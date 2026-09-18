@@ -1,145 +1,187 @@
 # YSM Convert — Java 版 YSM 模型包 → 网易基岩版组件
 
-把 **未加密** 的 Java 版 YSM(Yes Steve Model)模型包目录(含 `ysm.json`)一键转换成网易基岩版 YSM 组件。
-Windows 专用。三种用法共用一个转换内核:
+把 **未加密** 的 Java 版 YSM(Yes Steve Model)模型包(含 `ysm.json` 的目录)转换成网易我的世界基岩版的 YSM 模型组件, 目前仅支持 Windows。
 
-| 入口 | 文件 | 用途 |
-|---|---|---|
-| 图形界面 | `YsmConvert.exe` | 拖入目录、批量转换、合集文件夹(显示名 + 自定义封面)、日志与"开发者提醒"面板、体检、修复 |
-| 命令行 | `ysmconv.exe` | 脚本化 / CI: `discover` `convert` `validate` `fix` `baseline` |
-| MCP 服务器 | `ysmconv.exe mcp` | 让 AI(Claude Code 等)一键转换、看告警、改产物、复检的闭环 |
+| 入口 | 文件 | 适合 |
+| --- | --- | --- |
+| 图形界面 | `YsmConvert.exe` | 拖入目录, 一键转换 |
+| 命令行 | `ysmconv.exe` | 批量处理、写脚本 |
+| MCP 服务器 | `ysmconv.exe mcp` | 让 Claude Code 等 AI 助手替你转换, 读日志、改模型 |
 
-文档与教程在线上 Wiki: <https://ysm.cfpa.team/wiki/intro/>(界面里点"文档"直接打开)。`core/docs/` 留着同一批文档的
-本地副本, 给 AI 经 MCP 的 `ysm_docs` 工具查阅。转换器开源地址: <https://github.com/lovelyXiaoQi/ysm_convert>(界面里点"开源地址")。
+三种入口用的是同一个转换内核, 产物一样。模型移植教程、`ysm.json` 格式与 molang 替换清单见 [YSM Wiki](https://ysm.cfpa.team/wiki/intro/)。
 
-## 转换速度与产物体积
+## 下载与运行
 
-- **每个包一个内核进程, 并行转换**。并发数自动取逻辑核数的一半(最多 8), 再按可用内存封顶(每进程预算 1.5 GB;
-  实测最大的末影龙娘峰值 1.2 GB、凋灵娘 0.7 GB)。拆进程还有一个硬理由: 同一个 Python 进程连续转多个大包时内存只涨不回,
-  30 个包串行会在第 28 个时 MemoryError。
-- **产物 JSON 缺省压成一行**(界面开关 / `--pretty` 关掉)。磁盘约省 70%(30 个包的资源包 258 MB → 85 MB),
-  内核读写也快 2.5~3 倍; zip 打包后只小约 25%, 因为 zip 本来就把空白压掉了大半。
-- 内核算法优化: molang 名字映射先一次扫描收集出现过的名字、loop 映射按目录签名缓存、比对用紧凑序列化。
+1. 到 [Releases](https://github.com/lovelyXiaoQi/ysm_convert/releases) 下载最新的 `YsmConvert-vX.Y.Z-win-x64.zip`。
+2. 解压到任意目录(路径可以含中文和空格), 双击 `YsmConvert.exe`。
 
-| 30 个包(官方酒狐 22 + misc 4 + 坚守者 / 凋灵 / 萨赫梅特 / 末影龙娘) | 耗时 |
-|---|---|
-| 优化前, 串行 | 约 514 秒(单进程批量还会因内存累积失败 2 个) |
-| 优化后, 缩进, 串行 | 322 秒 |
-| 优化后, 压一行, 8 并发 | 约 120 秒(下限是最大的末影龙娘单包约 106 秒) |
+.NET 运行时和内核用的 Python 都在包里, 不用另装。
 
-优化前后的产物经 30 个包、520 个文件逐字节 / 逐值比对: 缩进模式逐字节一致, 压一行模式 JSON 解析后逐值一致。
+- exe 没有代码签名, 首次运行弹出"Windows 已保护你的电脑"时, 点"更多信息"再点"仍要运行"。
+- 提示转换内核无法启动时, 装一次 [VC++ 2008 SP1 运行库(x64)](https://www.microsoft.com/download/details.aspx?id=26368)。
+- 解压出来的目录要保持完整: `core/` 是转换内核, `*.deps.json`、`*.runtimeconfig.json` 是程序启动必需的文件, 都不要删。
 
-**长路径**: 产物目录一律走 Windows 长路径(`\\?\` 前缀), 完整路径超过 260 字符也能写(实测 311 字符含中文目录);
-早先末影龙娘的 `...\replace_entities\ender_sword.animation_controllers.json` 在稍深的输出目录下就会"找不到文件"。
+## 图形界面
 
-## 开发者提醒怎么读
+窗口分三块: 左上 **① Java 模型包**, 右上 **② 输出与选项**, 下方是结果区, 操作按钮在结果区右上角。设置会自动记住。
 
-转换完成后"开发者提醒"页汇总要人工过目的项, 每项带处理建议与文档名(CLI 与 MCP 的 `attention` 同一份):
+### 1. 添加模型包
+
+点 **添加目录…**(可多选), 或者直接把文件夹拖进窗口、拖到 `YsmConvert.exe` 图标上。单个模型包目录、带 `ysm-pack.json` 的合集目录、装着若干包的上级目录都可以, 程序会自动找出里面的包。
+
+列表里一个包一行:
+
+- **启用**: 取消勾选的包不参与转换。
+- **包名(可改)**: 模型 ID 和全部资源 ID 的词根, 只能用小写英文、数字、下划线, 以字母或数字开头, 最长 64 个字符。默认是自动生成的建议名(中文转拼音); 建议加上作者前缀, 免得和别人的模型重名。
+- **合集(可改)**: 合集就是游戏里模型选择界面的文件夹。合集名相同的包放进同一个文件夹, 留空则不进文件夹。
+- **状态 / 待过目 / 概况**: 转换进度、需要人工过目的条数、包内容统计。
+
+### 2. 选择输出位置
+
+二选一:
+
+- **新建 / 复用独立模型组件**(推荐): 在"目标根目录"下生成 `<组件名>_bp`(行为包)和 `<组件名>_rp`(资源包), 自带 `manifest.json`; 同名组件已存在时沿用它。组件名用英文、数字、下划线或连字符。
+- **写入已有的资源包 / 行为包**: "目标根目录"选一个已经装着行为包和资源包的目录(比如你自己的组件工程), 产物写进这两个包。
+
+### 3. 合集文件夹(可选)
+
+勾选 **把列表里的包归入同一个合集文件夹** 后填写:
+
+- **合集目录名**: 英文、数字、下划线或连字符。填好后点 **应用到列表里全部包的"合集"列**; 勾选之后再添加的包会自动填上。
+- **文件夹名**: 游戏里文件夹卡片上显示的名字。不填则沿用 Java 合集自带的名字, 都没有就显示目录名。
+- **文件夹封面**: 不超过 1MB 的 PNG, 最好是 Java 文件夹卡片 52x90 的比例。不选则用 Java 合集自带的 `ysm-pack.png`, 都没有就是默认封面。
+
+### 4. 转换选项
+
+| 选项 | 默认 | 说明 |
+| --- | --- | --- |
+| 产物 JSON 压缩为一行 | 开 | 体积小、转换快; 要手工查看或修改产物、用 git 对比时关掉 |
+| 转换后运行资源包红线体检 | 开 | 推荐保持开启 |
+| 携带第三方模组联动动画 | 关 | tacz、slashblade 等模组的动画, 基岩版没有对应物品, 一般不勾 |
+
+### 5. 开始转换, 看结果
+
+点 **开始转换**。多个包会并行转换, 底部状态栏显示进度和耗时, 中途可以点 **取消**。结果在下方三个页签里:
+
+- **日志**: 每个包的转换过程。红 = 错误, 橙 = 警告, 蓝 = 提醒(做了降级或近似处理, 建议进游戏核对), 灰 = 明细(勾选"显示全部内核明细行"才显示)。
+- **开发者提醒**: 汇总需要人工过目的项, 每项带处理建议; 点"文档"列的按钮打开 Wiki 查对应文档, **复制全部** 可以整份复制出来。有提醒时, 转换完会自动切到这一页。
+- **体检**: 资源包红线体检的结果。错误 = 整份动画 / 控制器文件会被引擎拒载(游戏里模型停在绑定姿态), 必须修到 0; 警告 = 某些功能可能缺失(如音效未登记)。
+
+开发者提醒按级别区分:
 
 | 级别 | 含义 | 典型项 |
-|---|---|---|
-| error / warn | 要修 | 移植失败、Java 包声明的文件不存在、体检错误(整份动画文件会被引擎拒载) |
-| notice | 要看 | molang 置零(基岩没有对应的查询/函数)、退化处理(粒子位置近似等)、未转换的脚本控制器 |
-| info | 知道即可 | 中性常量(基岩没有的 Java 量按常量处理, 如 `ctrl.tac_*` 按"没拿枪"、模组联动按"没装")、动画名转小写(每包合并成一行) |
+| --- | --- | --- |
+| error / warn | 要修 | 移植失败、Java 包声明的文件不存在、体检错误 |
+| notice | 要看 | molang 置零(基岩版没有对应的查询或函数)、退化处理(如粒子位置近似)、未转换的脚本控制器 |
+| info | 知道即可 | 基岩版没有的 Java 量按常量处理(如 `ctrl.tac_*` 按"没拿枪"、模组联动按"没装")、动画名转小写 |
 
-按映射表完成的等价替换不进提醒。天气、血量、露天、roaming 变量的存档与多人同步、药水/附魔探针、骨骼旋转回读(`ysm.bone_rot`)
-这批 Java 专有量现在由 **YSM 主组件运行层**给真值(不再置常量), 模型要什么写在产物 ysm.json 的顶级 `java_state` 里 ——
-所以产物要搭配**同期或更新的 YSM 主组件**使用, 旧主组件上这些量停在缺省值、roaming 变量不存档。完整清单见
-molang 映射文档第五节(仍置常量的)与第七节(运行层提供的)。
+按映射表做的等价替换不会进提醒, 完整清单见 Wiki 里的 molang 映射文档。
 
-## 分发与运行要求
+结果区右上角的其他按钮:
 
-发布包就是 `dist/YsmConvert/` 整个目录, 压缩后发出去、对方解压到任意路径即可(实测含中文与空格的路径正常),
-约 152 MB, zip 后 64 MB。.NET 运行时随包自带, 目标机器**不需要**装 .NET。
+- **只体检**: 对已经生成的产物重新体检, 不重新转换。
+- **修复产物**: 对已经生成的产物就地补跑修复规则, 重复执行也没关系。手上还有 Java 源包的话, 重新转换效果更完整。
+- **打开输出目录**、**导出报告…**(存成 txt 或 json)。
 
-- **Visual C++ 2008 运行库(x64)**: 内核用的 Python 2.7 依赖 `msvcr90.dll`, Windows 默认不带。
-  发布包已在 `core/python/Microsoft.VC90.CRT/` 带了一份应用程序私有程序集, 正常情况下免安装;
-  万一仍起不来, 装一次 [vcredist_x64.exe (VC++ 2008 SP1)](https://www.microsoft.com/download/details.aspx?id=26368) 即可。
-  两个 exe 都会在内核起不来时直接给出这句提示, 不会只报一个无头错误。
-- **SmartScreen**: 两个 exe 没有代码签名, 别人首次运行会看到"Windows 已保护你的电脑", 点"更多信息"再点"仍要运行"。
-- `*.deps.json` 与 `*.runtimeconfig.json` 看着像临时产物, 但是 .NET 启动必需文件, 不要删。
+"只体检"和"修复产物"只处理列表里勾选的包(按包名找产物), 列表为空时处理输出位置里的全部包。**文档 ↗**、**开源地址 ↗** 两个页签点一下就在浏览器打开 Wiki 和本仓库。
 
-## 架构
+### 6. 进游戏
 
-```
-YsmConvert.exe / ysmconv.exe   C# (.NET 10, WPF)      —— 壳: 任务编排、进程管理、报告聚合、界面
-        │  子进程 + JSON Lines 事件流
-core/python/python.exe          便携 Python 2.7        —— 与游戏内解释器同版本
-core/kernel/devtools/port_cli.py                        —— 宿主入口(任务单 → 事件流)
-core/kernel/devtools/port_java_pack.py 等               —— 转换规则(YSM 仓库 devtools 的快照)
-core/kernel/ysm_bp/ysmModelScripts/packLoader           —— 与游戏内解析器共用的同一份代码
-core/kernel/ysm_rp/animations/java_default              —— Java 默认模型基线动画(缺键回落用)
-core/docs/*.md                                          —— 移植文档(界面/MCP 可查)
-```
+- 独立组件要和 **YSM 主组件** 一起启用, 模型会被自动发现; 归入合集的包在模型选择界面里显示成文件夹。
+- 资源包(包括文件夹封面)有改动时, 要重启游戏才会重新加载。
+- 产物要搭配 **同期或更新版本的 YSM 主组件** 使用: 天气、血量、roaming 变量存档等 Java 专有量由主组件在运行时提供, 旧版主组件上这些量会停在默认值。
+- Java 包里没有的动画(拉弓、举盾、游泳等)在游戏里会用 YSM 主组件自带的默认动画。
 
-转换规则的**唯一真源**是 YSM 网易版仓库的 `devtools/`(它直接 import 游戏运行时的 `packParser`, 产物必须与游戏解析口径一致,
-所以内核跑在 Python 2.7 而不是重写成 C#)。本仓库只保存快照, 用 `build/sync-core.ps1` 更新。
+## 命令行(ysmconv)
 
-## 构建
+`ysmconv.exe` 和图形界面在同一目录, 功能一样, 但不开窗口, 适合批量处理和写脚本。在解压目录里打开终端运行:
 
-前置: .NET 10 SDK; 本机 Python 2.7(`C:\Python27`, 装了 `pypinyin`)只在生成便携运行时时需要。
+| 命令 | 作用 |
+| --- | --- |
+| `ysmconv info` | 查看内核、Python 与文档的位置; 内核起不来时用它排查 |
+| `ysmconv discover <目录>...` | 列出目录里找到的 Java 包和建议包名 |
+| `ysmconv convert <目录>... --out <根目录> [选项]` | 转换 |
+| `ysmconv validate --out <根目录> [包名...]` | 只体检已有产物 |
+| `ysmconv fix --out <根目录> [包名...]` | 就地修复已有产物 |
+| `ysmconv baseline <Java default 模型目录> --out <主组件工程>` | 移植 Java 默认模型的基线动画, 只有 YSM 主组件工程需要跑一次 |
+| `ysmconv mcp [--out <根目录>]` | 以 MCP 服务器方式运行, 见下一节 |
 
-```powershell
-.\build\sync-core.ps1 -YsmRepo "D:\...\AddOn\ysm"   # 同步内核快照(改了 YSM 仓库的 devtools 后重跑; 按实际导入闭包拷文件, 拷完自检导入)
-.\build\make-python.ps1 -Force                     # 生成 core/python(便携 2.7, 约 17 MB, 不入库)
-dotnet build                                       # 开发构建(exe 在 src/*/bin/Debug, 会自动向上找到 core/)
-dotnet test                                        # 单元测试
-.\build\publish.ps1                                # 发布到 dist/YsmConvert(自包含, 无需装 .NET)
-```
+`--out` 是输出根目录: 加 `--component <组件名>` 时在它下面新建 / 复用独立组件, 不加时它必须已经装着行为包和资源包。`convert` 的常用选项:
 
-程序图标是根目录 `icon.ico`(多尺寸)。它是**构建输入, 删了就编译不过**(CS7064), 通过两个 csproj 的 `ApplicationIcon`
-编进 exe 的资源; 窗口标题栏图标由 WPF 自动取主模块的, 不另外嵌资源, 所以发布目录里**不会**出现 icon.ico。
-它由 1000x1000 的 PNG 经 Pillow 生成, 换图时把新图存为 icon.png 重跑下面这行(生成后 icon.png 可删, icon.ico 要留):
+| 选项 | 作用 |
+| --- | --- |
+| `--component <组件名>` | 新建 / 复用独立组件 `<组件名>_bp` 与 `<组件名>_rp` |
+| `--collection <目录名>` | 全部包归入这个合集文件夹 |
+| `--collection-name <名字>`、`--collection-cover <PNG>` | 文件夹显示名、封面, 要和 `--collection` 一起用 |
+| `--prefix <前缀>` | 包名统一加前缀 |
+| `--rename <文件夹>=<包名>` | 逐包指定包名, 可以写多次 |
+| `--pretty` | 产物 JSON 按缩进输出(默认压成一行) |
+| `--no-validate` | 转换后不体检 |
+| `--with-mods` | 携带第三方模组联动动画 |
+| `--jobs <N>` | 同时转换的包数(默认自动) |
+| `--json`、`--report <文件>` | 输出 / 另存机器可读的 JSON 报告 |
 
-```powershell
-py -3 -c "from PIL import Image; Image.open('icon.png').convert('RGBA').save('icon.ico', format='ICO', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(24,24),(16,16)])"
-```
-
-## 命令行
+全部选项见 `ysmconv --help`。示例:
 
 ```powershell
-ysmconv discover "D:\java_models"                                   # 列出发现的 Java 包(单包/合集/上级目录, 深 2 层)
+# 看看目录里有哪些包
+ysmconv discover "D:\java_models"
+
+# 全部转换成独立组件 D:\out\my_models_bp + D:\out\my_models_rp
+ysmconv convert "D:\java_models" --out "D:\out" --component my_models
+
+# 归入合集文件夹, 自定义显示名和封面
 ysmconv convert "D:\java_models\wine_fox" --out "D:\out" --component my_models --collection wine_fox --collection-name 酒狐合集 --collection-cover "D:\art\fox.png"
-ysmconv convert "D:\java_models" --out "D:\out" --component my_models --jobs 4 --pretty   # 限 4 并发、产物按缩进落盘
-ysmconv convert "D:\java_models\sahmet" --out "D:\...\AddOn\ysm"    # 直接写进 YSM 主仓库(工程形态)
-ysmconv validate --out "D:\out"                                     # 只体检
-ysmconv fix --out "D:\out" my_models_sahmet                         # 就地修复已落盘的包
-ysmconv baseline "<java-src>\assets\ysm\builtin\default" --out "D:\...\AddOn\ysm"   # 移植 java_default 基线(主工程一次)
+
+# 写进已有工程(D:\MyAddon 下已有行为包和资源包)
+ysmconv convert "D:\java_models\sahmet" --out "D:\MyAddon"
+
+# 对已有产物只体检 / 修复其中一个包
+ysmconv validate --out "D:\out" --component my_models
+ysmconv fix --out "D:\out" --component my_models sahmet
 ```
 
-退出码: 0 成功, 1 有失败或体检错误, 2 参数/环境错误。加 `--json` 得机器可读报告, `--report x.json` 另存。
+退出码: 0 成功, 1 有转换失败或体检错误, 2 参数或环境错误。
 
 ## MCP 服务器
 
+MCP(Model Context Protocol)是 AI 助手调用外部工具的标准协议。把 `ysmconv` 注册成 MCP 服务器后, 在 Claude Code 等 AI 客户端里直接说"把 D:\java_models 里的包转换到 D:\out", AI 会自己完成转换、读提醒、改产物、复检的整个流程。
+
+在 Claude Code 里注册(路径换成你的解压目录; `--out` 是默认输出根目录, 可以不写):
+
 ```powershell
-claude mcp add ysm-convert -- "D:\桌面\ysm_convert\dist\YsmConvert\ysmconv.exe" mcp --out "D:\out"
+claude mcp add ysm-convert -- "D:\Tools\YsmConvert\ysmconv.exe" mcp --out "D:\out"
 ```
 
-工具: `ysm_info` `ysm_discover` `ysm_convert` `ysm_validate` `ysm_fix` `ysm_baseline` `ysm_explain` `ysm_docs` `ysm_last_report` `ysm_pack_files`。
-典型闭环: `ysm_convert` 返回"需要开发者过目"的清单与每个包的产物路径 → AI 读产物文件按建议修改 → `ysm_validate` 复检到 0 错误 →
-必要时 `ysm_fix` 补跑修复规则; 看不懂的告警用 `ysm_explain`, 规则细节用 `ysm_docs` 检索随附文档。
-协议: stdio、JSON-RPC 2.0、每行一条消息(不依赖 SDK, 手写 `initialize / ping / tools/list / tools/call`)。
+其他支持 MCP 的客户端, 在配置文件里加:
 
-## 输出形态
-
-- **独立组件**(创作者): `<根>/<组件名>_bp` + `<组件名>_rp`, 自动生成 `manifest.json`; 与 YSM 主组件一起启用即被发现
-  (主包扫描所有启用行为包下的 `ysm_models/`, 资源索引扫描整个 resource_packs 目录)。
-- **已有工程**(开发者): 根目录下已含行为包 + 资源包(按 manifest 模块类型 `data` / `resources` 识别, 或 `*_bp`/`*_rp` 目录名兜底)。
-- **合集**: 若干包归入 `ysm_models/<合集目录>/` 并写 `ysm-pack.json`, 游戏里自动出文件夹。网易版文件夹只显示一个名字,
-  不分中英文; 不填就沿用 Java 合集自带的名字。**文件夹封面**: 选一张 PNG(不超过 1MB, 最好是 Java 卡片 52x90 的比例),
-  转换时拷到资源包 `textures/ui/ysm_packs/<合集>.png` 并在清单写 `folder_texture`; 不选就用 Java 合集自带的 `ysm-pack.png`,
-  都没有则是默认封面。贴图改动要重启游戏才会加载。
-
-Java 包缺的动画(拉弓/举盾/游泳…)运行时回落 `java_default` 基线; 独立组件没有基线时内核用自带快照做移植期推导,
-游戏里由 YSM 主组件的资源包提供。
-
-## 目录
-
+```json
+{
+  "mcpServers": {
+    "ysm-convert": {
+      "command": "D:\\Tools\\YsmConvert\\ysmconv.exe",
+      "args": ["mcp", "--out", "D:\\out"]
+    }
+  }
+}
 ```
-build/        sync-core.ps1 / make-python.ps1 / publish.ps1
-core/kernel   内核快照(入库)     core/docs 文档快照(入库)     core/python 便携运行时(生成, 不入库)
-src/YsmConvert.Core   任务模型、内核进程、事件解析、报告聚合、告警解释、组件脚手架
-src/YsmConvert.App    WPF 界面
-src/YsmConvert.Cli    命令行 + MCP 服务器
-tests/                xunit
-```
+
+提供的工具:
+
+| 工具 | 作用 |
+| --- | --- |
+| `ysm_discover` | 在目录里找 Java 模型包 |
+| `ysm_convert` | 转换并体检, 返回待过目清单和每个包的产物路径 |
+| `ysm_validate`、`ysm_fix` | 对已有产物体检、就地修复 |
+| `ysm_pack_files` | 列出某个包的全部产物文件, 供 AI 逐个打开修改 |
+| `ysm_explain` | 解释一条提醒或体检结果: 什么意思、要不要处理、查哪份文档 |
+| `ysm_docs` | 查阅随附的移植文档(格式速查、移植教程、molang 映射、动画机制) |
+| `ysm_last_report` | 取上一次转换 / 体检 / 修复的完整报告 |
+| `ysm_baseline` | 移植 Java 默认模型的基线动画(只有 YSM 主组件工程需要) |
+| `ysm_info` | 查看转换器与内核信息 |
+
+典型流程: `ysm_convert` 转换 → AI 按待过目清单修改产物 → `ysm_validate` 复检到 0 错误。
+
+## 从源码构建
+
+构建、发版与项目结构见 [DEVELOPMENT.md](DEVELOPMENT.md)。
