@@ -1,0 +1,37 @@
+{
+  "format_version": "1.8.0", 
+  "animations": {
+    "animation.java_default_arm.parallel0": {
+      "loop": true, 
+      "animation_length": 1000000.0
+    }, 
+    "animation.java_default_arm.parallel1": {
+      "loop": true, 
+      "animation_length": 1000000.0
+    }, 
+    "animation.java_default_arm.parallel2": {
+      "loop": true, 
+      "animation_length": 1000000.0
+    }, 
+    "animation.java_default_arm.parallel3": {
+      "loop": true, 
+      "animation_length": 1000000.0
+    }, 
+    "animation.java_default_arm.parallel4": {
+      "loop": true, 
+      "animation_length": 1000000.0
+    }, 
+    "animation.java_default_arm.parallel5": {
+      "loop": true, 
+      "animation_length": 1000000.0
+    }, 
+    "animation.java_default_arm.parallel6": {
+      "loop": true, 
+      "animation_length": 1000000.0
+    }, 
+    "animation.java_default_arm.parallel7": {
+      "loop": true, 
+      "animation_length": 1000000.0
+    }
+  }
+}

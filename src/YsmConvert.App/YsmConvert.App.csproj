@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>YsmConvert</AssemblyName>
+    <RootNamespace>YsmConvert.App</RootNamespace>
+    <RollForward>Major</RollForward>
+    <!-- exe 图标: 仓库根目录 icon.ico(由 icon.png 生成, 见 README) -->
+    <ApplicationIcon>..\..\icon.ico</ApplicationIcon>
+    <!-- WPF Fluent 主题(ThemeMode)在 .NET 9/10 里标记为实验特性 -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\YsmConvert.Core\YsmConvert.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 窗口标题栏图标(Window.Icon 走 pack URI, 需要嵌成资源) -->
+    <Resource Include="..\..\icon.ico" Link="icon.ico" />
+  </ItemGroup>
+
+</Project>

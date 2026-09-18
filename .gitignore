@@ -1,0 +1,19 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+dist/
+TestResults/
+
+# 生成物: 便携 Python 内核运行时(由 build/make-python.ps1 生成, 不入库)
+core/python/
+
+# Python 缓存
+*.pyc
+__pycache__/
+
+# 本地任务单 / 日志
+*.jsonl
+job-*.json

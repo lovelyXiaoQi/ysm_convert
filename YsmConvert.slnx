@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/YsmConvert.App/YsmConvert.App.csproj" />
+    <Project Path="src/YsmConvert.Cli/YsmConvert.Cli.csproj" />
+    <Project Path="src/YsmConvert.Core/YsmConvert.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/YsmConvert.Core.Tests/YsmConvert.Core.Tests.csproj" />
+  </Folder>
+</Solution>
