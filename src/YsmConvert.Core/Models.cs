@@ -22,27 +22,44 @@ public sealed class PackSpec
     public string? Collection { get; set; }
 }
 
-/// <summary>合集(模型选择界面里的文件夹)的显示信息 → ysm-pack.json。</summary>
+/// <summary>
+/// 合集(模型选择界面里的文件夹)的设置 → ysm-pack.json。网易版文件夹只显示一个名字, 不分中英文;
+/// 没填的字段沿用 Java 源旁那份清单(内核 port_cli._CollectionManifest 以它为底覆盖)。
+/// </summary>
 public sealed class CollectionSpec
 {
+    /// <summary>文件夹 PNG 封面允许的最大字节数(与 Java 版同一上限, 内核同样拒收更大的)。</summary>
+    public const long MaxCoverBytes = 1024 * 1024;
+
     public required string Dir { get; init; }
+    /// <summary>文件夹显示名。</summary>
     public string? Name { get; set; }
     public string? Description { get; set; }
-    public string? NameZh { get; set; }
-    public string? DescriptionZh { get; set; }
+    /// <summary>
+    /// 文件夹封面图(PNG, 不超过 1MB)。转换时拷进资源包 textures/ui/ysm_packs/&lt;合集&gt;.png 并写 folder_texture;
+    /// 游戏里按 Java 卡片 52x90 的比例等比铺满, 图最好也是这个比例。不填就用 Java 合集自带的 ysm-pack.png(有的话)。
+    /// </summary>
+    public string? CoverImage { get; set; }
+
+    public bool IsEmpty =>
+        string.IsNullOrWhiteSpace(Name) && string.IsNullOrWhiteSpace(Description) && string.IsNullOrWhiteSpace(CoverImage);
+
+    /// <summary>封面图的问题(不存在 / 不是 PNG / 超过 1MB), 没问题或没填时为 null。</summary>
+    public string? CoverProblem()
+    {
+        if (string.IsNullOrWhiteSpace(CoverImage)) return null;
+        if (!File.Exists(CoverImage)) return $"封面图不存在: {CoverImage}";
+        if (!CoverImage.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) return $"封面图必须是 PNG: {CoverImage}";
+        if (new FileInfo(CoverImage).Length > MaxCoverBytes) return $"封面图超过 1MB(Java 版同样拒收): {CoverImage}";
+        return null;
+    }
 
     public JsonObject ToManifest()
     {
         var obj = new JsonObject();
-        if (!string.IsNullOrWhiteSpace(Name)) obj["name"] = Name;
-        if (!string.IsNullOrWhiteSpace(Description)) obj["description"] = Description;
-        if (!string.IsNullOrWhiteSpace(NameZh) || !string.IsNullOrWhiteSpace(DescriptionZh))
-        {
-            var zh = new JsonObject();
-            if (!string.IsNullOrWhiteSpace(NameZh)) zh["name"] = NameZh;
-            if (!string.IsNullOrWhiteSpace(DescriptionZh)) zh["description"] = DescriptionZh;
-            obj["lang"] = new JsonObject { ["zh_cn"] = zh };
-        }
+        if (!string.IsNullOrWhiteSpace(Name)) obj["name"] = Name.Trim();
+        if (!string.IsNullOrWhiteSpace(Description)) obj["description"] = Description.Trim();
+        if (!string.IsNullOrWhiteSpace(CoverImage)) obj["coverImage"] = Path.GetFullPath(CoverImage);
         return obj;
     }
 }
@@ -53,6 +70,15 @@ public sealed class ConvertOptions
     public bool WithMods { get; set; }
     /// <summary>转换后跑资源包红线体检。</summary>
     public bool Validate { get; set; } = true;
+    /// <summary>
+    /// 产物 JSON 压成一行(缺省开)。磁盘约省 70%, 内核读写也快 2.5~3 倍(Python 2.7 只在不缩进时用 C 编码器);
+    /// 关掉则按 2 空格缩进, 便于人读和 git diff。
+    /// </summary>
+    public bool CompactJson { get; set; } = true;
+    /// <summary>同时转换的包数; 0 = 自动(见 <see cref="ConversionService.AutoParallelism"/>)。</summary>
+    public int MaxParallel { get; set; }
+    /// <summary>内部: 按包拆出的子任务不写合集清单, 由收尾任务 finalize 统一写。</summary>
+    internal bool WriteCollections { get; set; } = true;
 }
 
 /// <summary>交给 port_cli.py --job 的任务单(字段名与它的约定一一对应)。</summary>
@@ -99,6 +125,8 @@ public sealed class JobSpec
             {
                 ["withMods"] = Options.WithMods,
                 ["validate"] = Options.Validate,
+                ["compactJson"] = Options.CompactJson,
+                ["writeCollections"] = Options.WriteCollections,
             },
         };
         return job.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });

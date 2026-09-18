@@ -71,6 +71,7 @@ from collections import OrderedDict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import port_java_pack as port  # noqa: E402  复用同一套规则实现
+import java_runtime_bindings as runtime_bindings  # noqa: E402  主包运行层声明(java_state)
 from ysmModelScripts.packLoader.packParser import (  # noqa: E402
     _ITEM_IN_USE_TEST, _ItemTagTest, _JAVA_ATTACK_TIME,
     _LEGACY_ITEM_IN_USE_TEST, _LEGACY_USE_MAINHAND_GATE, _LEGACY_USE_OFFHAND_GATE,
@@ -117,9 +118,39 @@ _OLD_TO_NEW_EXPANSIONS = [
      "&&query.modified_move_speed>0.05&&!query.is_sprinting&&!query.is_sneaking)", _CTRL_NOW["walk"]),
     ("((query.is_on_ground||(query.vertical_speed<=0&&query.vertical_speed>-4))"
      "&&query.is_sprinting)", _CTRL_NOW["run"]),
-    # ground_speed 替换式加死区(见 port._GROUND_SPEED_EXPR 注); 动画文本同样迁移
+    # 2026-09-18 之前逐个独立映射的展开 → Java 互斥语义(读 variable.ysm_ctrl_main, 见 port._CTRL_MAIN_PRIORITY 注)。
+    # 闩锁系 idle/walk/run 含 jump 的展开串, 必须先于 jump 替换; 裸查询形态(query.is_gliding / is_sleeping /
+    # is_sneaking)与 attacked 的 (query.hurt_time>0) 分不清是否作者手写, 不迁(语义也几乎一致)
+    ("((!((variable.ysm_airborne??0)>0.5))&&query.modified_move_speed<=0.05"
+     "&&!query.is_riding&&!query.is_sneaking)", _CTRL_NOW["idle"]),
+    ("((!((variable.ysm_airborne??0)>0.5))&&query.modified_move_speed>0.05"
+     "&&!query.is_sprinting&&!query.is_sneaking)", _CTRL_NOW["walk"]),
+    ("((!((variable.ysm_airborne??0)>0.5))&&query.is_sprinting)", _CTRL_NOW["run"]),
+    ("((variable.ysm_airborne??0)>0.5)", _CTRL_NOW["jump"]),
+    ("(query.is_sneaking&&query.modified_move_speed>0.05)", _CTRL_NOW["sneak"]),
+    ("(query.is_in_water&&!query.is_swimming&&!query.is_on_ground)", _CTRL_NOW["swim_stand"]),
+    ("(query.swim_amount>0)", _CTRL_NOW["swim"]),
+    ("(query.mod.ysm_is_on_ladder>0.5&&query.mod.ysm_climbing_vector>0)", _CTRL_NOW["ladder_up"]),
+    ("(query.mod.ysm_is_on_ladder>0.5&&query.mod.ysm_climbing_vector==0)", _CTRL_NOW["ladder_stillness"]),
+    ("(query.mod.ysm_is_on_ladder>0.5&&query.mod.ysm_climbing_vector<0)", _CTRL_NOW["ladder_down"]),
+    ("(query.is_crawling&&query.modified_move_speed>0.05)", _CTRL_NOW["climb"]),
+    ("(query.is_crawling&&query.modified_move_speed<=0.05)", _CTRL_NOW["climbing"]),
+    ("(query.death_ticks>0)", _CTRL_NOW["death"]),
+    ("query.mod.ysm_is_flying", _CTRL_NOW["fly"]),
+    # ground_speed 替换式: 早年裸式 → 死区式 → 2026-09-18 起主包按 Java 口径逐帧计算的摩擦后速度
+    # (见 port._GROUND_SPEED_EXPR 注)。旧产物分不出原文是 query.ground_speed 还是 ysm.ground_speed2, 一律按前者
+    # (后者只有 36 处, 重新移植可得精确映射); 动画文本同样迁移
     ("(query.modified_move_speed*1.9)", port._GROUND_SPEED_EXPR),
+    (port._LEGACY_GROUND_SPEED_EXPR, port._GROUND_SPEED_EXPR),
+    # Java query.is_jumping = 腾空且不飞行不骑乘(QueryBinding); 2026-09-18 前原样透传成基岩同名 query, 而那是
+    # "跳跃键按住"(实机: 点按只有 2 帧为 1, 松键后仍在空中归 0, 纯下落全程 0) —— 各包挥击时间线拿它选跳劈。
+    # 本工具只处理移植包, 产物里的 is_jumping 都来自 Java 原文; 新式不含旧串, 迁移幂等
+    ("query.is_jumping", runtime_bindings.IS_JUMPING_EXPR),
+    ("q.is_jumping", runtime_bindings.IS_JUMPING_EXPR),
 ]
+# Java ysm.input_vertical/horizontal 是位移方向(不是按键), 旧产物映射成了按键向量 query.mod.ysm_input_* → 迁到主包
+# 逐帧计算的位移方向量。Java 的 xxa/zza 才是真按键量, 移植工具给它们带 `1*` 前缀(port._JAVA_NAME_MAP), 这里跳过
+_LEGACY_INPUT_VECTOR_PATTERN = re.compile(r"(?<!1\*)query\.mod\.ysm_input_(vertical|horizontal)")
 
 
 def _CollectPackAnimKeys(packName):
@@ -197,7 +228,7 @@ def _FixControllers(packName, knownKeys, report):
             if not isinstance(body, dict):
                 continue
             referencedParallels += port._CollectParallelRefs(body)
-        text = json.dumps(data, ensure_ascii=False, indent=2)
+        text = port.SerializeForDisk(data)      # 落盘格式跟随 port.JSON_COMPACT(转换器可切成压一行)
         port.WriteBytes(path, text.encode("utf-8"))
         notes = []
         if javaFixes:
@@ -480,18 +511,26 @@ def _MigrateUseGate(text):
 # 运行期条件动画走同一套合成(基岩 tag 覆盖稀疏且不认时静默恒假, 不能只靠它一条腿)。
 # **只重建 equipped_item_any_tag**: is_item_name_any 里同形串是物品 ID, 不能动。
 # 已展开形态 `(tag||具名)` 单列一条分支同样按参数重建 —— 重建结果一致, 故幂等。
+# 剑判定的 Java 口径形态 `(is_sword 调用&&!(get_equipped_item_name(手)=='mace'))`(packParser._NON_JAVA_SWORD_ITEMS:
+# 重锤不是 Java 的剑)同理整段吃掉再按参数重建, 否则里面的裸调用下一遍又被套一层。2026-09-18 当天短暂用过的
+# 否决变量形态 `&&!(variable.ysm_sword_veto_*??0)`(共享控制器的转移在无实体实例上刷错, 已撤)同样认, 重建成现行形态。
 _TAG_CALL_PATTERN = re.compile(
     r"\(query\.equipped_item_any_tag\((?P<wrapped>[^()]*)\)"
     r"\|\|query\.is_item_name_any\([^()]*\)\)"
+    r"|\(query\.equipped_item_any_tag\((?P<vetoed>[^()]*)\)"
+    r"(?:&&!\(variable\.ysm_sword_veto_(?:main|off)\?\?0\)"
+    r"|(?:&&!\(query\.get_equipped_item_name\('(?:main_hand|off_hand)'\)=='[A-Za-z0-9_.]+'\))+)\)"
     r"|query\.equipped_item_any_tag\((?P<bare>[^()]*)\)")
 
 
 def _MigrateItemTags(text):
-    """equipped_item_any_tag 调用按当前规则重建(Java tag 改名 + 原版具名兜底)"""
+    """equipped_item_any_tag 调用按当前规则重建(Java tag 改名 + 剑判定排除重锤)"""
     counter = [0]
 
     def _Replace(match):
         args = match.group("wrapped")
+        if args is None:
+            args = match.group("vetoed")
         if args is None:
             args = match.group("bare")
         parts = [part.strip().strip("'\"") for part in args.split(",")]
@@ -560,6 +599,8 @@ def _MigrateOneString(value):
         if oldExpr != newExpr and oldExpr in value:
             fixes += value.count(oldExpr)
             value = value.replace(oldExpr, newExpr)
+    value, inputFixes = _LEGACY_INPUT_VECTOR_PATTERN.subn(r"query.mod.ysm_move_\1", value)
+    fixes += inputFixes
     # 顺序要紧: 分手门迁移的正则认的是裸 is_using_item 形态, 必须排在信号替换之前
     value, gateFixes = _MigrateUseGate(value)
     value, useFixes = _MigrateItemUseSignal(value)
@@ -704,7 +745,10 @@ def _FixAnimationChannels(packName, report):
             # 本工具产物打架(幂等性守护逮到)
             shortKey = animId.split(".", 2)[-1] if animId.startswith(playerPrefixes) \
                 else animId.split(".")[-1]
-            wantOverride = port._ShouldOverridePrevious(shortKey, additiveKeys, preKeys)
+            # 玩家 parallel/pre 控制器的引用集按短键匹配, 只对玩家侧命名空间有意义: 替换实体(弹射物/载具)的
+            # 同名键套上会误伤(末影龙娘玩家侧的表情 fire / 末影剑火焰与投射物动画同名), 与移植工具同口径不带
+            wantOverride = port._ShouldOverridePrevious(shortKey, additiveKeys, preKeys) \
+                if animId.startswith(playerPrefixes) else port._ShouldOverridePrevious(shortKey)
             if wantOverride and body.get("override_previous_animation") is not True:
                 body["override_previous_animation"] = True
                 overrideFixes += 1
@@ -757,7 +801,8 @@ def _FixAnimationChannels(packName, report):
         if loopFixes:
             notes.append(u"loop 按 Java 主链/一次性通道语义改写 {} 条".format(loopFixes))
         if timelineFixes:
-            notes.append(u"timeline 声明语句改写 {} 处(表达式内赋值基岩拒绝)".format(timelineFixes))
+            notes.append(u"timeline 按 Java 语义规范化 {} 处(声明语句改写 / 每 tick 脚本长度 / "
+                         u"超出长度的条目: 循环挪到下一圈 0.0 最前, 单次挪到结尾)".format(timelineFixes))
         if sanitizeFixes:
             notes.append(u"清理引擎拒载的空节点 {} 处(空 bones 会作废整份文件)".format(sanitizeFixes))
         if gateFixes:
@@ -885,6 +930,22 @@ def _RebuildFirstPersonArm(packName, report):
                           u", ".join(u"{}→{}".format(old, new) for old, new in sorted(renames.items()))))
 
 
+def _FixJavaStateDeclaration(packName, report):
+    """主包运行层声明(ysm.json 顶层 java_state, 见 java_runtime_bindings.BuildDeclaration)按产物现状重算: 早先移植的
+    包没有这个键, roaming 变量(Java v.roaming.*)就做不了存档与多人同步。探针表没有汇可查, 沿用 ysm.json 里已有的。幂等"""
+    manifestPath = port.PackManifestPath(packName)
+    if not manifestPath or not os.path.isfile(manifestPath):
+        return
+    manifest = port.LoadJson(manifestPath)
+    declaration = runtime_bindings.BuildDeclaration(
+        [os.path.join(RP, "animations", packName), os.path.join(RP, "animation_controllers", packName)],
+        manifest)
+    if runtime_bindings.ApplyDeclaration(manifest, declaration):
+        port.DumpJson(manifestPath, manifest)
+        report.append(u"  " + (runtime_bindings.DeclarationReportLine(declaration)
+                              or u"java_state(顶层): 产物里已没有运行层落点, 已撤掉声明"))
+
+
 def FixPack(packName):
     report = [u"== {}".format(packName)]
     # Java 逐通道覆盖的伴生动画/占用变量先整体撤掉, 让下面每一步看到与移植期相同的数据
@@ -898,6 +959,7 @@ def FixPack(packName):
         return report
     referencedParallels = _FixControllers(packName, knownKeys, report)
     _FixManifest(packName, referencedParallels, report)
+    _FixJavaStateDeclaration(packName, report)
     # 实体初始化读 ysm.json 的 initialize/config_forms, 必须在 _FixManifest
     # (roaming 扁平化)之后跑, 拿到的才是与动画侧同名的变量
     _FixEntityInitialize(packName, report)
@@ -915,17 +977,12 @@ def FixPack(packName):
     if droppedPreRefs:
         report.append(u"  pre 通道控制器摘掉对主链成员的冗余引用 {} 处(主链由状态机播, 同播叠成两倍): {}".format(
             len(droppedPreRefs), u", ".join(u"{}.{}:{}".format(*item) for item in droppedPreRefs[:6])))
-    deduped = port.DedupPreLayer(packName)
-    if deduped:
-        report.append(u"  pre 层内部去重(Java 通道顺序后者胜出): 删 {} 对".format(deduped))
-    # 主链压住 pre 层的通道由逐通道覆盖按状态让位(port.ApplyChannelOwnership 注末尾); 早先静态删掉的
-    # pre 层通道(大酒狐爱心/ZZZ 的隐藏缩放)补不回来 —— 这类包请从 Java 源重新移植
+    # 主链与 pre 层内部的覆盖都由逐通道覆盖按状态让位(port.ApplyChannelOwnership 注末尾); 早先静态删掉的
+    # pre 层通道(大酒狐爱心/ZZZ 的隐藏缩放、K 螺诺亚待机摆尾)补不回来 —— 这类包请从 Java 源重新移植
     loopedPreview = port.LoopPreviewAnimation(packName)
     if loopedPreview:
         report.append(u"  GUI 展示动画按 Java 强制循环(CapPredicate playLoopAnimation): {}".format(
             u", ".join(u"{}(原 loop={})".format(key, loop) for key, loop in loopedPreview)))
-    # 折叠与旁路排在删通道步骤之后(与移植工具同序): 折出来的条件通道若先生成,
-    # 会被后面的去重当普通通道删掉
     foldedVariants, skippedVariants = port.ReconcileConditionalVariants(packName)
     if foldedVariants:
         report.append(u"  条件变体折叠 {} 对(pre 静态显隐 + parallel 条件变体 → 单一所有者), "
@@ -966,6 +1023,11 @@ def FixPack(packName):
         report.append(u"  逐通道覆盖伴生动画: 已是最新({} 条)".format(ownership.CompanionCount()))
     else:
         report.extend(u"  " + line for line in ownershipLines or [u"逐通道覆盖伴生动画: 已清除"])
+    # override 动画(含伴生)的恒等常量通道 → 微小值(见 port.EpsilonizeOverrideIdentities 注); 幂等
+    epsilonized = port.EpsilonizeOverrideIdentities(packName)
+    if epsilonized:
+        report.append(u"  override 动画的恒等常量通道换成微小值 {} 处(引擎把单位值通道当成不存在, "
+                      u"清不掉前面的层)".format(epsilonized))
     # 一次性通道(挥击/使用/受击/死亡)状态机: 直挂 animate 条目对不循环动画不重放; 排在逐通道覆盖
     # 之后 —— 挥击/使用成员拆出的伴生动画要跟成员进同一状态
     _FixOneShotControllers(packName, report, ownership=ownership)

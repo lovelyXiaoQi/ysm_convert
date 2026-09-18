@@ -48,10 +48,18 @@ public partial class MainWindow : Window
             await ViewModel.AddPathsAsync(paths);
     }
 
-    private void Docs_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    /// <summary>"文档"页签当按钮用: 点一下就在浏览器打开线上 Wiki, 不切换页签。</summary>
+    private void DocsTab_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (sender is ListBox { SelectedItem: DocInfo doc })
-            ViewModel.OpenDocCommand.Execute(doc);
+        e.Handled = true;
+        ViewModel.OpenWikiCommand.Execute(null);
+    }
+
+    /// <summary>"开源地址"页签同样当按钮用: 在浏览器打开转换器的 GitHub 仓库。</summary>
+    private void RepoTab_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        ViewModel.OpenRepoCommand.Execute(null);
     }
 
     protected override void OnClosing(CancelEventArgs e)

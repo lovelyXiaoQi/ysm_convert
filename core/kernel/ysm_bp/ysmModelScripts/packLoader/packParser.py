@@ -263,6 +263,29 @@ def MapJavaItemTag(tag):
     return _JAVA_TO_BEDROCK_ITEM_TAGS.get(tag, tag)
 
 
+# 基岩 minecraft:is_sword 比 Java 的"剑"宽: 网易引擎里**重锤**也是剑(2026-09-18 实机 GetItemBasicInfo:
+# itemType 'sword', tags is_sword/is_tool/diamond_tier), 而 Java 的 :sword 分类是 SwordItem || #ysm:swords、
+# #minecraft:swords 也不含重锤(MaceItem 不是 SwordItem)。末影龙娘手持重锤: 持剑并行状态机进了持剑待机、
+# 翅膀化剑露出来, 它是更晚的通道、整套覆盖手臂, 作者专门写的 swing$minecraft:mace 挥击也被盖住;
+# 萨赫梅特/凋灵娘的骨骼通道按"持剑"把原版手持物缩成 0、换出模型自己的刀镰, 重锤同样被藏。
+# 排除要按物品名, 但 is_item_name_any 在无实体的渲染实例上报 "called without a specified entity"(骨骼通道、
+# 纸娃娃/界面实例; 2026-09-18 放进共享控制器的转移里照样刷错) —— 改用 query.get_equipped_item_name(手)
+# 比较短名: 主包共享输入状态动画早就在全渲染域用它判盾(`=='shield'`)从未报错, 转移/animate 条件/骨骼通道
+# 同一写法, 不需要控制器或变量。
+_NON_JAVA_SWORD_ITEMS = ("minecraft:mace",)
+_BEDROCK_SWORD_TAG = "minecraft:is_sword"
+_EQUIPPED_NAME_HANDS = (("slot.weapon.mainhand", "main_hand"), ("slot.weapon.offhand", "off_hand"))
+
+
+def _NonJavaSwordExclusion(slot):
+    """槽位 → `!(get_equipped_item_name(手)=='mace')...` 否定串; 非手部槽位 → None"""
+    for handSlot, hand in _EQUIPPED_NAME_HANDS:
+        if handSlot == slot:
+            return "".join("&&!(query.get_equipped_item_name('{}')=='{}')".format(hand, item.split(":")[-1])
+                           for item in _NON_JAVA_SWORD_ITEMS)
+    return None
+
+
 def IsUnmappedJavaItemTag(tag):
     """是 minecraft: 命名空间但没有基岩对应名 —— 判定恒假, 值得告警。"""
     return tag.startswith("minecraft:") and tag not in _JAVA_TO_BEDROCK_ITEM_TAGS \
@@ -369,6 +392,11 @@ _SWING_RETRIGGER_SUFFIX = "__re"
 _JAVA_INPUT_STATE_KEY = "ysm_java_input_state"
 _JAVA_INPUT_STATE_ANIMATION = "animation.ysm.java_input_state"
 _JAVA_INPUT_STATE_CONDITION = "1"
+# Java ctrl.<主状态> 的互斥语义(CtrlBinding: 每帧按优先级只认一个主状态, 见 port_java_pack._CTRL_MAIN_PRIORITY
+# 注): 主包资源包 animations/java_mode/ctrl_state.animation.json 逐帧把主状态序号写进 variable.ysm_ctrl_main,
+# 移植产物里的 ctrl.X 读它。紧跟输入状态动画(同帧拿到最新腾空闩锁), 排在所有作者控制器之前; 条件恒 "1"
+_JAVA_CTRL_STATE_KEY = "ysm_java_ctrl_state"
+_JAVA_CTRL_STATE_ANIMATION = "animation.ysm.java_ctrl_state"
 # 使用状态共享控制器(见 _BLOCKING_SIGNAL 上方长注 ysm_use_hold 条): 主包资源包 animation_controllers/
 # java_mode/use_state.animation_controllers.json。idle/using 两态, 转移判 query.main_hand_item_use_duration
 # (控制器转移上下文, 实机可靠), on_entry 写 variable.ysm_item_in_use。排在输入状态动画之前: 同一帧里
@@ -399,7 +427,19 @@ _JAVA_GLIDE_STATE_CONTROLLER = "controller.animation.ysm.java_glide_state"
 # 修复工具连生成的挥击状态机一起扫, 两条路径的初始化表对不上
 _INPUT_STATE_VARIABLE_PATTERN = re.compile(
     r"^ysm_(?:input_attack|attack_prev|attack_last|attack_recent|shield_held|block_last|block_hold"
-    r"|item_in_use|use_last|use_hold|swing_edge|swing_muted|swing_serial|(?:fp_)?swing_seen)$", re.IGNORECASE)
+    r"|item_in_use|use_last|use_hold|swing_edge|swing_muted|swing_serial|(?:fp_)?swing_seen|ctrl_main)$",
+    re.IGNORECASE)
+# 主包运行层(业务包 client/javaStateSync + config/javaState)维护的变量: Java 专有的环境/状态量(字符串落
+# variable.ysm_env_*)、带常量参数的函数探针(variable.ysm_pb_*)、共享动画逐帧算的鞘翅追随角。读取处都带 ?? 回落,
+# 同样不参与"文件扫描变量补 0": 补 0 会让字符串变量的 ??'' 回落失效, 切模型时还会把运行层推过的值清成 0 而它的
+# 写缓存不知道。业务包 config/javaState.RUNTIME_VARIABLE_PATTERN 是同一口径(数据包不反向依赖业务包, 各持一份,
+# devtools/test_java_state.py 守护两边一致)
+_RUNTIME_STATE_VARIABLE_PATTERN = re.compile(r"^ysm_(?:env_|pb_|elytra_rot_[xyz]$)", re.IGNORECASE)
+# Java ysm.elytra_rot_x/y/z(原版 ElytraModel 的追随角, 默认模型滑翔时张开手臂靠它): 主包资源包
+# animations/java_mode/elytra_state.animation.json 逐帧复刻(语句由 devtools/java_runtime_bindings.
+# BuildElytraStateStatement 生成, 测试守护逐字一致), 写 variable.ysm_elytra_rot_*; 紧跟主状态动画, 条件恒 "1"
+_JAVA_ELYTRA_STATE_KEY = "ysm_java_elytra_state"
+_JAVA_ELYTRA_STATE_ANIMATION = "animation.ysm.java_elytra_state"
 # 状态链里的一次性成员(Java AnimationRegister: death/attacked 为 PLAY_ONCE, 其余 LOOP)
 _ONESHOT_STATE_KEYS = OrderedDict([("attacked", "ysm_attacked"), ("death", "ysm_death")])
 
@@ -493,9 +533,9 @@ _HAND_EQUIPPED_ITEM_TAGS = (
 
 
 def _HandEquippedItemTest(slot):
-    """CSM 口径的"工具类手持物"判据(animate 条件上下文)"""
+    """CSM 口径的"工具类手持物"判据(animate 条件上下文)。问的是基岩的渲染形态, 不套 Java 分类口径"""
     return "({}||{})".format(_ItemNameTest(slot, _HAND_EQUIPPED_ITEM_NAMES),
-                             _ItemTagTest(slot, _HAND_EQUIPPED_ITEM_TAGS))
+                             _ItemTagTest(slot, _HAND_EQUIPPED_ITEM_TAGS, javaClassify=False))
 
 
 def _JavaItemFixAnimates():
@@ -1825,16 +1865,27 @@ def _ItemNameTest(slot, names):
         slot, ",".join(["'{}'".format(n) for n in names]))
 
 
-def _ItemTagTest(slot, tags):
+def _ItemTagTest(slot, tags, javaClassify=True):
     """query.equipped_item_any_tag(槽位, tag...) 表达式。
 
     本函数是全部 equipped_item_any_tag 合成的唯一出口(条件动画 / 挥击控制器 /
     移植工具的 ctrl.* 展开都经它), Java 原版 tag 名在此换成基岩内置名
     (见 _JAVA_TO_BEDROCK_ITEM_TAGS)。**不要在这里掺 query.is_item_name_any 兜底** ——
     动画通道没有实体上下文, 掺进去整条通道作废(见上方长注)。
+    javaClassify: 按 Java 的物品分类口径判定(缺省) —— 基岩 is_sword 里不是 Java 剑的物品(重锤)
+    按手部物品短名排除(见 _NON_JAVA_SWORD_ITEMS); 只问基岩渲染形态的判定(手持物挂点修正的
+    "工具类")传 False。
     """
-    return "query.equipped_item_any_tag('{}',{})".format(
-        slot, ",".join(["'{}'".format(MapJavaItemTag(t)) for t in tags]))
+    mapped = [MapJavaItemTag(t) for t in tags]
+    exclusion = _NonJavaSwordExclusion(slot) if javaClassify else None
+    if exclusion is None or _BEDROCK_SWORD_TAG not in mapped:
+        return "query.equipped_item_any_tag('{}',{})".format(slot, ",".join(["'{}'".format(t) for t in mapped]))
+    swordTest = "(query.equipped_item_any_tag('{}','{}'){})".format(slot, _BEDROCK_SWORD_TAG, exclusion)
+    others = [t for t in mapped if t != _BEDROCK_SWORD_TAG]
+    if not others:
+        return swordTest
+    return "(query.equipped_item_any_tag('{}',{})||{})".format(
+        slot, ",".join(["'{}'".format(t) for t in others]), swordTest)
 
 
 def _ClassifySelfTest(test, slot, handIndex):
@@ -1945,7 +1996,7 @@ def _BuildConditionalAnimates(animKeys, warnings, keyPrefix="", extraGate=None,
     withFallbacks(Java 模式): swing/use 条件全不命中时兜底 swing_hand/use_mainhand/
     use_offhand(Java SwingPredicate / UsePredicate 末尾的 playCompatAnimation)。
     quietKeys: 来自共享基线的键集 —— 其未映射分类只在基线包自己解析时告警一次,
-    不随每个引用基线的模型重复刷。
+    不随每个引用基线的模型重复刷; 本包控制器引用的键同样不告警(由控制器驱动, 不靠条件合成)。
     """
     guards = [_NON_GUI_GUARD] + ([personGuard] if personGuard else [])
     entries = []
@@ -2558,29 +2609,78 @@ _VEHICLE_CHANNELS = (
         ("not_ride", "!query.has_rider"),
     )),
 )
-# 并行键强制常开(ParallelControllerDiscovery): 弹射物只有 parallel0-7, 载具另有 pre_parallel0-7
-_REPLACE_PARALLEL_KEYS = {
-    "projectiles": re.compile(r"^parallel[0-7]$"),
-    "vehicles": re.compile(r"^(?:pre_)?parallel[0-7]$"),
+# Java 通道注册序(ProjectileControllerCollection / VehicleControllerCollection.init): 并行键强制常开
+# (ParallelControllerDiscovery, 只收 0-7; 弹射物只有 parallel 族, 载具另有排在最前的 pre_parallel 族),
+# 单通道 = (通道名, 上面谓词组下标 | None)。vehicle.origin 是代码控制器, 不读作者数据, 不列
+_REPLACE_CHANNEL_LAYOUT = {
+    "projectiles": ("projectile", False, (("pre_main", None), ("main", 0), ("post_main", None))),
+    "vehicles": ("vehicle", True, (("pre_main", None), ("main", 0), ("move", 1), ("ride", 2), ("post_main", None))),
 }
 _STRING_TYPES = (str, type(u""))
 
 
-def _ReplaceAnimates(sectionKey, animKeys):
-    """替换实体动画短键 → [[键, 条件], ...], 按 Java 通道序: pre_parallel → 谓词通道 → parallel"""
-    present = set(animKeys)
-    parallel = _REPLACE_PARALLEL_KEYS["vehicles" if sectionKey == "vehicles" else "projectiles"]
+def _ReplaceAnimates(sectionKey, animKeys, controllerKeys=(), controllerRefs=()):
+    """替换实体 animate 表 [[键, 条件], ...], 按 Java 通道序: pre_parallel 族 → 单通道 → parallel 族 → 其余控制器。
+
+    作者控制器(键 = 移植工具的注册名 <类别>_<通道>, 如 projectile_parallel_0 / vehicle_main)占其同名通道的
+    位置, 该通道的内置播放(谓词状态 / 同号 parallelN)让位 —— Java HybridAnimationController 有同名作者数据
+    就用作者的。并行族另按控制器状态引用接管(controllerRefs, 与玩家侧 _DrivenParallelKeys 同口径: 基岩逐通道
+    相加, 同一动画两路驱动会翻倍)。非通道名的控制器(基岩扩展写法)常开, 排在最后。
+    """
+    category, hasPreParallel, singles = _REPLACE_CHANNEL_LAYOUT[
+        "vehicles" if sectionKey == "vehicles" else "projectiles"]
     channels = _VEHICLE_CHANNELS if sectionKey == "vehicles" else _PROJECTILE_CHANNELS
-    pre = [[key, "1"] for key in animKeys if parallel.match(key) and key.startswith("pre_")]
-    post = [[key, "1"] for key in animKeys if parallel.match(key) and not key.startswith("pre_")]
-    states = []
-    for discovery, conditions in channels:
+    present = set(animKeys)
+    controllerKeys = list(controllerKeys or ())
+    referenced = set(key for key in controllerRefs or () if _PARALLEL_KEY_PATTERN.match(key))
+    placed = set()
+
+    def _Owner(channel):
+        key = "{}_{}".format(category, channel)
+        if key in controllerKeys and key not in placed:
+            placed.add(key)
+            return [key, "1"]
+        return None
+
+    def _ParallelFamily(prefix):
+        entries = []
+        for index in range(8):
+            owner = _Owner("{}_{}".format(prefix, index))
+            if owner:
+                entries.append(owner)
+                continue
+            animKey = "{}{}".format(prefix, index)
+            if animKey in present and animKey not in referenced:
+                entries.append([animKey, "1"])
+        return entries
+
+    result = _ParallelFamily("pre_parallel") if hasPreParallel else []
+    for channel, groupIndex in singles:
+        owner = _Owner(channel)
+        if owner:
+            result.append(owner)
+            continue
+        if groupIndex is None:
+            continue
+        discovery, conditions = channels[groupIndex]
         if not present.intersection(discovery):
             continue
         for stateKey, condition in conditions:
             if stateKey in present:
-                states.append([stateKey, condition])
-    return pre + states + post
+                result.append([stateKey, condition])
+    result += _ParallelFamily("parallel")
+    return result + [[key, "1"] for key in controllerKeys if key not in placed]
+
+
+def _ReplaceControllerRefs(ctlEntries):
+    """替换实体控制器各状态引用的动画短键并集(资源索引; 索引不可用 / 未登记按"没有引用"处理)"""
+    index = _GetResourceIndex()
+    refs = set()
+    if index is None or not hasattr(index, "QueryControllerAnimRefs"):
+        return refs
+    for _key, ctlId in ctlEntries or ():
+        refs |= index.QueryControllerAnimRefs(ctlId) or set()
+    return refs
 
 
 _REPLACED_SEGMENT_UNSAFE = re.compile(r"[^a-z0-9_]+")
@@ -2680,9 +2780,10 @@ def _WithProjectileOrientation(entityId, replace):
 
 
 # 载具缩放(对齐 Java CustomVehicleEntity 硬编码 0.7, 不读 ysm.json 缩放): 移植工具给载具几何外包 ysm_vehicle_root
-# (port_java_pack.WrapVehicleGeometry), 这里在根骨骼上播缩放。朝向不用补 —— Java 载具与基岩实体同为 YP(180 - 偏航)
-# 约定, 马这类数据驱动实体由引擎按身体朝向转, 船(硬编码渲染)的替身实体由运行层按 Java 口径转(vehicleRender)。
-# 几何里没有这根骨骼(直写 geometry.* 的共享几何 / 旧产物)时动画空转, 按模型原尺寸渲染。
+# (port_java_pack.WrapVehicleGeometry), 这里在根骨骼上播缩放。朝向: Java 载具与基岩实体同为 YP(180 - 偏航) 约定,
+# 马这类数据驱动实体由引擎按身体朝向转(动画里的旋转项为 0); 船/矿车是引擎硬编码渲染, 换成数据驱动渲染后引擎不转
+# 模型, 同一动画在根骨骼上补 Y 旋转, 读业务包运行层写在载具上的两个变量(client/render/vehicleOrient)。
+# 几何里没有这根骨骼(直写 geometry.* 的共享几何 / 旧产物)时动画空转, 按模型原尺寸、船/矿车按固定朝向渲染。
 _VEHICLE_ROOT_KEY = "ysm_vehicle_root"
 _VEHICLE_ROOT_ANIMATION = "animation.ysm.vehicle_root"
 
@@ -2708,9 +2809,10 @@ def _BuildReplaceEntities(jsonDict, packName, readTextFunc, warnings, foundVars=
     - 几何体: geometry.<包名>_<模型段>(模型段 = model 文件基名规整, 见 ReplacedResourceSegment);
     - 贴图:   textures/entity/<包名>/<texture文件基名>;
     - 动画:   animation 声明文件(资源包索引按路径定位, BP 副本回落)内的动画全部注册;
-              无控制器时按 Java 通道语义合成 animate(_ReplaceAnimates: 谓词状态键 + 并行键,
+              按 Java 通道语义合成 animate(_ReplaceAnimates: 谓词状态键 + 并行键,
               其余动画只注册不直播);
-    - 控制器: controller 声明文件可读时自动注册并常开, 由控制器接管动画播放;
+    - 控制器: controller 声明文件可读时自动注册并常开, 按控制器名接管同名通道(移植工具产物在
+              animation_controllers/<包>/replace_entities/, 索引按文件名 + 命名空间定位);
     - 变量:   替换实体的动画/控制器文件与玩家侧同样参与 molang 变量扫描
               (foundVars) —— 变量域全局共享, 漏收会导致替换动画表达式求值失败;
     - 载具:   根骨骼缩放动画打头(_WithVehicleRoot, Java 硬编码 0.7), 有动画时带上包的音效登记
@@ -2759,19 +2861,20 @@ def _BuildReplaceEntities(jsonDict, packName, readTextFunc, warnings, foundVars=
         if animEntries is None:
             animEntries = _ReadAnimFileEntries(
                 entry.get("animation"), "animation." + namespace, readTextFunc, warnings, foundVars)
-        ctlEntries, ctlAnimate, ctlLoaded = _QueryIndexFileControllers(
+        ctlEntries, _ctlAnimate, ctlLoaded = _QueryIndexFileControllers(
             entry.get("controller"), namespace, foundVars)
         if not ctlLoaded:
-            ctlEntries, ctlAnimate, ctlLoaded = _ReadControllerFileEntries(
+            ctlEntries, _ctlAnimate, ctlLoaded = _ReadControllerFileEntries(
                 entry.get("controller"), readTextFunc, warnings, foundVars)
         if animEntries:
             replace["animations"] = [list(item) for item in animEntries]
-            if not ctlLoaded:
-                replace["animate"] = _ReplaceAnimates(sectionKey, [key for key, _ in animEntries])
         if ctlEntries:
             replace["animation_controllers"] = [list(item) for item in ctlEntries]
-            replace["animate"] = (replace.get("animate") or []) + [
-                list(item) for item in ctlAnimate]
+        # 控制器常开, 按名接管同名通道; 未被接管的谓词状态 / 并行键照常直挂(见 _ReplaceAnimates 注)
+        animate = _ReplaceAnimates(sectionKey, [key for key, _ in animEntries or ()],
+                                   [key for key, _ in ctlEntries], _ReplaceControllerRefs(ctlEntries))
+        if animate:
+            replace["animate"] = animate
         if entry.get("controller") and not ctlLoaded:
             warnings.append(
                 "{}({}) 声明的控制器文件不可读, 未自动注册 —— 把改名后的控制器文件"
@@ -2874,10 +2977,41 @@ def _BuildInitialize(netease, buttonsList, fileMolangVars, warnings):
             continue   # 占用变量由控制器 on_entry 维护, 读取处自带 ??0; 模型应用时补 0 会把活跃状态清掉
         if _INPUT_STATE_VARIABLE_PATTERN.match(shortName):
             continue   # 输入状态锁存/挥动序号由共享动画与挥击状态机维护, 读取处自带 ?? 回落
+        if _RUNTIME_STATE_VARIABLE_PATTERN.match(shortName):
+            continue   # 主包运行层维护的环境/探针/鞘翅变量, 读取处自带 ?? 回落
 
         seenNames.add(fullName)
         scannedEntries.append("{} = 0.0;".format(fullName))
     return entries, scannedEntries
+
+
+_ROAMING_VARIABLE_PREFIX = "roaming_"
+
+
+def _BuildJavaStateDeclaration(declared, buttonsList, fileMolangVars):
+    """模型的 Java 运行期状态声明(顶级 java_state, 移植工具写; 形态见业务包 config/javaState 模块注)直通进配置。
+
+    roaming 清单 = 声明 ∪ 表单变量 ∪ 文件扫描到的 roaming_* 变量: 早先移植的包没有声明, 资源索引在场时照样能做
+    存档 + 多人同步(Java v.roaming.* 的语义)。规整与校验在业务包消费侧(数据包不反向依赖业务包)。
+    """
+    declaration = dict(declared) if isinstance(declared, dict) else {}
+    roaming = [name for name in (declaration.get("roaming") or []) if isinstance(name, _STRING_TYPES)]
+    known = set(name.lower() for name in roaming)
+    candidates = []
+    for button in buttonsList or []:
+        for form in button.get("config_forms") or []:
+            name = _NormalizeVariableName(form.get("value")) if isinstance(form, dict) else None
+            if name:
+                candidates.append(name[len("variable."):])
+    candidates.extend(sorted(fileMolangVars or []))
+    for name in candidates:
+        lowered = name.lower()
+        if lowered.startswith(_ROAMING_VARIABLE_PREFIX) and lowered not in known:
+            known.add(lowered)
+            roaming.append(lowered)
+    if roaming:
+        declaration["roaming"] = roaming
+    return declaration or None
 
 
 def _OrderedKeys(mapping):
@@ -3195,9 +3329,12 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
         if javaMode else list(modelAnimEntries)
     mergedAnimKeys = [key for key, _animId in mergedAnimEntries]
     modelOwnKeys = set(key for key, _animId in modelAnimEntries)
+    # 本包自有控制器引用的键也不告警"分类无对应判定": 作者用条件命名的动画当控制器素材
+    # (末影龙娘 player.parallel_4 的 use_mainhand:shield_start / shield_loop), Java 同样不自动播
     conditionalAnimates = _BuildConditionalAnimates(
         mergedAnimKeys, warnings, withFallbacks=javaMode,
-        quietKeys=set(k for k, _v in javaBaseline) - modelOwnKeys, javaMode=javaMode)
+        quietKeys=(set(k for k, _v in javaBaseline) - modelOwnKeys)
+        | _QueryControllerAnimRefs(_NamespaceName(animNs)), javaMode=javaMode)
     if javaMode:
         # 带 override 的条件动画被移植工具拆出的通道覆盖伴生(hold/passenger/carryon 等直挂族)
         # 紧跟原条目, 核心权重取顶级 channel_ownership(见 _AttachOwnershipCompanions 注);
@@ -3256,7 +3393,12 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
         playerAnimates.append((_JAVA_HEAD_LOOK_KEY, _CONTROLLER_ANIMATE_GATE))
         # 逐帧输入状态(格挡/使用锁存 + 挥动序号, 见 _BLOCKING_SIGNAL 注): 排在最前, 同一帧里
         # 后面的状态机与条件读到的就是本帧的值; 全渲染域恒开(第一人称挥击同样依赖序号)
-        mergedAnimEntries = mergedAnimEntries + [(_JAVA_INPUT_STATE_KEY, _JAVA_INPUT_STATE_ANIMATION)]
+        mergedAnimEntries = mergedAnimEntries + [(_JAVA_INPUT_STATE_KEY, _JAVA_INPUT_STATE_ANIMATION),
+                                                 (_JAVA_CTRL_STATE_KEY, _JAVA_CTRL_STATE_ANIMATION),
+                                                 (_JAVA_ELYTRA_STATE_KEY, _JAVA_ELYTRA_STATE_ANIMATION)]
+        # 鞘翅追随角(见 _JAVA_ELYTRA_STATE_KEY 注): 先插入者排在后面 —— 最终顺序 输入状态 → 主状态 → 鞘翅角
+        playerAnimates.insert(0, (_JAVA_ELYTRA_STATE_KEY, "1"))
+        playerAnimates.insert(0, (_JAVA_CTRL_STATE_KEY, "1"))
         playerAnimates.insert(0, (_JAVA_INPUT_STATE_KEY, _JAVA_INPUT_STATE_CONDITION))
         # 使用状态控制器排在输入状态动画之前(锁存同帧读到; 骨骼通道里查物品使用不可靠, 见其常量注)
         autoCtlEntries = autoCtlEntries + [(_JAVA_USE_STATE_KEY, _JAVA_USE_STATE_CONTROLLER)]
@@ -3506,6 +3648,9 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
         config["_ysmInitialize"] = initializeList
     if scannedInitList:
         config["_ysmScannedInitialize"] = scannedInitList
+    javaStateDeclaration = _BuildJavaStateDeclaration(netease.get("java_state"), buttonsList, fileMolangVars)
+    if javaStateDeclaration:
+        config["java_state"] = javaStateDeclaration
     # GUI 预览的并行叠加层: Java 的 ParallelPredicate 恒 LOOP **含 GUI** —— 隐藏/
     # 摆位装饰部件的 parallel/pre_parallel 不叠上去, 预览就是零件摊开的杂乱状态。
     # javaMode 自动取模型自有的并行动画全表(列表形态, previewRender 逐条注册);

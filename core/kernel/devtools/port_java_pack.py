@@ -63,7 +63,7 @@ from ysmModelScripts.packLoader.packParser import (  # noqa: E402
     StripJsonComments, _BuildConditionalAnimates, _BuildJavaStateAnimates, _CLASSIFY_TESTS,
     _ClassifySelfTest,
     _CONDITION_FALLBACK_KEYS, _OWNERSHIP_COMPANION_PATTERN, _OWNERSHIP_VARIABLE_PATTERN,
-    _INPUT_STATE_VARIABLE_PATTERN,
+    _INPUT_STATE_VARIABLE_PATTERN, _RUNTIME_STATE_VARIABLE_PATTERN,
     _JAVA_ATTACK_TIME, _ONESHOT_SWING_KEY, _ONESHOT_USE_CHANNELS, _SWING_ACTIVE_TEST,
     _USE_MAINHAND_GATE, _USE_OFFHAND_GATE,
     _IsMainSwingKey, _ItemNameTest, _ItemTagTest, _OneShotConditionMembers, _OneShotSwingMembers,
@@ -74,6 +74,8 @@ from molang_syntax import (  # noqa: E402
     GuardAnimationMolang, GuardControllerMolang)
 # Java 脚本控制器(functions/*@player_ctrl_<通道>.molang)转换, 见 script_controller.py 注
 from script_controller import ConvertPackScripts  # noqa: E402
+# Java 专有的环境/状态量、探针函数、骨骼旋转回读、roaming 声明 → 主包运行层(见 java_runtime_bindings.py 注)
+import java_runtime_bindings as runtime_bindings  # noqa: E402
 
 RP = os.path.join(ROOT, "ysm_rp")
 BP_MODELS = os.path.join(ROOT, "ysm_bp", "ysm_models")
@@ -146,6 +148,38 @@ _WRITE_RETRY_ERRNOS = (errno.EINVAL, errno.EACCES)
 _WRITE_RETRY_ATTEMPTS = 8
 
 
+# 每个文件最近一次经 WriteBytes 写入的序号(本进程内单调递增), 目录查询缓存的失效判据(_DirJsonSignature)。
+# 产物里的 JSON 全经 WriteBytes 落盘(CopyBinary 只拷 ogg/png), 删除走 os.remove 会改变文件列表, 都能被签名看见
+_WRITE_SERIAL = [0]
+_WRITTEN_AT = {}
+
+
+def _PathKey(path):
+    """路径的规范键(统一成 unicode: 同一路径可能一会儿是字节串一会儿是 unicode)"""
+    key = os.path.normcase(os.path.abspath(path))
+    if isinstance(key, bytes):
+        try:
+            key = key.decode(sys.getfilesystemencoding() or "utf-8")
+        except UnicodeDecodeError:
+            key = key.decode("utf-8", "replace")
+    return key
+
+
+def _DirJsonSignature(dirPath):
+    """目录里 .json 文件的签名: 文件名 + 本进程写入序号 + 大小 + 修改时间; 任何一份被写 / 增 / 删, 签名即变"""
+    signature = []
+    for name in sorted(os.listdir(dirPath)):
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(dirPath, name)
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+        signature.append((name, _WRITTEN_AT.get(_PathKey(path), 0), stat.st_size, stat.st_mtime))
+    return tuple(signature)
+
+
 def WriteBytes(path, payload):
     """写文件字节; 只对文件被临时占用的两种错误退避重试"""
     EnsureDir(os.path.dirname(path))
@@ -153,6 +187,8 @@ def WriteBytes(path, payload):
         try:
             with open(path, "wb") as f:
                 f.write(payload)
+            _WRITE_SERIAL[0] += 1
+            _WRITTEN_AT[_PathKey(path)] = _WRITE_SERIAL[0]
             return
         except (IOError, OSError) as error:
             if getattr(error, "errno", None) not in _WRITE_RETRY_ERRNOS or attempt == _WRITE_RETRY_ATTEMPTS - 1:
@@ -160,14 +196,92 @@ def WriteBytes(path, payload):
             time.sleep(0.25 * (attempt + 1))
 
 
+# 落盘 JSON 的格式。缺省 2 空格缩进: 本仓库的移植产物入库, 要能读、能 diff。独立转换器(port_cli)按任务单
+# 默认压成一行 —— 磁盘省约 70%, 而且 Python 2.7 的 json 只在不缩进时才用 C 编码器: 实测写快 3 倍, 后续
+# 各步骤读回也快 2.6 倍(解析器少跳空白)。**只影响落盘**: PortMolangText 等在序列化文本上做正则替换的步骤
+# 仍然吃缩进文本, 规则行为不变(2026-09-18 以 30 个包的产物逐字节 / 逐值比对守护)。
+JSON_COMPACT = False
+_COMPACT_SEPARATORS = (",", ":")
+
+
+def SetJsonStyle(compact):
+    """切换落盘格式: True = 压一行, False = 2 空格缩进(缺省)"""
+    global JSON_COMPACT
+    JSON_COMPACT = bool(compact)
+
+
+def SerializeForDisk(data):
+    """按当前落盘格式序列化(不带结尾换行)"""
+    if JSON_COMPACT:
+        return json.dumps(data, ensure_ascii=False, separators=_COMPACT_SEPARATORS)
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
 def DumpJson(path, data):
-    """写 JSON(2 空格缩进 + 结尾换行); 先序列化再写, 写入经 WriteBytes 重试"""
-    WriteBytes(path, json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8") + b"\n")
+    """写 JSON(格式见 JSON_COMPACT, 带结尾换行); 先序列化再写, 写入经 WriteBytes 重试"""
+    WriteBytes(path, SerializeForDisk(data).encode("utf-8") + b"\n")
 
 
 def EnsureDir(path):
+    """建目录; 转换器按包并行时几个进程会同时建同一个父目录(sounds/、entity/、合集目录), 后到者不报错"""
     if path and not os.path.isdir(path):
-        os.makedirs(path)
+        try:
+            os.makedirs(path)
+        except OSError as error:
+            if error.errno != errno.EEXIST or not os.path.isdir(path):
+                raise
+
+
+# ---- 跨进程互斥: 转换器按包并行时, 几个包会"读-改-写"同一批共享文件 ----
+# sounds/sound_definitions.json(各包按前缀合并)、ysm_models/<合集>/ysm-pack.json 与合集封面。锁文件放在系统
+# 临时目录(按目标路径的哈希命名), 不落进产物; 锁的是文件首字节, 进程崩溃时由系统释放, 不会留下死锁。
+# 串行时总能立即拿到, 本仓库命令行行为不变。
+try:
+    import msvcrt as _msvcrt
+except ImportError:          # 非 Windows: 转换器只在 Windows 上并行, 这里退化成无锁
+    _msvcrt = None
+
+
+class SharedFileLock(object):
+    """with SharedFileLock(path): 独占 path 的读改写; 超时(默认 120 秒)抛 IOError"""
+
+    def __init__(self, path, timeout=120.0):
+        target = os.path.normcase(os.path.abspath(path))
+        if not isinstance(target, bytes):
+            target = target.encode("utf-8")
+        import hashlib
+        self._lockPath = os.path.join(tempfile.gettempdir(), "ysmconv_locks",
+                                      hashlib.md5(target).hexdigest() + ".lock")
+        self._timeout = timeout
+        self._handle = None
+
+    def __enter__(self):
+        if _msvcrt is None:
+            return self
+        EnsureDir(os.path.dirname(self._lockPath))
+        self._handle = open(self._lockPath, "a+b")
+        deadline = time.time() + self._timeout
+        while True:
+            try:
+                self._handle.seek(0)
+                _msvcrt.locking(self._handle.fileno(), _msvcrt.LK_NBLCK, 1)
+                return self
+            except IOError:
+                if time.time() > deadline:
+                    self._handle.close()
+                    self._handle = None
+                    raise
+                time.sleep(0.02)
+
+    def __exit__(self, *_exc):
+        if self._handle is not None:
+            try:
+                self._handle.seek(0)
+                _msvcrt.locking(self._handle.fileno(), _msvcrt.LK_UNLCK, 1)
+            finally:
+                self._handle.close()
+                self._handle = None
+        return False
 
 
 def BaseName(relPath):
@@ -578,9 +692,17 @@ _ARMOR_SLOT_ITEMS = {
              "minecraft:diamond_boots", "minecraft:netherite_boots"),
 }
 
-# 内层故意不写成 (query.modified_move_speed*1.9): 修复工具按旧文本整串迁移, 内层若含旧文本
-# 会在第二遍再次套一层(幂等性守护逮到)
-_GROUND_SPEED_EXPR = "((query.modified_move_speed>0.05)?query.modified_move_speed*1.9:0)"
+# Java 口径的运动量由主包逐渲染帧按实际位移计算(client/motionTracker.py 模块注: Java 源码口径与摩擦系数):
+#   ysm.ground_speed2 → 每 tick 水平位移 × 20; query.ground_speed → 摩擦后速度(步行约 2.36、创造飞行约 9.9);
+#   ysm.input_vertical / input_horizontal → 位移方向相对视线偏航的 cos / sin(向右为正, 与按键无关)。
+# 2026-09-18 前 ground_speed/ground_speed2 都映射成 modified_move_speed×1.9(走路步频量, 飞行/下落/被击退时几乎不动 ——
+# 末影龙娘创造飞行的前倾 `input_vertical×ground_speed2×5.5` 只有几度), input_* 映射成按键向量(Java 是实际位移方向,
+# 且 Java 的 xxa 按键量向左为正、input_horizontal 向右为正, 同一个按键量映射两者至少一处符号反)。
+# 旧产物由修复工具整串迁移(_OLD_TO_NEW_EXPANSIONS)。
+_GROUND_SPEED_EXPR = "query.mod.ysm_ground_speed"
+_GROUND_SPEED2_EXPR = "query.mod.ysm_ground_speed2"
+# 旧死区表达式(修复工具迁移的识别文本)
+_LEGACY_GROUND_SPEED_EXPR = "((query.modified_move_speed>0.05)?query.modified_move_speed*1.9:0)"
 # 界面纸娃娃(背包/暂停界面的玩家实例、YSM 界面的预览实体)读不到 query.mod.ysm_food_level(按 0 算) →
 # 各包 `ysm.food_level<=6?...` 的饥饿姿态在纸娃娃上常驻(2026-09-17 用户反馈)。界面里按满饱食度读;
 # 世界里取值不变(query.is_in_ui 世界中为 0, is_paperdoll 世界中为 0, 两个界面变量只由 YSM 界面纸娃娃置 1)
@@ -606,11 +728,14 @@ _JAVA_NAME_MAP = [
     ("armor_value", "query.mod.ysm_armor_value"),
     ("rendering_in_paperdoll", "variable.is_paperdoll"),
     ("rendering_in_inventory", "variable.is_paperdoll"),
-    ("input_vertical", "query.mod.ysm_input_vertical"),      # 主包 GetInputVector 下发
-    ("input_horizontal", "query.mod.ysm_input_horizontal"),
-    # Java xxa/zza = 左右/前后移动输入分量(±0.98), 主包输入向量同域近似; yya 恒 0
-    ("xxa", "query.mod.ysm_input_horizontal"),
-    ("zza", "query.mod.ysm_input_vertical"),
+    # Java 按实际位移方向算(MoveInputVariable, 见 _GROUND_SPEED_EXPR 注), 主包逐帧下发
+    ("input_vertical", "query.mod.ysm_move_vertical"),
+    ("input_horizontal", "query.mod.ysm_move_horizontal"),
+    # Java xxa/zza = 左右/前后移动**按键**分量(±0.98), 主包按键输入向量同域近似; yya 恒 0。
+    # `1*` 是给修复工具看的标记: 旧产物里不带它的 query.mod.ysm_input_* 来自 input_vertical/horizontal, 要迁到
+    # 位移方向量(fix_ported_controllers._LEGACY_INPUT_VECTOR_PATTERN), 带它的是真按键量、不迁
+    ("xxa", "(1*query.mod.ysm_input_horizontal)"),
+    ("zza", "(1*query.mod.ysm_input_vertical)"),
     ("is_close_eyes", "query.mod.ysm_is_close_eyes"),        # 主包 5 秒眨眼节拍(Java 4.5 秒)
     ("on_ladder", "query.mod.ysm_is_on_ladder"),
     # —— 基岩原生对应(替换目标全部在引擎实测集内) ——
@@ -623,16 +748,12 @@ _JAVA_NAME_MAP = [
     ("has_chest_plate", _ItemNameTest("slot.armor.chest", _ARMOR_SLOT_ITEMS["chest"])),
     ("has_leggings", _ItemNameTest("slot.armor.legs", _ARMOR_SLOT_ITEMS["legs"])),
     ("has_boots", _ItemNameTest("slot.armor.feet", _ARMOR_SLOT_ITEMS["feet"])),
-    # —— 同名但数值不可用: 网易引擎的这两个 query 实测噪声极大, 直接沿用会让
-    #    吃它们的头发/胸部/饰品物理表达式每帧剧烈抖动(游戏内实测定位的鬼畜主因)。
-    # query.ground_speed: 走路中 0↔60 每帧乱跳(平均跳变 16.8) → 换平滑的
-    #   modified_move_speed(实测 0.59~0.99 连续、停止后平滑衰减); ×1.9 对齐 Java
-    #   量纲(Java 行走约 1.7)。ysm.ground_speed2 同为格/秒, 同一替换。
-    #   死区: 作者状态机拿 `ground_speed==0` 判静止(Java 静止时精确为 0), 基岩的
-    #   modified_move_speed 在冰面滑行/潜行微动时是小非零值, ==0 永假 → 卡在空中转状态
-    #   (凋灵娘潜行不动直立, 2026-09-03)。低于走路阈值 0.05(与 ctrl.walk 一致)钳成 0。
+    # —— 同名但口径不同: 主包按 Java 源码口径逐帧计算(见 _GROUND_SPEED_EXPR 注)。静止时精确为 0(作者状态机拿
+    #    `ground_speed==0` 判静止, 凋灵娘潜行不动直立 2026-09-03 即此)。早先"原生 query.ground_speed 走路 0↔60
+    #    每帧乱跳"的结论来自 SetMotion(3.0) 驱动的采样(客户端被服务端纠偏拉回), 数据不可信; 原生值实测正是
+    #    20×每 tick 水平位移(2026-09-18), 仍改走主包: 远端玩家更新节奏与摩擦口径都在一处控制。
     ("ground_speed", _GROUND_SPEED_EXPR),
-    ("ground_speed2", _GROUND_SPEED_EXPR),
+    ("ground_speed2", _GROUND_SPEED2_EXPR),
     # query.yaw_speed: 走路中 0~290 间歇归零(平均跳变 21.7) → 换主包差分+EMA 平滑值
     ("yaw_speed", "query.mod.ysm_yaw_speed"),
     ("is_passenger", "query.is_riding"),
@@ -650,9 +771,10 @@ _JAVA_NAME_MAP = [
     # Java: 0=一人称 1=三人称背面 2=三人称正面; GUI/纸娃娃渲染恒 2(PersonView.java)
     ("person_view",
      "(variable.is_paperdoll?2.0:(query.is_first_person?0.0:1.0))"),
+    # Java = |getDeltaMovement()|, 单位**格/tick**(YSMBinding.java:112, 不乘 20); 水平取摩擦后速度
     ("delta_movement_length",
-     "math.sqrt(query.ground_speed*query.ground_speed"
-     "+query.vertical_speed*query.vertical_speed)"),
+     "(math.sqrt(query.mod.ysm_ground_speed*query.mod.ysm_ground_speed"
+     "+query.vertical_speed*query.vertical_speed)/20)"),
     # —— Java 专有且引擎无对应, 降级**语义中性**常量(除数/阈值场景置零会出错) ——
     # (yaw_speed/math.exp 曾按"原版零使用"误判缺失 —— 经引擎二进制证实存在, 已保留原样)
     ("fps", "60.0"),             # 常见用法 60/fps 帧率补偿, 置零会除零
@@ -704,7 +826,15 @@ _JAVA_NAME_MAP = [
     ("in_shield_block_cooldown", "0.0"),
     ("elytra_rot_x", "0.0"),
     ("elytra_rot_y", "0.0"),
+    # —— 投射物(箭类)绑定(YSMBinding.abstractArrowVar): 替换实体的动画/控制器里用 ——
+    # Java inGround = 箭插在方块里; 基岩近似为在地判据(与 packParser._PROJECTILE_CHANNELS 的 ground
+    # 谓词、CSM 箭矢主控制器同口径)。末影龙娘的末影剑: 落地后火焰播完一轮再熄灭
+    ("in_ground", "query.is_on_ground"),
+    ("is_spectral_arrow", "0.0"),             # 基岩没有光灵箭
 ]
+# 主包运行层能给出真值的名字(天气/露天/维度/准星目标/空气/光照/远程玩家血量/贴图名/鞘翅角/is_jumping ...):
+# 同名旧行(中性常量)原位换成读运行层落点, 见 java_runtime_bindings.RUNTIME_NAME_ROWS
+_JAVA_NAME_MAP = runtime_bindings.MergeNameRows(_JAVA_NAME_MAP, runtime_bindings.RUNTIME_NAME_ROWS)
 
 # 地面判据的稳定形态: 走路中 query.is_on_ground 每秒翻转数次(实机 40 帧翻 10 次,
 # 见 packParser._JAVA_STATE_GROUPS jump 组注), 裸用会让转换包的控制器状态机在
@@ -722,37 +852,60 @@ _JAVA_NAME_MAP = [
 _AIRBORNE_LATCH = "((variable.ysm_airborne??0)>0.5)"
 _STABLE_ON_GROUND = "(!{})".format(_AIRBORNE_LATCH)
 
+# ---- ctrl.<主状态> 的 Java 互斥语义(CtrlBinding.testCondition, 2026-09-18) ----
+# Java 每帧按优先级(HIGHEST → LOWEST, 同级按注册序)找出**第一个**成立的主状态缓存起来, ctrl.X 只在 X
+# 就是它时为真; 骑乘载具时一律为假, YSM 界面预览实体同样全假。早先逐个独立映射, 滑翔/创造飞行时
+# ctrl.jump(腾空)也为真 —— 末影龙娘的 player.post_main 在滑翔时跑进"跳跃下坠"播 jump_fall(Java 里
+# elytra_fly 优先级更高, 它停在不播动画的"缓冲")。主包共享动画 animation.ysm.java_ctrl_state(animate 表里
+# 紧跟 java_input_state, 同帧拿到最新腾空闩锁)逐帧把主状态序号写进 variable.ysm_ctrl_main, ctrl.X 读它;
+# 纸娃娃/GUI 预览不跑这条动画 → ??0 → 全假(= Java 预览实体)。语句由 BuildCtrlStateStatement 生成,
+# 资源包文件(ysm_rp/animations/java_mode/ctrl_state.animation.json)与它逐字一致(测试守护)。
+# 条目: (ctrl 名, 状态序号(= 优先级序, 0 保留给骑乘/无状态), 基岩判据; None = 基岩无法判定恒假)
+_CTRL_MAIN_VARIABLE = "variable.ysm_ctrl_main"
+_CTRL_MAIN_PRIORITY = [
+    ("death", 1, "query.death_ticks>0"),
+    ("riptide", 2, None),                     # 基岩无 is_riptide/is_auto_spin_attack(实测), 恒假
+    ("sleep", 3, "query.is_sleeping"),
+    ("swim", 4, "query.swim_amount>0"),       # 原生 query; variable.swim_amount 有未初始化风险
+    # Java climb/climbing = Pose.SWIMMING 移动/静止(swim 已先判) —— 基岩原生 is_crawling
+    ("climb", 5, "query.is_crawling&&query.modified_move_speed>0.05"),
+    ("climbing", 6, "query.is_crawling"),
+    ("ladder_up", 7, "query.mod.ysm_is_on_ladder>0.5&&query.mod.ysm_climbing_vector>0"),
+    ("ladder_stillness", 8, "query.mod.ysm_is_on_ladder>0.5&&query.mod.ysm_climbing_vector==0"),
+    ("ladder_down", 9, "query.mod.ysm_is_on_ladder>0.5&&query.mod.ysm_climbing_vector<0"),
+    ("fly", 10, "query.mod.ysm_is_flying"),   # 主包创造飞行状态
+    ("elytra_fly", 11, "query.is_gliding"),
+    ("swim_stand", 12, "query.is_in_water&&!query.is_on_ground"),
+    ("attacked", 13, "query.hurt_time>0"),
+    # Java jump = !onGround && !inWater(含下落); 闩锁已含 !in_water
+    ("jump", 14, _AIRBORNE_LATCH),
+    # Java sneak = 在地潜行**移动**(limbSwing > 0.05), sneaking = 在地潜行; "在地"由 jump 已先判保证
+    ("sneak", 15, "query.is_sneaking&&query.modified_move_speed>0.05"),
+    ("sneaking", 16, "query.is_sneaking"),
+    ("run", 17, "query.is_sprinting"),        # Java run = onGround && isSprinting(疾跑状态, 非速度阈值)
+    ("walk", 18, "query.modified_move_speed>0.05"),
+    ("idle", 19, None),                       # LOWEST 兜底: 其余都不成立
+]
+
+
+def BuildCtrlStateStatement():
+    """主包共享动画 java_ctrl_state 的逐帧语句: 按 Java 优先级嵌套三元(全加括号 —— 资源包走旧版 Molang
+    语义, 三元左结合, 见 molang_syntax.ExplicitPrecedence), 骑乘时写 0"""
+    expr = str(_CTRL_MAIN_PRIORITY[-1][1])
+    for _name, index, condition in reversed(_CTRL_MAIN_PRIORITY[:-1]):
+        if condition is not None:
+            expr = "({})?{}:({})".format(condition, index, expr)
+    return "{}=query.is_riding?0:({});return 0;".format(_CTRL_MAIN_VARIABLE, expr)
+
+
 # ctrl.*(geckolib 控制器局部状态)有明确对应的映射; 其余由兜底置零并告警。
-# idle/walk/run 阈值与 packParser._JAVA_STATE_GROUPS 地面组一致(0.01/0.87)。
 _CTRL_NAME_MAP = [
-    ("elytra_fly", "query.is_gliding"),
-    # Java ctrl.jump = !onGround && !inWater(含下落, CtrlBinding NORMAL 级); 闩锁已含 !in_water
-    ("jump", _AIRBORNE_LATCH),
-    # Java: sneak=潜行**移动**, sneaking=潜行(含静止兜底) —— 移动阈值 0.05(limbSwing)
-    ("sneak", "(query.is_sneaking&&query.modified_move_speed>0.05)"),
-    ("sneaking", "query.is_sneaking"),
-    ("sleep", "query.is_sleeping"),
-    ("swim", "(query.swim_amount>0)"),   # 原生 query; variable.swim_amount 有未初始化风险
-    ("swim_stand", "(query.is_in_water&&!query.is_swimming&&!query.is_on_ground)"),
-    ("ladder_up", "(query.mod.ysm_is_on_ladder>0.5&&query.mod.ysm_climbing_vector>0)"),
-    ("ladder_stillness", "(query.mod.ysm_is_on_ladder>0.5&&query.mod.ysm_climbing_vector==0)"),
-    ("ladder_down", "(query.mod.ysm_is_on_ladder>0.5&&query.mod.ysm_climbing_vector<0)"),
-    ("fly", "query.mod.ysm_is_flying"),                       # 主包创造飞行状态
+    (name, "0.0" if name == "riptide" else "(({}??0)=={})".format(_CTRL_MAIN_VARIABLE, index))
+    for name, index, _condition in _CTRL_MAIN_PRIORITY
+] + [
     ("playing_extra_animation", "query.mod.ysm_wheel_anim"),  # 主包轮盘动画播放中
-    # Java ctrl.climb/climbing = 趴下(爬行)移动/静止 —— 基岩原生 is_crawling
-    ("climb", "(query.is_crawling&&query.modified_move_speed>0.05)"),
-    ("climbing", "(query.is_crawling&&query.modified_move_speed<=0.05)"),
-    ("attacked", "(query.hurt_time>0)"),
-    ("death", "(query.death_ticks>0)"),
-    ("riptide", "0.0"),   # 基岩无 is_riptide/is_auto_spin_attack(实测), 无法判定
     # 被抱起 = 骑乘玩家(主包 riding 值表: minecraft:player → 5)
     ("carryon_is_princess", "(query.mod.ysm_riding==5)"),
-    ("idle", "({}&&query.modified_move_speed<=0.05"
-             "&&!query.is_riding&&!query.is_sneaking)".format(_STABLE_ON_GROUND)),
-    # Java ctrl.run = onGround && isSprinting(疾跑状态, 非速度阈值)
-    ("run", "({}&&query.is_sprinting)".format(_STABLE_ON_GROUND)),
-    ("walk", "({}&&query.modified_move_speed>0.05"
-             "&&!query.is_sprinting&&!query.is_sneaking)".format(_STABLE_ON_GROUND)),
     # —— 模组联动的 ctrl 变量(client/compat/*Compat.java: 模组未安装时的默认绑定):
     #    字符串型给 ''(`ctrl.parcool_state==''` 这类"没在跑酷"判据才保持为真), 布尔/数值给 0
     ("parcool_state", "''"),
@@ -774,6 +927,8 @@ _CTRL_NAME_MAP = [
     ("swem_is_ride", "0.0"),
     ("has_sophisticated_backpack", "0.0"),
 ]
+# 网易侧有对应数据的联动量(TACZ 的 variable.tac.*、CarryOn 类型), 见 java_runtime_bindings.RUNTIME_CTRL_ROWS
+_CTRL_NAME_MAP = runtime_bindings.MergeNameRows(_CTRL_NAME_MAP, runtime_bindings.RUNTIME_CTRL_ROWS)
 
 # Java 专有函数(带括号调用)的剥离策略: int=取第 N 个参数(0 基), str=整体替换。
 # second_order/first_order 正常由 PhysicsRewriter 改写成 molang 状态积分(见其注),
@@ -941,6 +1096,17 @@ def _ReplaceFunctionCalls(text, report):
         args, endIndex = _ScanCall(text, match.end())
         prefix, name = match.group(1), match.group(2)
         memberTail = _MEMBER_ACCESS_TAIL.match(text, endIndex + 1)
+        # 主包运行层接得住的调用(见 java_runtime_bindings): 骨骼旋转回读 ysm.bone_rot('骨骼').x、带常量参数的
+        # 探针函数(药水等级/附魔等级/相对方块)。转不了的(参数非常量、没有活动的包汇)落回下面的旧策略
+        runtimeReplacement = None
+        if prefix == "ysm" and name == "bone_rot" and memberTail is not None:
+            runtimeReplacement = runtime_bindings.RewriteBoneRotationCall(args, memberTail.group(0), report)
+        elif prefix == "ysm" and memberTail is None and name in runtime_bindings.PROBE_FUNCTIONS:
+            runtimeReplacement = runtime_bindings.RewriteProbeCall(name, args, report)
+        if runtimeReplacement is not None:
+            tailEnd = memberTail.end() if memberTail is not None else endIndex + 1
+            text = text[:match.start()] + runtimeReplacement + text[tailEnd:]
+            continue
         replacement = None
         if prefix == "ctrl" and name in _CTRL_ITEM_FUNCS:
             replacement = _ItemConditionFromArgs(args, _CTRL_ITEM_FUNCS[name])
@@ -1507,6 +1673,80 @@ def RewriteJavaLexicalForms(text):
     return rewritten, counters[0], counters[1]
 
 
+# ---- Java 执行域作值 `{表达式}` ----
+# Java 解析器把 `{...}` 当执行域(MolangParserImpl.parseSingle 的 LBRACE 分支 → ExecutionScopeExpression),
+# 求值返回最后一条表达式的值(ExpressionEvaluatorImpl.visitExecutionScope), 作者拿它当括号用 —— 末影龙娘
+# 拉弓控制器的松弦转移 `{!ctrl.use(...)&&!ctrl.use(...)}&&{ctrl.hold(...)||ctrl.hold(...)}&&v.bow_charge==1`。
+# 基岩的块只收以 ';' 结尾的语句, 这种写法整条拒载(移植守卫只能落成 0 → 松弦状态永远进不去)。
+# 块里(连同嵌套块)既没有 ';' 也没有赋值时, 值就是那一个表达式 → 换成圆括号, 两边同值; 带语句的块
+# (`q.x ? {v.a = 1;}`、loop/for_each 的循环体)原样。基岩合法写法里不存在不带分号的块, 改写不会误伤。
+_SCOPE_ASSIGNMENT = re.compile(r"(?<![=!<>])=(?!=)")
+
+
+def RewriteValueScopes(text):
+    """值位置的 Java 执行域 `{表达式}` → `(表达式)`; 返回 (新文本, 改写数)。只动 JSON 字符串内的 molang"""
+    counter = [0]
+
+    def _Rewrite(piece):
+        if "{" not in piece:
+            return piece
+        chars = list(piece)
+        opened = []
+        quoted = False
+        for index, char in enumerate(piece):
+            if char == "'":
+                quoted = not quoted
+            elif quoted:
+                continue
+            elif char == "{":
+                opened.append(index)
+            elif char == "}" and opened:
+                start = opened.pop()
+                inner = _MOLANG_QUOTED_SPLIT.sub("''", piece[start + 1:index])
+                if inner.strip() and ";" not in inner and not _SCOPE_ASSIGNMENT.search(inner):
+                    chars[start], chars[index] = "(", ")"
+                    counter[0] += 1
+        return "".join(chars)
+
+    return _MapMolangTexts(text, _Rewrite), counter[0]
+
+
+# PortMolangText ③ 名字映射的预筛(2026-09-18 性能)。原先对映射表 123 个名字逐个做全文正则扫描: 一份几 MB 的
+# 动画要扫 123 遍, 占整包移植约 1/4 的时间(warden 剖析: 625 次 findall 共 9.4 秒), 而实际命中往往只有几个。
+# 改成先一次扫描收集文本里出现的 <前缀>.<标识符>, 不在集合里的名字直接跳过。严格等价的三个前提(测试守护):
+# ① 映射表的名字全是纯标识符 —— 原正则是 \b前缀\.名字\b, 能命中就必定以完整标识符出现在集合里;
+# ② 替换体里没有反斜杠 —— 模板即字面量, subn 的计数等于原先 findall 的匹配数, 插入的正是替换体本身;
+# ③ 替换体可能带出新的前缀名(35 条, 如 head_yaw → (-query.mod.ysm_head_yaw)), 命中后把替换体里的前缀名并进
+#    集合; 原正则两端的 \b 保证替换体不会与两侧原文拼出新名字, 所以只看替换体就够, 逐条替换的原语义不变。
+_JAVA_PREFIXED_NAME = re.compile(r"\b(?:query|q|ysm)\.([A-Za-z_][A-Za-z0-9_]*)")
+_CTRL_PREFIXED_NAME = re.compile(r"\bctrl\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _MapJavaNames(text, report):
+    """PortMolangText ③: _JAVA_NAME_MAP(ysm./query./q.)与 _CTRL_NAME_MAP(ctrl.)逐条替换, 计数进 report。
+    先一次扫描收集文本里真正出现的名字, 不在集合里的条目跳过; 命中的条目 subn 一遍完成计数与替换, 再把替换体
+    带出的前缀名并进集合(等价前提见上注; test_port_java_pack.TestNameMappingPrefilter 与逐条扫描逐字对比)。"""
+    present = set(_JAVA_PREFIXED_NAME.findall(text))
+    for name, replacement in _JAVA_NAME_MAP:
+        if name not in present:
+            continue
+        pattern = re.compile(r"\b(?:query|q|ysm)\.{}\b".format(re.escape(name)))
+        text, count = pattern.subn(replacement, text)
+        if count:
+            report["map:{} -> {}".format(name, replacement)] += count
+            present.update(_JAVA_PREFIXED_NAME.findall(replacement))
+    present = set(_CTRL_PREFIXED_NAME.findall(text))
+    for name, replacement in _CTRL_NAME_MAP:
+        if name not in present:
+            continue
+        pattern = re.compile(r"\bctrl\.{}\b".format(re.escape(name)))
+        text, count = pattern.subn(replacement, text)
+        if count:
+            report["map:ctrl.{} -> {}".format(name, replacement)] += count
+            present.update(_CTRL_PREFIXED_NAME.findall(replacement))
+    return text
+
+
 def PortMolangText(text, defaults=None, report=None):
     """动画/控制器文本里的 Java 专有 molang → 基岩可解析形态(批量替换 + 引擎门)。
 
@@ -1551,19 +1791,17 @@ def PortMolangText(text, defaults=None, report=None):
     # ②.5 函数调用剥离(先于 ③: 函数名会被名字替换弄坏; 后于 ②: 见 ② 注)
     text = _ReplaceFunctionCalls(text, report)
 
+    # ②.6 ysm.texture_name 与字面量的比较 → 皮肤序号比较(见 runtime_bindings.RewriteTextureNameCompare 注)
+    text, textureCount = runtime_bindings.RewriteTextureNameCompare(text, report)
+    if textureCount:
+        report["map:ysm.texture_name 比较式 -> query.mod.ysm_skin_index 序号比较"] += textureCount
+    # ②.6 ctrl.carryon_type 的字符串比较 → 主包数值量的比较(裸引用由 ③ 落成数值, 见 runtime_bindings 注)
+    text, carryonCount = runtime_bindings.RewriteCarryonType(text)
+    if carryonCount:
+        report["map:ctrl.carryon_type 比较式 -> query.mod.ysm_carryon 数值比较"] += carryonCount
+
     # ③ 名字映射(ysm./query./q. 三前缀一体处理; ctrl. 单独)
-    for name, replacement in _JAVA_NAME_MAP:
-        pattern = re.compile(r"\b(?:query|q|ysm)\.{}\b".format(re.escape(name)))
-        count = len(pattern.findall(text))
-        if count:
-            report["map:{} -> {}".format(name, replacement)] += count
-            text = pattern.sub(replacement, text)
-    for name, replacement in _CTRL_NAME_MAP:
-        pattern = re.compile(r"\bctrl\.{}\b".format(re.escape(name)))
-        count = len(pattern.findall(text))
-        if count:
-            report["map:ctrl.{} -> {}".format(name, replacement)] += count
-            text = pattern.sub(replacement, text)
+    text = _MapJavaNames(text, report)
 
     # ③.5 槽位参数形态改写(Java 短槽名 → 基岩全称; 同名 query 参数不兼容)
     text = _RewriteSlotParams(text, report)
@@ -1575,6 +1813,11 @@ def PortMolangText(text, defaults=None, report=None):
         report["map:true/false 关键字 -> 1.0/0.0"] += boolCount
     if mulCount:
         report["map:隐式乘法 )( / N( -> 显式 *"] += mulCount
+    # ③.7 Java 执行域作值 `{表达式}` → `(表达式)`(见 RewriteValueScopes 注); 排在 ⑥ 之前:
+    #     `cond ? {表达式}` 改成圆括号后才轮得到无 else 三元补 `: 0`
+    text, scopeCount = RewriteValueScopes(text)
+    if scopeCount:
+        report["map:Java 执行域作值 {表达式} -> (表达式)"] += scopeCount
 
     # ④ 残余 ysm./ctrl./fn./tlm./args. 一律置零(unknown token = 整份文件作废, 宁可缺细节)
     def _NeutralizeResidual(match):
@@ -1721,9 +1964,10 @@ def _ShouldOverridePrevious(shortKey, additiveKeys=None, preKeys=None):
     - **pre 通道**: 裸 pre_parallelN, 以及 player_pre_parallel_*/pre_main/vehicle 控制器
       状态引用的动画(preKeys: jump_up/jump_fall 之类) —— 与主链同处淡化链路, 同上。
     Java 的"main 逐通道覆盖 pre"改由 ApplyChannelOwnership 的伴生动画按状态让位, 不依赖该标志在
-    animate 条目之间的确切语义 —— 那一点至今**没有可靠实机结论**: 早先"占住骨骼、挡住
-    主链"的判断建立在一次整份动画文件被引擎拒载(空 bones 节点)的观察之上, 已作废,
-    见 SanitizeAnimationBody 注。
+    animate 条目之间的确切语义。该语义 2026-09-18 已实机定案: 权重大于 0 时把本条目驱动的骨骼**整根**
+    重置(三个通道一起)再应用, 恒为单位值的常量通道加载期被丢弃、不算驱动(见 _GroupOwnershipPairs /
+    EpsilonizeOverrideIdentities 注)。早先"占住骨骼、挡住主链"的判断建立在一次整份动画文件被引擎拒载
+    (空 bones 节点)的观察之上, 已作废, 见 SanitizeAnimationBody 注。
     """
     if _ADDITIVE_PARALLEL_PATTERN.match(shortKey):
         return False
@@ -2276,13 +2520,57 @@ def ApplyJavaImpliedLength(body):
     return "infinite"
 
 
-def ClampTimelineToLength(body):
-    """超出 animation_length 的 timeline 条目按 Java 语义处理; 返回处理数。
+def _TimelineLines(value):
+    return list(value) if isinstance(value, list) else [value]
 
-    Java AnimationPlayer: LOOP 回绕、PLAY_ONCE 结束时都会 executeRemaining —— 没到点的
-    timeline 条目在动画结尾**补跑**(builtin wine_fox parallel4: 0.01s 循环里 0.0101 的条目
-    每圈都跑); HOLD_ON_LAST_FRAME 锁在末帧, 超长条目永不执行。基岩超出长度的条目大概率
-    不触发: 循环/单次的挪到结尾时间戳(合并同刻条目), hold 的删除。
+
+def _WrapTimelineToCycleStart(timeline, length):
+    """循环动画: 时间戳 >= 长度的条目按时间序挪到 0.0 条目最前面; 返回挪动的条目数"""
+    wrapped = []
+    for stamp in list(timeline.keys()):
+        try:
+            seconds = float(stamp)
+        except (TypeError, ValueError):
+            continue
+        if seconds >= length - _TIMELINE_EPSILON and seconds > _TIMELINE_EPSILON:
+            wrapped.append((seconds, _TimelineLines(timeline.pop(stamp))))
+    if not wrapped:
+        return 0
+    lines = []
+    for _seconds, entry in sorted(wrapped, key=lambda item: item[0]):
+        lines.extend(entry)
+    start = None
+    for stamp in timeline:
+        try:
+            if abs(float(stamp)) <= _TIMELINE_EPSILON:
+                start = stamp
+                break
+        except (TypeError, ValueError):
+            continue
+    if start is None:
+        # 0.0 条目放最前(基岩按时间戳触发, 字典序无所谓; 放前面便于人读)
+        rest = list(timeline.items())
+        timeline.clear()
+        timeline["0.0"] = lines
+        for stamp, value in rest:
+            timeline[stamp] = value
+    else:
+        timeline[start] = lines + _TimelineLines(timeline[start])
+    return len(wrapped)
+
+
+def ClampTimelineToLength(body):
+    """超出(循环动画含正好在)animation_length 的 timeline 条目按 Java 语义处理; 返回处理数。
+
+    Java AnimationPlayer: LOOP 回绕、PLAY_ONCE 结束时都会 executeRemaining —— 本圈还没执行的 timeline
+    条目(含时间戳超出长度的)在回绕/结束那一刻**补跑**, LOOP 紧接着跑下一圈的 0.0 条目(builtin wine_fox
+    的 0.01s 物理循环: 0.0 求增量/积分一步, 0.0101 锁存本帧的值 —— 每帧两段都跑); HOLD_ON_LAST_FRAME 锁在末帧,
+    超长条目永不执行。
+    基岩的**循环**动画不触发时间戳 >= 长度的条目(2026-09-18 实机: 15 号克洛诺亚 pre_parallel0 长 0.01, 早先挪到
+    0.01 的锁存条目从不执行, v.MHair1_x_1 恒 0 —— 头发"增量"退化成绝对角 0.8×头部俯仰, 逐节跟随链卷成一团;
+    01/05/06 等 `P0=P1` 欧拉积分锁存不跑, 头发不动)。所以循环的挪到 **0.0 条目最前面**(= 回绕补跑后紧接下一圈
+    0.0, 与 Java 同序; 近似: 第一圈开头多跑一次, 锁存/归零类语句无影响), 单次的挪到结尾时间戳(合并同刻条目),
+    hold 的删除。幂等: 循环动画处理后不再有 >= 长度的条目。
     """
     if not isinstance(body, dict):
         return 0
@@ -2291,6 +2579,8 @@ def ClampTimelineToLength(body):
     if not isinstance(length, (int, float)) or isinstance(length, bool) \
             or length >= JAVA_INFINITE_LENGTH or not isinstance(timeline, dict):
         return 0
+    if body.get("loop") is True and length > _TIMELINE_EPSILON:
+        return _WrapTimelineToCycleStart(timeline, length)
     hold = body.get("loop") == _LOOP_HOLD_WORD
     target = None
     for stamp in timeline:
@@ -2707,22 +2997,24 @@ def WriteSoundResources(packName, javaDir, soundDirRel, sink):
         for stale in os.listdir(outDir):
             if stale.endswith(".ogg") and stale not in wanted:
                 os.remove(os.path.join(outDir, stale))     # 上次移植遗留
-    existing = OrderedDict()
-    if os.path.isfile(_SOUND_DEFINITIONS_FILE):
-        try:
-            loaded = LoadJson(_SOUND_DEFINITIONS_FILE)
-        except ValueError:
-            loaded = {}
-        if isinstance(loaded.get("sound_definitions"), dict):
-            existing = loaded["sound_definitions"]
-        elif isinstance(loaded, dict):          # 旧式根级定义
-            existing = OrderedDict((k, v) for k, v in loaded.items() if k != "format_version")
-    prefix = "ysm.{}.".format(packName)
-    merged = OrderedDict((k, v) for k, v in existing.items() if not str(k).startswith(prefix))
-    merged.update(definitions)
-    if merged or os.path.isfile(_SOUND_DEFINITIONS_FILE):
-        DumpJson(_SOUND_DEFINITIONS_FILE, OrderedDict([
-            ("format_version", "1.14.0"), ("sound_definitions", merged)]))
+    # sound_definitions.json 是全部包共用的一份, 转换器按包并行时要独占它的读改写(见 SharedFileLock 注)
+    with SharedFileLock(_SOUND_DEFINITIONS_FILE):
+        existing = OrderedDict()
+        if os.path.isfile(_SOUND_DEFINITIONS_FILE):
+            try:
+                loaded = LoadJson(_SOUND_DEFINITIONS_FILE)
+            except ValueError:
+                loaded = {}
+            if isinstance(loaded.get("sound_definitions"), dict):
+                existing = loaded["sound_definitions"]
+            elif isinstance(loaded, dict):          # 旧式根级定义
+                existing = OrderedDict((k, v) for k, v in loaded.items() if k != "format_version")
+        prefix = "ysm.{}.".format(packName)
+        merged = OrderedDict((k, v) for k, v in existing.items() if not str(k).startswith(prefix))
+        merged.update(definitions)
+        if merged or os.path.isfile(_SOUND_DEFINITIONS_FILE):
+            DumpJson(_SOUND_DEFINITIONS_FILE, OrderedDict([
+                ("format_version", "1.14.0"), ("sound_definitions", merged)]))
     return copied, missing
 
 
@@ -3132,7 +3424,7 @@ def RewriteAnimations(srcPath, dstPath, namespace, molangDefaults=None, molangRe
             if ApplyTickTimelineLength(body):
                 _Note(u"tick:每 tick 脚本动画(loop+显式 0 长度+timeline) -> 0.05s 循环")
             _Note(u"norm:timeline 超出 animation_length 的条目按 Java 语义处理"
-                  u"(循环/单次挪到结尾补跑, hold 删除)", ClampTimelineToLength(body))
+                  u"(循环挪到下一圈 0.0 最前补跑, 单次挪到结尾, hold 删除)", ClampTimelineToLength(body))
             if particles is not None:
                 ConvertTimelineParticles(body, particles, molangReport, shortKey)
             if sounds is not None:
@@ -3183,7 +3475,8 @@ def RewriteAnimations(srcPath, dstPath, namespace, molangDefaults=None, molangRe
         finalText = json.dumps(reparsed, ensure_ascii=False, indent=2)
     if foundVars is not None:
         foundVars.update(_MOLANG_VAR_SCAN.findall(finalText))
-    WriteBytes(dstPath, finalText.encode("utf-8") + b"\n")
+    # 落盘格式另选: 压一行时从解析结果重新序列化(上面各步骤对 reparsed 的原地修改都已计入)
+    WriteBytes(dstPath, (SerializeForDisk(reparsed) if JSON_COMPACT else finalText).encode("utf-8") + b"\n")
     return len(keys), dropped, (vectorFixes, stmtFixes, loopFixes, physicsFixes,
                                 sanitizeFixes, lerpFixes), keys
 
@@ -3773,6 +4066,14 @@ _JAVA_CHANNEL_CONTROLLER_PATTERNS = tuple(re.compile(pattern) for pattern in (
     r"^player\.armor_(?:head|chest|legs|feet|mainhand|offhand)$",
     r"^fp\.arm\.(?:misc|parallel_.+|armor_(?:head|chest|legs|feet|mainhand|offhand))$",
 ))
+# 替换实体的通道名(files.projectiles / vehicles 条目的 controller 文件): ProjectileControllerCollection /
+# VehicleControllerCollection 的 single + parallel(非 multi, 只收 0-7)发现规则。vehicle.origin 是代码控制器
+# (VehicleOriginController, 不读作者数据), 不在此列
+_REPLACED_CHANNEL_CONTROLLER_PATTERNS = {
+    "projectiles": (re.compile(r"^projectile\.(?:pre_main|main|post_main|parallel_[0-7])$"),),
+    "vehicles": (re.compile(
+        r"^vehicle\.(?:pre_parallel_[0-7]|pre_main|main|move|ride|post_main|parallel_[0-7])$"),),
+}
 # Java 跨态过渡是四元数 nlerp(BlendBoneAnimationQueue → MathUtil.lerpRotationValues), 天然走
 # 最短路径且不看 blend_via_shortest_path 字段; 基岩缺省逐分量插值, 该字段为 true 才是最短路径
 _JAVA_SHORTEST_PATH_BLEND = True
@@ -3782,12 +4083,15 @@ _NUMBER_LITERAL = re.compile(r"^-?\d+(?:\.\d+)?$")
 _JAVA_DROPPED_STATE_KEYS = ("sound_effects", "particle_effects")
 
 
-def IsJavaChannelControllerName(rawName):
-    """控制器名是否会被 Java 挂到某条通道上(已是基岩注册名 controller.animation.* 视为放行)"""
+def IsJavaChannelControllerName(rawName, section=None):
+    """控制器名是否会被 Java 挂到某条通道上(已是基岩注册名 controller.animation.* 视为放行)。
+    section: None = 玩家/第一人称手臂; "projectiles" / "vehicles" = 替换实体(各自一套通道名)"""
     name = str(rawName)
     if name.startswith("controller.animation."):
         return True
-    return any(pattern.match(name) for pattern in _JAVA_CHANNEL_CONTROLLER_PATTERNS)
+    patterns = _REPLACED_CHANNEL_CONTROLLER_PATTERNS.get(section, ()) if section \
+        else _JAVA_CHANNEL_CONTROLLER_PATTERNS
+    return any(pattern.match(name) for pattern in patterns)
 
 
 def _NumericBlend(value):
@@ -3950,7 +4254,7 @@ def ApplyShortestPathBlend(body):
 
 
 def RewriteControllers(srcPath, dstPath, namespace, molangDefaults=None, molangReport=None,
-                       nameMapper=None, knownAnimKeys=None, foundVars=None, physics=None):
+                       nameMapper=None, knownAnimKeys=None, foundVars=None, physics=None, section=None):
     """动画控制器文件 → controller.animation.<namespace>.<名称>, 动画引用同步转义。
 
     返回 (控制器数, 接管的直播动画键列表, 动画引用改名数, 剪掉的死引用列表,
@@ -3960,6 +4264,8 @@ def RewriteControllers(srcPath, dstPath, namespace, molangDefaults=None, molangR
     _CHANNEL_TAKEOVER_PATTERN / _PARALLEL_SHORT_PATTERN 注释)。非通道名的控制器与
     初始状态不存在的控制器 Java 不会动作, 移植期跳过(molangReport 留痕)。
     knownAnimKeys: 本包动画文件产出的短键全集(死引用剪枝判据; None = 不剪)。
+    section: 替换实体的控制器文件传 "projectiles" / "vehicles"(通道名换成该实体类别的一套,
+    见 IsJavaChannelControllerName); 通道接管由主包解析器按控制器名与状态引用推导。
     """
     data = LoadJson(srcPath)
     controllers = data.get("animation_controllers")
@@ -3977,7 +4283,7 @@ def RewriteControllers(srcPath, dstPath, namespace, molangDefaults=None, molangR
     prunedTransitions = []
     for rawName in controllers:
         body = controllers[rawName]
-        if not IsJavaChannelControllerName(rawName):
+        if not IsJavaChannelControllerName(rawName, section):
             _Note(u"skip:控制器 {}(非 Java 通道名, Java 不挂载, 移植同样跳过)".format(rawName))
             continue
         matched = _CHANNEL_TAKEOVER_PATTERN.match(rawName)
@@ -4031,7 +4337,7 @@ def RewriteControllers(srcPath, dstPath, namespace, molangDefaults=None, molangR
         finalText = json.dumps(reparsed, ensure_ascii=False, indent=2)
     if foundVars is not None:
         foundVars.update(_MOLANG_VAR_SCAN.findall(finalText))
-    WriteBytes(dstPath, finalText.encode("utf-8"))
+    WriteBytes(dstPath, (SerializeForDisk(reparsed) if JSON_COMPACT else finalText).encode("utf-8"))
     return len(renamed), takeovers, refFixes, prunedRefs, prunedTransitions
 
 
@@ -4115,6 +4421,8 @@ def BuildPackVariableDefaults(manifest, foundVars):
             continue     # 占用变量(ApplyChannelOwnership)由控制器 on_entry 维护, 读取处带 ??0
         if _INPUT_STATE_VARIABLE_PATTERN.match(shortName):
             continue     # 输入状态锁存/挥动序号(主包 java_input_state + 挥击状态机), 读取处带 ?? 回落
+        if _RUNTIME_STATE_VARIABLE_PATTERN.match(shortName):
+            continue     # 主包运行层维护的环境/探针/鞘翅变量, 读取处带 ?? 回落
         seen.add(shortName.lower())
         lines.append("variable.{} = 0.0;".format(shortName))
     return lines
@@ -4124,6 +4432,9 @@ VARIABLE_INIT_KEY = "ysm_variable_init"
 VARIABLE_INIT_FILE = "ysm_variable_init.json"
 ONESHOT_FILE = "ysm_oneshot.json"
 STATE_FILE = "ysm_state.json"
+# 替换实体(弹射物/载具)控制器所在的子目录: animation_controllers/<包>/replace_entities/<命名空间段>.animation_controllers.json
+# (与玩家侧作者控制器隔开, 见 PortPack 替换实体一节注)
+REPLACED_CONTROLLER_DIR = "replace_entities"
 STATE_RESET_FILE = "ysm_reset.animation.json"
 STATE_RESET_CONTROLLER_FILE = "ysm_reset.json"
 GUI_BASE_FILE = "ysm_gui_base.animation.json"
@@ -4234,6 +4545,113 @@ def _HasMolangAssignment(value):
     return bool(_ASSIGNMENT_PATTERN.search(json.dumps(value, ensure_ascii=False)))
 
 
+_ASSIGNMENT_TARGET_PATTERN = re.compile(r"((?:v|variable)\.[A-Za-z_][A-Za-z0-9_.]*)\s*=(?!=)")
+_PHYSICS_STATE_TARGET = re.compile(r"^(?:v|variable)\.ysm_(?:so|fo)_", re.IGNORECASE)
+
+
+def _HasOnlyPhysicsAssignments(value):
+    """通道里的赋值是否全是物理积分(PhysicsRewriter)的状态变量 v.ysm_so_*/v.ysm_fo_* —— 这类通道的值就是骨骼姿态,
+    赋值只是积分器自己的状态推进, 同一帧重复求值 dt=0 恒等(见 PhysicsRewriter 注), 可以像普通通道一样
+    搬进伴生动画让位(末影龙娘 fly 的前倾/侧倾物理: 主链与 post_main 同播 fly, 早先这两个通道没拆、
+    两份相加, 疾跑飞行前倾翻倍)"""
+    targets = _ASSIGNMENT_TARGET_PATTERN.findall(json.dumps(value, ensure_ascii=False))
+    return bool(targets) and all(_PHYSICS_STATE_TARGET.match(target) for target in targets)
+
+
+# ---- override 动画里的恒等常量通道(2026-09-18 实机定案) ----
+# 网易基岩引擎把**恒为单位值**的通道(旋转/位移 [0,0,0]、缩放 [1,1,1])当成不存在 —— 带
+# override_previous_animation 的动画写这种通道, 排在它前面的层照样生效。Java 是逐 (骨骼, 通道) 后写覆盖,
+# 写 0 就是把前面的值清掉。实机(末影龙娘持上弦弩): hold_mainhand:charged_crossbow 给 RightHand 写 [0,0,0],
+# 游戏里右手腕仍是主链 idle 的 [42.7, 4.7, -52.3](骨骼矩阵逐骨分解, 同一动画里的 RightArm/RightForeArm/
+# RightHandLocator 与 Java 姿态逐值吻合) → 弩跟着手腕朝下, "没瞄准前方"。对照(同一帧同一底层): 同为
+# override 的舞蹈 huangyanwuzhe(RightHand 常量 0)清不掉、ailisiwu(关键帧 0.202°)与 pose_5(常量
+# [2.06,7.85,0.28])都清得掉。收尾把 override 动画里的恒等常量(含全部关键帧都恒等的通道)换成看不见的
+# 微小值; 非 override 动画不动(逐通道相加/相乘下恒等值本就没有贡献)。幂等(微小值不再是恒等)。
+# 同日第二个实机结论: override 是**按骨骼整体重置**(只写位移/缩放的 override 条目会把旋转一起清掉, 见
+# _GroupOwnershipPairs 注) —— 恒等通道被丢弃的那根骨骼若本动画还写了别的通道, 重置照样发生、结果本就是恒等;
+# 真正需要补值的只是"整根骨骼全是恒等通道"的情形, 这里一律补也无害。补值后该骨骼变成"被本动画驱动", 排在前面的
+# 晚层写它的任意通道都会被清掉 —— 逐通道覆盖按骨骼整体让位/删除(ApplyChannelOwnership 在本步之前规划, 恒等通道
+# 在 JSON 里照样是通道, 冲突已计入)。轮盘键例外(见 EpsilonizeOverrideIdentities 注)。
+_IDENTITY_EPSILON_VALUES = {"rotation": [0.01, 0, 0], "position": [0.01, 0, 0], "scale": [1.001, 1, 1]}
+_IDENTITY_VALUES = {"rotation": 0.0, "position": 0.0, "scale": 1.0}
+
+
+def _IsIdentityNumber(value, identity):
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return float(value) == identity
+    if isinstance(value, (str, unicode)):  # noqa: F821
+        try:
+            return float(value.strip()) == identity
+        except ValueError:
+            return False
+    return False
+
+
+def _IsIdentityVector(value, identity):
+    if isinstance(value, list):
+        return len(value) == 3 and all(_IsIdentityNumber(item, identity) for item in value)
+    return _IsIdentityNumber(value, identity)
+
+
+def _IsIdentityChannel(value, identity):
+    """常量或"每个关键帧(pre/post)都恒等"的通道"""
+    if isinstance(value, dict):
+        frames = [frame for frame in value.values()]
+        if not frames:
+            return False
+        for frame in frames:
+            if isinstance(frame, dict):
+                parts = [frame[key] for key in ("pre", "post") if key in frame]
+                if not parts or not all(_IsIdentityVector(part, identity) for part in parts):
+                    return False
+            elif not _IsIdentityVector(frame, identity):
+                return False
+        return True
+    return _IsIdentityVector(value, identity)
+
+
+def EpsilonizeOverrideIdentitiesInBody(body):
+    """单个动画体: override 动画的恒等通道 → 微小值; 返回改写数(见本节注)"""
+    if not isinstance(body, dict) or body.get("override_previous_animation") is not True:
+        return 0
+    fixes = 0
+    for channels in (body.get("bones") or {}).values():
+        if not isinstance(channels, dict):
+            continue
+        for channel, identity in _IDENTITY_VALUES.items():
+            if channel in channels and _IsIdentityChannel(channels[channel], identity):
+                channels[channel] = list(_IDENTITY_EPSILON_VALUES[channel])
+                fixes += 1
+    return fixes
+
+
+def EpsilonizeOverrideIdentities(packName, manifest=None):
+    """包内全部动画文件(含替换实体)跑 EpsilonizeOverrideIdentitiesInBody; 返回改写的通道数。
+
+    **轮盘键不动**: 轮盘动画经 /playanimation 叠在全部条目之后(Java 是 cap 通道, 早于 parallel/armor), 引擎的
+    override 又是整骨重置 —— 把它的恒等通道变成有效值, 等于连并行层(头发/尾巴物理、眨眼)一起清掉, 比 Java 多压;
+    保留恒等通道被丢弃的旧行为。逐通道覆盖同样不拆轮盘键(ChannelOwnershipPlan 注)。"""
+    if manifest is None:
+        manifestPath = PackManifestPath(packName)
+        manifest = LoadJson(manifestPath) if os.path.isfile(manifestPath) else {}
+    roulette = _RouletteAnimationKeys(manifest)
+    fixes = 0
+    for path, data in _LoadPackAnimationFiles(packName):
+        fileFixes = 0
+        for animId, body in (data.get("animations") or {}).items():
+            shortKey = str(animId).split(".", 2)[-1] if str(animId).startswith("animation.") else str(animId)
+            matched = _OWNERSHIP_COMPANION_PATTERN.match(shortKey)
+            if (matched.group(1) if matched else shortKey) in roulette:
+                continue
+            fileFixes += EpsilonizeOverrideIdentitiesInBody(body)
+        if fileFixes:
+            DumpJson(path, data)
+            fixes += fileFixes
+    return fixes
+
+
 def CollectPreChannelAnimationKeys(packName):
     """pre 通道(Java 里排在 main 之前)所播动画 → {"always_on": set, "gated": set}。
 
@@ -4278,59 +4696,13 @@ def CollectPreChannelAnimationKeys(packName):
 _PRE_CHANNEL_RANK = (("player_pre_parallel", 0), ("player_vehicle", 1), ("player_pre_main", 2))
 
 
-def PreLayerOrder(packName):
-    """常驻 pre 层动画按 **Java 通道顺序**排列(后者覆盖前者)。
-
-    Java 注册序: pre_parallel_0..7 → vehicle → pre_main_*(见 PlayerControllerCollection);
-    同一状态的 animations 列表内也是后者覆盖前者。裸 pre_parallelN 动画按 N 排。
-    """
-    ranked = []
-    ctlDir = os.path.join(RP, "animation_controllers", packName)
-    if os.path.isdir(ctlDir):
-        for name in sorted(os.listdir(ctlDir)):
-            if not name.endswith(".json") or name in (
-                    STATE_FILE, ONESHOT_FILE, VARIABLE_INIT_FILE, STATE_RESET_CONTROLLER_FILE):
-                continue
-            try:
-                data = LoadJson(os.path.join(ctlDir, name))
-            except ValueError:
-                continue
-            for ctlName, body in (data.get("animation_controllers") or {}).items():
-                last = str(ctlName).split(".")[-1]
-                rank = next((value for prefix, value in _PRE_CHANNEL_RANK
-                             if last.startswith(prefix)), None)
-                if rank is None or not isinstance(body, dict):
-                    continue
-                suffix = re.findall(r"(\d+)$", last)
-                channelIndex = int(suffix[0]) if suffix else 0
-                initName = body.get("initial_state") or "default"
-                state = (body.get("states") or {}).get(initName)
-                if not isinstance(state, dict):
-                    continue
-                for position, item in enumerate(state.get("animations") or []):
-                    # **只收裸字符串**: dict 形态是带权重/条件的条目(如凋灵娘的三套眼型
-                    # {"yanshena": "v.roaming_eyes_transition==0"}), 它们本就互斥,
-                    # 参与去重会把另外两套的通道删掉 —— 换装/眼型会失效(踩过)
-                    if isinstance(item, (str, unicode)):  # noqa: F821
-                        ranked.append(((rank, channelIndex, position), str(item)))
-    for key in CollectPackAnimationBodies(packName):
-        if _PARALLEL_SHORT_PATTERN.match(key) and key.startswith("pre_"):
-            suffix = re.findall(r"(\d+)$", key)
-            ranked.append(((0, int(suffix[0]) if suffix else 0, -1), key))
-    seen, order = set(), []
-    for _rank, key in sorted(ranked):
-        if key not in seen:
-            seen.add(key)
-            order.append(key)
-    return order
-
-
 def PreLayerEntries(packName):
     """pre 层全部条目(常驻 + 门控) → [(序, 动画键, 控制器短名, 状态名, 是否 dict 条目)], 按序升序。
 
-    序 = (通道等级, 通道序号, 状态内位置), 与 Java 注册序一致(后者覆盖前者): pre_parallel_0..7
-    → vehicle → pre_main; 裸 pre_parallelN 记作 (0, N, -1)、控制器 None。dict 条目(带权重/
-    条件, 如凋灵娘的三套眼型)也收, 同一状态内的两个 dict 条目视为互斥(见 _PreEntriesCoplay)。
+    序 = (通道等级, 通道序号, 状态内位置), 与 Java 注册序一致: pre_parallel_0..7 → vehicle → pre_main;
+    裸 pre_parallelN 记作 (0, N, -1)、控制器 None。dict 条目(带权重/条件, 如凋灵娘的三套眼型)也收。
+    Java 跨通道逐 (骨骼, 通道) 后写覆盖、同一状态内加权相加(BedrockAnimationController 的 fma),
+    谁压住谁取决于各控制器当前状态 —— pre 层内部的覆盖不做静态删除, 由 ApplyChannelOwnership 按状态让位。
     """
     entries = []
     ctlDir = os.path.join(RP, "animation_controllers", packName)
@@ -4362,8 +4734,7 @@ def PreLayerEntries(packName):
                                                 last, str(stateName), isinstance(item, dict)))
     # 裸 pre_parallelN 只在**没被任何 pre 控制器引用**时才算直播条目: 被引用即通道接管
     # (移植工具把它摘出 animate 表), 它实际的播放序是控制器状态里那一条; 再记一条 (0, N, -1)
-    # 幻影会排在控制器条目之后, 让真正在播的那条与被它压住的门控动画(sahmet 的 jump_up/
-    # jump_fall 各 24 对)双双被剥 —— 踩过。
+    # 幻影会多出一个并不存在的写入者(sahmet 的 jump_up/jump_fall 各 24 对曾因此被误判)。
     referenced = set(entry[1] for entry in entries)
     for key in CollectPackAnimationBodies(packName):
         if _PARALLEL_SHORT_PATTERN.match(key) and key.startswith("pre_") and key not in referenced:
@@ -4371,74 +4742,6 @@ def PreLayerEntries(packName):
             entries.append(((0, int(suffix[0]) if suffix else 0, -1), key, None, None, False))
     entries.sort(key=lambda entry: entry[0])
     return entries
-
-
-def _PreEntriesCoplay(first, second):
-    """两条 pre 层条目能否同时在播: 不同控制器(含裸动画)可以; 同一控制器只有同一状态内可以,
-    且同一状态内的两个 dict 条目(带条件/权重, 通常互斥 —— 凋灵娘的三套眼型)视为不能"""
-    if first[2] is None or second[2] is None or first[2] != second[2]:
-        return True
-    if first[3] != second[3]:
-        return False
-    return not (first[4] and second[4])
-
-
-def DedupPreLayer(packName):
-    """pre 层内部按 Java 通道顺序去重: 能同时在播的两条动画共写一个 (骨骼, 通道) 时, 只留
-    **序靠后**的那条(Java 后写覆盖, 基岩相加); 返回删除对数。含 molang 赋值的通道不动。幂等。
-
-    覆盖三种叠加: ① 常驻 pre 之间(实测 ref_wither 的常驻 pre 有 65 对重叠); ② 门控 pre(控制器
-    非初始态, 如凋灵娘整套悬浮/地面步态)压住更早通道的常驻 pre(眼光/眉毛定位 37 对) —— 这类
-    动画原先靠 override_previous_animation 掩盖, 撤掉标志后必须在数据层解决; ③ 跨控制器的
-    门控 pre 之间。代价: 靠前那条在靠后那条**不在播**时, 该通道回到绑定姿态(静态剥离的固有
-    局限; 常驻 pre 对门控 pre 的让位只在门控全部空闲时可见)。
-    同一控制器的不同状态不会同时在播, 不互剥; 同一状态内的 dict 条目互斥, 也不互剥(去重会
-    删掉另外几套眼型/换装件 —— 踩过)。
-    """
-    files = _LoadPackAnimationFiles(packName)
-    bodies, owners = {}, {}
-    prefix = "animation.{}.".format(packName)
-    for path, data in files:
-        for animId, body in (data.get("animations") or {}).items():
-            if isinstance(body, dict) and animId.startswith(prefix):
-                key = str(animId[len(prefix):])
-                bodies.setdefault(key, body)
-                owners.setdefault(key, path)
-    entries = [entry for entry in PreLayerEntries(packName) if entry[1] in bodies]
-    pairsByKey = dict((key, AnimationChannelPairs(bodies[key]))
-                      for key in set(entry[1] for entry in entries))
-    removed, dirty = 0, set()
-    for index, entry in enumerate(entries):
-        key = entry[1]
-        laterPairs = set()
-        for other in entries[index + 1:]:
-            if other[1] != key and other[0] > entry[0] and _PreEntriesCoplay(entry, other):
-                laterPairs |= pairsByKey[other[1]]
-        if not laterPairs:
-            continue
-        bones = bodies[key].get("bones") or {}
-        for boneName in list(bones.keys()):
-            channels = bones[boneName]
-            if not isinstance(channels, dict):
-                continue
-            for channel in list(channels.keys()):
-                if channel not in ("rotation", "position", "scale"):
-                    continue
-                if (boneName, channel) not in laterPairs:
-                    continue
-                if _HasMolangAssignment(channels[channel]):
-                    continue
-                del channels[channel]
-                removed += 1
-                dirty.add(owners.get(key))
-            if not channels:
-                del bones[boneName]
-        # 删空了就连 bones 键一起去掉: 空 bones 节点会让引擎拒载整份文件(见 SanitizeAnimationBody)
-        SanitizeAnimationBody(bodies[key])
-    for path, data in files:
-        if path in dirty:
-            DumpJson(path, data)
-    return removed
 
 
 def DropPreControllerMainChainRefs(packName):
@@ -4580,9 +4883,9 @@ def CollectParallelVariantWriters(packName):
     return writers
 
 
-def ReconcileConditionalVariants(packName):
+def ReconcileConditionalVariants(packName, manifest=None):
     """pre 层的**静态显隐**与 parallel 层的**条件变体**共写同一 (骨骼, position/scale) 时,
-    折叠成单一所有者; 返回 (折叠对数, 放弃的非常量对数)。
+    折叠成单一所有者; 返回 (折叠对数, 放弃的非常量对数)。manifest: 调用方持有的 ysm.json(缺省读盘)。
 
     背景(2026-09-03 实机): 凋灵娘的火焰是几何骨骼 —— `pre_parallel0` 把四个火焰容器
     `scale` 设 0(装饰件隐藏基线), 当前样式的火焰动画(`huoyandonghuaa`, parallel 通道,
@@ -4596,8 +4899,20 @@ def ReconcileConditionalVariants(packName):
     rotation 不动(Java parallel 本就相加, 基岩同语义); 变体值是关键帧的(凋灵娘攻击族对
     pre 的摆位偏移)放弃并计数 —— 那属 Java 覆盖 vs 基岩相加的残留差异, 表现为攻击期姿态
     带一份 pre 偏移, 无法用常量折叠表达。
+    只折进**恒在播**的 pre 写入者(未被控制器接管的裸 pre_parallelN、单状态无转移控制器里的裸字符串条目),
+    且该 (骨骼, 通道) 在全包只有这条 pre 与这些变体在写: 折叠等于把变体降到 pre 层 —— 写入者不在播
+    (门控状态未进入 / dict 条件为假)时变体跟着消失, 夹在中间的晚层(主链、作者 pre_main/post_main ...)
+    活跃时会连变体一起压住, 而 Java 里变体(parallel, 最晚)照样胜出。这些对原样留给 ApplyChannelOwnership:
+    早层在晚层活跃时逐状态让出(精确, 只是多一条伴生动画)。轮盘动画与 GUI 展示动画不算"别的写入者": 前者经
+    /playanimation 带 override 叠在全部条目之上(整骨清空, 折不折都一样, 逐通道覆盖同样不管它), 后者只在卡片上播。
+    折叠对卡片另有一层意义: 预览实体只叠裸 pre_parallel/parallel 族, 作者控制器里的变体上不了卡片, 折进裸
+    pre_parallel 的条件才让卡片按存档变量显示当前的嘴型/表情/火焰。
     幂等: 折叠后 pre 的值不再是常量向量, 变体也不再写该通道。
     """
+    if manifest is None:
+        manifestPath = PackManifestPath(packName)
+        manifest = LoadJson(manifestPath) if os.path.isfile(manifestPath) else {}
+    notInWorldChain = _RouletteAnimationKeys(manifest) | set(filter(None, [_GuiOnlyPreviewKey(packName, manifest)]))
     files = _LoadPackAnimationFiles(packName)
     bodies, owners = {}, {}
     prefix = "animation.{}.".format(packName)
@@ -4609,11 +4924,21 @@ def ReconcileConditionalVariants(packName):
                 owners.setdefault(key, path)
     variantWriters = CollectParallelVariantWriters(packName)
     seen = Counter(key for _rank, key, _condition in variantWriters)
+    preEntries = [entry for entry in PreLayerEntries(packName) if entry[1] in bodies]
+    pairWriters = {}
+    for key, body in bodies.items():
+        if key in notInWorldChain:
+            continue
+        for pair in AnimationChannelPairs(body):
+            pairWriters.setdefault(pair, set()).add(key)
+    singleStates = _SingleStateControllers(packName)
+    alwaysOn = set(entry[1] for entry in preEntries
+                   if entry[2] is None or (entry[2] in singleStates and not entry[4]))
     folded, skipped, dirty = 0, 0, set()
-    for preEntry in PreLayerEntries(packName):
+    for preEntry in preEntries:
         preKey = preEntry[1]
-        preBody = bodies.get(preKey)
-        if preBody is None:
+        preBody = bodies[preKey]
+        if preKey not in alwaysOn:
             continue
         bones = preBody.get("bones") or {}
         for boneName in list(bones.keys()):
@@ -4639,6 +4964,9 @@ def ReconcileConditionalVariants(packName):
                     continue
                 if any(value is None for _key, _condition, value in writers):
                     skipped += len(writers)
+                    continue
+                if pairWriters.get((boneName, channel), set()) - set(
+                        [preKey] + [key for key, _condition, _value in writers]):
                     continue
                 components = [_CompactNumber(value) for value in baseline]
                 for _key, condition, value in writers:      # 后者胜出 → 条件包在外层
@@ -4671,6 +4999,43 @@ def ReconcileConditionalVariants(packName):
     return folded, skipped
 
 
+def _SingleStateControllers(packName):
+    """作者控制器里只有一个状态且没有转移的(恒停在该状态, 条目恒在播) → 短名集合;
+    与 _CollectOwnershipOccurrences 的 alwaysActive 同口径"""
+    names = set()
+    for _path, data in _OwnershipControllerFiles(packName):
+        for ctlId, body in (data.get("animation_controllers") or {}).items():
+            if not isinstance(body, dict):
+                continue
+            states = [state for state in (body.get("states") or {}).values() if isinstance(state, dict)]
+            if len(states) == 1 and not states[0].get("transitions"):
+                names.add(str(ctlId).split(".")[-1])
+    return names
+
+
+def _GuiOnlyPreviewKey(packName, manifest):
+    """GUI 展示动画(properties.preview_animation)键 —— 仅当它只在卡片上播: 不是并行族/主链成员/轮盘键,
+    也没被作者控制器状态引用(那些情形它在世界里另有通道); 否则 None"""
+    previewKey = _PreviewAnimationKey(manifest)
+    if previewKey is None or _PARALLEL_SHORT_PATTERN.match(previewKey):
+        return None
+    # 主链成员口径与 _CollectOwnershipOccurrences 一致(_MainChainKeys 是候选全集, 过一遍状态判定才是成员)
+    members = set(key for key, _condition in _BuildJavaStateAnimates(list(_MainChainKeys(packName))))
+    if previewKey in members or previewKey in _RouletteAnimationKeys(manifest):
+        return None
+    for _path, data in _OwnershipControllerFiles(packName):
+        for body in (data.get("animation_controllers") or {}).values():
+            if not isinstance(body, dict):
+                continue
+            for state in (body.get("states") or {}).values():
+                if not isinstance(state, dict):
+                    continue
+                for _item, entries in _StateAnimationItems(state):
+                    if any(ref == previewKey for ref, _condition in entries):
+                        return None
+    return previewKey
+
+
 def LoopPreviewAnimation(packName, manifest=None):
     """GUI 展示动画(properties.preview_animation)按 Java 口径强制循环; 返回改写的 [(动画键, 原 loop)]。
 
@@ -4683,27 +5048,13 @@ def LoopPreviewAnimation(packName, manifest=None):
     if manifest is None:
         manifestPath = PackManifestPath(packName)
         manifest = LoadJson(manifestPath) if os.path.isfile(manifestPath) else {}
-    previewKey = _PreviewAnimationKey(manifest)
-    if previewKey is None or _PARALLEL_SHORT_PATTERN.match(previewKey):
+    previewKey = _GuiOnlyPreviewKey(packName, manifest)
+    if previewKey is None:
         return []
     animFiles = _LoadPackAnimationFiles(packName)
     bodyIndex = _OwnershipBodyIndex(packName, animFiles)
     if previewKey not in bodyIndex:
         return []
-    # 主链成员口径与 _CollectOwnershipOccurrences 一致(_MainChainKeys 是候选全集, 过一遍状态判定才是成员)
-    members = set(key for key, _condition in _BuildJavaStateAnimates(list(_MainChainKeys(packName))))
-    if previewKey in members or previewKey in _RouletteAnimationKeys(manifest):
-        return []
-    for _path, data in _OwnershipControllerFiles(packName):
-        for body in (data.get("animation_controllers") or {}).values():
-            if not isinstance(body, dict):
-                continue
-            for state in (body.get("states") or {}).values():
-                if not isinstance(state, dict):
-                    continue
-                for _item, entries in _StateAnimationItems(state):
-                    if any(ref == previewKey for ref, _condition in entries):
-                        return []
     companionPattern = re.compile(r"^{}__own\d+$".format(re.escape(previewKey)))
     changed, dirty = [], set()
     for key, (fileIndex, _animId, body) in bodyIndex.items():
@@ -4732,8 +5083,8 @@ def LoopPreviewAnimation(packName, manifest=None):
 #   放出来 —— Java 覆盖可见, 基岩 0×1 永远不可见("持剑攻击特效没了");
 # - 持剑/持镰类动画是**整套姿态**(sword_walk 的腿部数值与 walk 逐帧相同), Java 覆盖主链与
 #   前置步态, 基岩相加 → 持剑时全身旋转叠成两倍。
-# 静态剥离(DedupPreLayer)只适用于"两者总是同时在播"的情形; 晚层是
-# 控制器里的**条件状态**时, 早层的值在晚层不活跃时必须照常生效。做法:
+# 静态删除只适用于"晚层恒在播"的情形(见下面第 4 条); 晚层是控制器里的**条件状态**时, 早层的值
+# 在晚层不活跃时必须照常生效。做法:
 # 1. 早层动画 E 里会被晚层覆盖的 (骨骼, 通道) 搬进伴生动画 `<E>__own<N>`(同文件、同顶层字段,
 #    只含搬出的通道), 在 E 出现的每个状态里紧跟 E 播放, 权重 = "该通道的晚层写入者都不活跃";
 # 2. 晚层写入者所在控制器的每个状态 on_entry 写占用变量 `variable.ysm_own_<控制器> = <状态序号>`
@@ -4773,11 +5124,15 @@ def LoopPreviewAnimation(packName, manifest=None):
 # 读卡片纸娃娃的 variable.ysm_show(_PlanChannelOwnership ①); 预览实体按 channel_ownership 的同一份权重注册伴生。
 # 不处理(保持原样): 轮盘动画(经 /playanimation 播在最上层)与甲槽条件动画(armor 是最晚的通道);
 # 不带 override 的条件动画键/兜底键/第一人称控制器引用的键(它们还在别处直接播放, 拆走通道会
-# 让那一处缺通道)。与静态剥离的分工: 本步排在 DedupPreLayer / ReconcileConditionalVariants 之后,
-# 只处理它们剩下的冲突。主链(ysm_state)压住 pre 层的通道同样在这里按状态让位 —— 早先的
+# 让那一处缺通道)。本步排在 ReconcileConditionalVariants(恒播 pre 与常量变体的精确折叠)之后,
+# 处理其余全部覆盖。主链(ysm_state)压住 pre 层的通道同样在这里按状态让位 —— 早先的
 # ApplyJavaMainOverride 按"常驻 pre 与 idle 总在同播"静态删掉 pre 层通道, 走路/奔跑/卡片预览(不播 idle)时
 # 被删的隐藏通道就没了: 大酒狐 pre_parallel0/1 把 heart/ysmGlowZZZ 缩成 0, idle 按时间轴放出来,
-# 删掉后卡片上一直顶着爱心和 ZZZ(2026-09-18 用户报告), 已撤。
+# 删掉后卡片上一直顶着爱心和 ZZZ(2026-09-18 用户报告), 已撤。pre 层内部同理 —— 早先的 DedupPreLayer 把
+# "跨控制器即同播"的两条 pre 层动画静态去重(同一状态内也按后者覆盖, 而 Java 同状态是加权相加): K 螺诺亚
+# pre_parallel3 的待机摆尾被 pre_main 脚本控制器的走/跑/跳动画整条删光, 站着不动时尾巴僵直(2026-09-19
+# 用户报告), 已撤。全量重移植对比: 恢复 719 个通道 —— 凋灵娘 647(眼光/眉毛/头发摆动)、萨赫梅特 27(尾巴/头发摆动)、
+# K 螺诺亚 44(尾巴/耳朵/眨眼/车轮/表情)、05 号 1(魔法阵光效), 其余 22 包逐字节不变。
 # 过渡期近似: 占用变量在进入状态的那一帧就切换, 晚层动画的淡入/淡出(blend_transition)期间早层
 # 通道不跟着渐变(Java 是从当前姿态插值过去)。
 # 幂等: 每次先在内存里把已有伴生并回原动画、删掉伴生条目与占用赋值, 再从头规划, 只写内容变化
@@ -4862,7 +5217,8 @@ def _OwnershipControllerFiles(packName):
 
 
 def _SerializeJson(data):
-    return json.dumps(data, ensure_ascii=False, indent=2)
+    """改前 / 改后快照比较用的规范文本, 不落盘。紧凑格式走 C 编码器(比缩进快约 3 倍), 两边同一格式, 比较结果不变"""
+    return json.dumps(data, ensure_ascii=False, separators=_COMPACT_SEPARATORS)
 
 
 def _UndoChannelOwnershipData(packName, animFiles, ctlFiles):
@@ -5240,6 +5596,33 @@ def _IsConstantZeroVector(value):
     return True
 
 
+def _WriterPlacedAfterOverride(later):
+    """晚层写入者在 animate 表里是否排在带 override 的早层**之后**: 只有裸 parallelN 直挂(恒排在作者控制器、
+    主链与全部条件动画之后, 见 packParser._OrderJavaAnimates); 作者控制器、主链状态机与裸 pre_parallelN
+    都排在前面"""
+    if not later.host.startswith(BARE_HOST_PREFIX):
+        return False
+    return not _PRE_PARALLEL_SHORT_PATTERN.match(later.host[len(BARE_HOST_PREFIX):])
+
+
+def _OwnershipSignatureCore(host, hostRank, conflicts):
+    """一个宿主上的让出核心: conflicts = [(晚层出现, 通道值, 通道)] → "0"(恒让出) / (状态项, 逐帧项) / None"""
+    stateTerms, dynamicTerms = set(), set()
+    for later, _value, _channel in conflicts:
+        if later.host == host or not later.rank > hostRank[host]:
+            continue
+        stateTerm, dynamicTerm = later.Activity()
+        if stateTerm is None and dynamicTerm is None:
+            return "0"
+        if stateTerm is not None:
+            stateTerms.add(stateTerm)
+        if dynamicTerm is not None:
+            dynamicTerms.add((dynamicTerm, None if later.alwaysActive else later.host))
+    if stateTerms or dynamicTerms:
+        return (tuple(sorted(stateTerms)), tuple(sorted(dynamicTerms)))
+    return None
+
+
 def _GroupOwnershipPairs(plan, key, body, keyOccurrences, writers, extraWriters=None):
     """一条早层动画的 (骨骼, 通道) 按"让出签名"分组 → (分组, 宿主列表) 或 None。
     晚层恒活跃的通道记进 plan.strips。writers / extraWriters: (骨骼, 通道) → [(出现, 该出现的通道值)]。
@@ -5248,44 +5631,69 @@ def _GroupOwnershipPairs(plan, key, body, keyOccurrences, writers, extraWriters=
     让出反而出错 —— 状态机进入晚层状态有 blend_transition 交叉淡化(晚层权重 0→1, 缩放贡献从 1 渐变到 0),
     伴生当帧让出后这 0.1s 里没人把骨骼压在 0 上: 小小酒狐 pre_parallel2 把飞机骨骼 vv 藏成 0, run 同样写 0,
     起跑瞬间整架飞机闪出来(2026-09-17 用户实机); Java 的过渡从骨骼当前值(早层的 0)插到 0, 始终不可见。
+
+    **带 override 的早层按骨骼整体分组**(2026-09-18 实机定案): 引擎的 override_previous_animation 是
+    **按骨骼整体重置**(旋转/位移/缩放一起清), 不是按通道 —— 地面待机时往 animate 表末尾挂一条只写翅膀位移/缩放的
+    override 动画, 翅膀的旋转立刻变成单位阵, 摘掉即恢复。所以:
+    ① 同一骨骼的通道不能拆到两条会同时播放的 override 条目里(后一条把前一条这根骨骼的其余通道清掉 —— 末影龙娘
+       jump_fall 的翅膀旋转在 own2、位移/缩放在 own10, 下落时翅膀旋转被清成展开态"僵直");
+    ② 排在它前面的晚层(作者控制器、主链)写这根骨骼的**任意**通道都算冲突(整骨重置会清掉它们), 缩放恒 0 也不例外;
+    ③ 排在它后面的裸 parallel 只加在重置之后: 同通道才冲突(旋转相加除外), 恒活跃 → 只删该通道(删不会拆骨骼)。
+    骨骼上有赋值通道(副作用假骨骼)时整根骨骼留在原动画。
     """
     hosts = sorted(set(o.host for o in keyOccurrences))
     hostRank = dict((o.host, o.rank) for o in keyOccurrences)
     groups = OrderedDict()
     strips = []
+    isOverride = bool(body.get("override_previous_animation"))
+    # 含赋值的通道一般不动(假骨骼承载副作用); 只有物理积分通道例外(_HasOnlyPhysicsAssignments), 且只拆
+    # 不带 override 的早层 —— 伴生带 1e-4 下限, 让位期间积分照常推进
+    splitsPhysics = not isOverride
+
+    def LaterWriters(boneName, channel):
+        found = list(writers.get((boneName, channel), ()))
+        if extraWriters:
+            found += list(extraWriters.get((boneName, channel), ()))
+        return found
+
     for boneName, channels in (body.get("bones") or {}).items():
         if not isinstance(channels, dict):
             continue
-        for channel in channels:
-            if channel not in _OWNERSHIP_CHANNELS or _HasMolangAssignment(channels[channel]):
+        if isOverride:
+            owned = [channel for channel in _OWNERSHIP_CHANNELS if channel in channels]
+            if not owned or any(_HasMolangAssignment(channels[channel]) for channel in owned):
                 continue
-            laterWriters = list(writers.get((boneName, channel), ()))
-            if extraWriters:
-                laterWriters += list(extraWriters.get((boneName, channel), ()))
-            signature = []
-            for host in hosts:
-                stateTerms, dynamicTerms, full = set(), set(), False
-                for later, laterValue in laterWriters:
-                    if later.host == host or not later.rank > hostRank[host]:
-                        continue
-                    if channel == "rotation" and later.additiveRotation:
-                        continue
-                    if channel == "scale" and _IsConstantZeroVector(laterValue):
-                        continue
-                    stateTerm, dynamicTerm = later.Activity()
-                    if stateTerm is None and dynamicTerm is None:
-                        full = True
-                        break
-                    if stateTerm is not None:
-                        stateTerms.add(stateTerm)
-                    if dynamicTerm is not None:
-                        dynamicTerms.add((dynamicTerm, None if later.alwaysActive else later.host))
-                if full:
-                    signature.append("0")
-                elif stateTerms or dynamicTerms:
-                    signature.append((tuple(sorted(stateTerms)), tuple(sorted(dynamicTerms))))
-                else:
-                    signature.append(None)
+            before, stripped = [], []
+            for channel in _OWNERSHIP_CHANNELS:
+                for later, laterValue in LaterWriters(boneName, channel):
+                    if not _WriterPlacedAfterOverride(later):
+                        before.append((later, laterValue, channel))
+                    elif (channel in owned and channel not in stripped
+                          and all(later.rank > rank for rank in hostRank.values())
+                          and not (channel == "rotation" and later.additiveRotation)
+                          and not (channel == "scale" and _IsConstantZeroVector(laterValue))
+                          and later.Activity() == (None, None)):
+                        stripped.append(channel)      # 排在后面的恒活跃裸 parallel 覆盖该通道: 只删它
+            strips.extend((boneName, channel) for channel in stripped)
+            remaining = [channel for channel in owned if channel not in stripped]
+            signature = [_OwnershipSignatureCore(host, hostRank, before) for host in hosts]
+            if not remaining or all(core is None for core in signature):
+                continue
+            if all(core == "0" for core in signature):
+                strips.extend((boneName, channel) for channel in remaining)
+                continue
+            groups.setdefault(tuple(signature), []).extend((boneName, channel) for channel in remaining)
+            continue
+        for channel in channels:
+            if channel not in _OWNERSHIP_CHANNELS:
+                continue
+            if _HasMolangAssignment(channels[channel]) and not (
+                    splitsPhysics and _HasOnlyPhysicsAssignments(channels[channel])):
+                continue
+            conflicts = [(later, laterValue, channel) for later, laterValue in LaterWriters(boneName, channel)
+                         if not (channel == "rotation" and later.additiveRotation)
+                         and not (channel == "scale" and _IsConstantZeroVector(laterValue))]
+            signature = [_OwnershipSignatureCore(host, hostRank, conflicts) for host in hosts]
             if all(core is None for core in signature):
                 continue
             if all(core == "0" for core in signature):
@@ -5893,17 +6301,33 @@ def FadeControllerOneShots(packName):
     return faded
 
 
+_LOOPS_CACHE = {}
+
+
 def CollectPackAnimationLoops(packName, root=None):
     """RP 动画产物 → (主域注册键 → loop 字段, fp_ 键 → loop 字段)。
 
     口径与解析器注册一致(packParser._LoadArmAnimations): arm 命名空间的非 parallel 键
     同时是主域键(第三人称条件动画), fp_ 键 = arm 全部键加前缀; 主命名空间同名键优先。
     root = 资源包根(缺省产物资源包; 基线读 REF_RP)。
+
+    结果按目录签名缓存(见 _DirJsonSignature): 一次移植里它被调十来次(基线与本包), 大包每次都要整读
+    几十 MB 的动画, 而两次调用之间文件多半没变。只缓存派生出的 loop 映射(值是标量), 浅拷贝交出。
     """
     animDir = os.path.join(root or RP, "animations", packName)
-    mainLoops, fpLoops = OrderedDict(), OrderedDict()
     if not os.path.isdir(animDir):
-        return mainLoops, fpLoops
+        return OrderedDict(), OrderedDict()
+    cacheKey = (_PathKey(animDir), packName)
+    signature = _DirJsonSignature(animDir)
+    cached = _LOOPS_CACHE.get(cacheKey)
+    if cached is None or cached[0] != signature:
+        cached = (signature,) + _ScanPackAnimationLoops(animDir, packName)
+        _LOOPS_CACHE[cacheKey] = cached
+    return OrderedDict(cached[1]), OrderedDict(cached[2])
+
+
+def _ScanPackAnimationLoops(animDir, packName):
+    mainLoops, fpLoops = OrderedDict(), OrderedDict()
     mainPrefix = "animation.{}.".format(packName)
     armPrefix = "animation.{}_arm.".format(packName)
     armMain = OrderedDict()
@@ -6151,8 +6575,9 @@ def WrapVehicleGeometry(geoPath):
     """载具几何外包一层缩放根骨骼; 返回是否改动(幂等)。
 
     Java(CustomVehicleEntity/GeoEntityRenderer): YP(180 - 偏航) 后硬编码缩放 0.7, 不读 ysm.json 的缩放; 朝向约定与
-    基岩实体相同, 不用补旋转。模型根骨骼五花八门(Ship / bone6 / Car ...), 运行层够不着 —— 外包新根 ysm_vehicle_root,
-    主包在它上面播 animation.ysm.vehicle_root(packParser._WithVehicleRoot)。已带投射物朝向根的几何(同一模型两用)不再包。
+    基岩实体相同。模型根骨骼五花八门(Ship / bone6 / Car ...), 运行层够不着 —— 外包新根 ysm_vehicle_root, 主包在它上面播
+    animation.ysm.vehicle_root(packParser._WithVehicleRoot): 缩放 0.7, 船/矿车另补 Y 旋转(引擎硬编码渲染的实体换成数据
+    驱动渲染后不再转模型, 见业务包 client/render/vehicleOrient)。已带投射物朝向根的几何(同一模型两用)不再包。
     """
     data = LoadJson(geoPath)
     changed = False
@@ -6277,6 +6702,9 @@ def PortBaselinePack(javaDir, packName=JAVA_BASELINE_PACK, withMods=False):
     held = HoldControllerOneShots(packName)
     if held:
         report.append(u"一次性通道成员补 hold_on_last_frame {} 条".format(len(held)))
+    epsilonized = EpsilonizeOverrideIdentities(packName)
+    if epsilonized:
+        report.append(u"override 动画的恒等常量通道换成微小值 {} 处".format(epsilonized))
     precedence = ExplicitPackPrecedence(packName)
     if precedence:
         report.append(u"运算符优先级显式化 {} 处".format(precedence))
@@ -6328,6 +6756,52 @@ def PortGuiImages(manifest, srcOf, rpTextures, packName, report):
     return copied
 
 
+# ---- Java 合集(ysm_models/<合集>/<子包>, 合集目录带 ysm-pack.json, 可选封面 ysm-pack.png) ----
+COLLECTION_MANIFEST = "ysm-pack.json"
+COLLECTION_COVER = "ysm-pack.png"
+# Java ModelPackScanner.MAX_PACK_ICON_SIZE: 封面超过 1MB 时整份合集清单读取失败; 这里只跳过封面并告警
+COLLECTION_COVER_MAX_BYTES = 1024 * 1024
+# 合集文件夹封面的基岩扩展键(运行层 clientScanner 读它, 值是资源包纹理路径, 不带扩展名)
+COLLECTION_TEXTURE_KEY = "folder_texture"
+
+
+def CollectionCoverTexture(collection):
+    """合集封面在资源包里的纹理路径(不带扩展名): textures/ui/ysm_packs/<合集目录名>, 目录名按
+    替换实体模型段的口径规整(小写, 非 [a-z0-9_] 折成下划线)"""
+    return "textures/ui/ysm_packs/" + re.sub(r"[^a-z0-9_]", "_", collection.lower())
+
+
+def PortCollectionManifest(collectionDir, collection):
+    """合集清单搬到 ysm_models/<合集>/ysm-pack.json; 合集目录里有 ysm-pack.png(Java 合集封面)就拷进资源包,
+    清单写 folder_texture 指向它。返回汇总行; 目录里没有清单时什么都不做。
+
+    Java PackButton 把封面铺满整张 52x90 卡片(底部约 20 px 是名字区), 基岩卡片模板的 pack_img 占同一块
+    Java 卡片区(与 gui_background 同框), Java 原图直接可用、不改尺寸。清单里已写了 folder_texture
+    (作者手写的基岩扩展键)时以作者为准, 不拷封面。
+    """
+    manifestSrc = os.path.join(collectionDir, COLLECTION_MANIFEST)
+    if not os.path.isfile(manifestSrc):
+        return []
+    manifest = LoadJson(manifestSrc)
+    report = []
+    coverSrc = os.path.join(collectionDir, COLLECTION_COVER)
+    manifestDst = os.path.join(BP_MODELS, collection, COLLECTION_MANIFEST)
+    # 同一合集的各成员包都会写这份清单与封面(内容相同); 转换器按包并行时串行化, 免得两个进程同时写同一文件
+    with SharedFileLock(manifestDst):
+        if isinstance(manifest, dict) and not manifest.get(COLLECTION_TEXTURE_KEY) and os.path.isfile(coverSrc):
+            if os.path.getsize(coverSrc) > COLLECTION_COVER_MAX_BYTES:
+                report.append(u"[WARN] 合集封面 {} 超过 1MB(Java 同样拒收), 已跳过, 文件夹用默认封面".format(
+                    COLLECTION_COVER))
+            else:
+                texture = CollectionCoverTexture(collection)
+                CopyBinary(coverSrc, os.path.join(RP, *texture.split("/")) + ".png")
+                manifest[COLLECTION_TEXTURE_KEY] = texture
+                report.append(u"合集封面 {} → {}.png".format(COLLECTION_COVER, texture))
+        DumpJson(manifestDst, manifest)
+    report.append(u"合集清单 → ysm_models/{}/{}".format(collection, COLLECTION_MANIFEST))
+    return report
+
+
 def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None):
     """移植一个 Java 包; 返回汇总行列表。molangSink 传入 Counter 时把 molang 替换/降级计数原样并入
     (宿主据此做结构化告警, 汇总文本里的 "[!] label xN" 行是同一份数据的可读形态)。"""
@@ -6344,6 +6818,12 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     rpTextures = os.path.join(RP, "textures", "entity", packName)
     rpControllers = os.path.join(RP, "animation_controllers", packName)
     report = []
+    # 本包的运行期接线汇(探针登记 + 主几何绑定旋转 + 皮肤序号表), 见 java_runtime_bindings 注
+    runtimeSink = runtime_bindings.BeginPack()
+    runtimeSink.SetTextures(
+        [BaseName(entry.get("uv") if isinstance(entry, dict) else entry) for entry in (player.get("texture") or [])
+         if (entry.get("uv") if isinstance(entry, dict) else entry)],
+        (manifest.get("properties") or {}).get("default_texture"))
 
     def _Src(relPath):
         # 中文文件名(15_kluonoa 的 controller/主动画修改.json)不能 str(): 按文件系统编码转字节
@@ -6369,6 +6849,8 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
             geometryRenames, armNotes = BuildFirstPersonArmGeometry(rpOut)
             fpArmBoneRenames = FirstPersonArmBoneRenames(geometryRenames)
             report.extend(armNotes)
+    # ysm.bone_rot('骨骼') 在 Java 返回"绑定旋转 + 动画旋转": 读侧改写要用到主几何的绑定旋转
+    runtimeSink.SetBindRotations(os.path.join(rpModels, "main.geo.json"))
 
     # ---- 动画: 主命名空间 / 手臂命名空间 ----
     # 模组联动动画默认整键跳过: 既不生成资源, 也从声明里摘掉 —— 留着声明会让
@@ -6589,6 +7071,11 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     # 动画命名空间 <包名>_<动画命名空间段>(同模型配不同动画文件时带动画段区分, 01 酒狐的马/骡子)。
     # 动画产物落 <命名空间段>.animation.json, 声明路径同步改名 —— 主包按文件名定位替换实体动画,
     # 名字对不上就一条都注册不到(早先 horse.animation.json 落成 foxcar.animation.json 即如此)。
+    # 控制器(条目的 controller 文件)同理落 <命名空间段>.animation_controllers.json, 但放进包控制器目录的
+    # 子目录 REPLACED_CONTROLLER_DIR: 后面的逐通道覆盖/补 hold/播完判据改写等步骤(修复工具同)只枚举包目录
+    # 第一层, 它们按玩家通道语义改写, 不能碰替换实体的控制器; 资源索引与引擎加载都递归子目录。
+    rpReplacedControllers = os.path.join(rpControllers, REPLACED_CONTROLLER_DIR)
+    writtenReplacedControllers = set()
     for section, _entityIds, entry, modelSegment, namespaceSegment in ReplacedTargets(
             manifest.get("files")):
         modelRel = entry.get("model")
@@ -6607,24 +7094,61 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
             report.append(u"  载具几何外包缩放根骨骼 {}: 运行层在根上播 Java 硬编码的 0.7 缩放".format(
                 VEHICLE_ROOT_BONE))
         animRel = entry.get("animation")
+        replacedNamespace = "{}_{}".format(packName, namespaceSegment)
+        replacedAnimKeys = set()
         if isinstance(animRel, (str, unicode)) and animRel and os.path.isfile(_Src(animRel)):  # noqa: F821
             # 多个实体共用同一动画文件时(如 boat/chest_boat)按各自命名空间各生成一份;
             # 音频关键帧与玩家侧共用音频汇(Java 载具动画的 sound_effects 照播)
-            RewriteAnimations(
+            _count, _dropped, _fixes, replacedIds = RewriteAnimations(
                 _Src(animRel),
                 os.path.join(rpAnims, "{}.animation.json".format(namespaceSegment)),
-                "{}_{}".format(packName, namespaceSegment),
+                replacedNamespace,
                 molangDefaults, molangReport, nameMapper, physics=physics, sounds=soundSink)
+            nsPrefix = u"animation.{}.".format(replacedNamespace)
+            replacedAnimKeys = set(str(animId[len(nsPrefix):]) for animId in replacedIds
+                                   if animId.startswith(nsPrefix))
             srcName = animRel.replace(chr(92), "/").rsplit("/", 1)[-1]
             outName = u"{}.animation.json".format(namespaceSegment)
             if srcName != outName:
                 entry["animation"] = animRel[:len(animRel) - len(srcName)] + outName
+        ctlRel = entry.get("controller")
+        if isinstance(ctlRel, (str, unicode)) and ctlRel:  # noqa: F821
+            if not os.path.isfile(_Src(ctlRel)):
+                report.append(u"[WARN] {} {} 的控制器缺失: {}".format(section, modelSegment, ctlRel))
+            else:
+                # Java 按通道名挂作者控制器(HybridAnimationController: 有同名作者数据就用作者的), 其余通道照常
+                # 自动播; 接管推导在主包解析器(packParser._ReplaceAnimates)。死引用按本实体自己的动画键剪
+                ctlOutName = u"{}.animation_controllers.json".format(namespaceSegment)
+                ctlCount, _takeovers, _refFixes, prunedRefs, _prunedTransitions = RewriteControllers(
+                    _Src(ctlRel), os.path.join(rpReplacedControllers, ctlOutName), replacedNamespace,
+                    molangDefaults, molangReport, nameMapper, replacedAnimKeys or None, physics=physics,
+                    section=section)
+                writtenReplacedControllers.add(ctlOutName)
+                ctlSrcName = ctlRel.replace(chr(92), "/").rsplit("/", 1)[-1]
+                if ctlSrcName != ctlOutName:
+                    entry["controller"] = ctlRel[:len(ctlRel) - len(ctlSrcName)] + ctlOutName
+                report.append(u"  {} {} 控制器 → controller.animation.{}.* ({} 个, animation_controllers/{}/{}/{}){}".format(
+                    section, modelSegment, replacedNamespace, ctlCount, packName, REPLACED_CONTROLLER_DIR,
+                    ctlOutName, u", 剪掉死引用 {} 处".format(len(prunedRefs)) if prunedRefs else u""))
         texRel = entry.get("texture")
         texPath = texRel.get("uv") if isinstance(texRel, dict) else texRel
         if texPath and os.path.isfile(_Src(texPath)):
             CopyBinary(_Src(texPath),
                        os.path.join(rpTextures, os.path.basename(str(texPath))))
         report.append("{} {} → {}".format(section, modelSegment, identifier))
+    if os.path.isdir(rpReplacedControllers):
+        for name in os.listdir(rpReplacedControllers):
+            if name.endswith(".json") and name not in writtenReplacedControllers:
+                os.remove(os.path.join(rpReplacedControllers, name))     # 上次移植遗留(声明已删/改名)
+
+    # ---- 骨骼旋转回读的写侧(ysm.bone_rot, 头发跟随链): 动画/控制器文本都已落盘, 后面的删通道/拆伴生步骤搬的是包好的串 ----
+    wrappedWriters = runtime_bindings.InlineBoneRotationWriters(
+        [rpAnims], LoadJson, DumpJson, readDirs=[rpAnims, rpControllers])
+    if wrappedWriters:
+        report.append(u"骨骼旋转回读(ysm.bone_rot): 写侧 {} 个通道分量改成先存变量再返回({} 根骨骼) —— "
+                      u"Java 读的是该骨骼上一帧的旋转(含绑定旋转), 头发/饰品的逐节跟随链靠它".format(
+                          sum(item[3] for item in wrappedWriters),
+                          len(set(item[2].lower() for item in wrappedWriters))))
 
     # ---- 音频三件套(玩家侧与替换实体动画的 sound_effects 关键帧都已进音频汇) ----
     if soundSink.entries:
@@ -6743,6 +7267,15 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
         report.append(u"ysm.json 表单变量 v.roaming.* 扁平化 {} 处(与动画侧同步)".format(
             flattenCount))
 
+    # ---- 主包运行层声明(顶层 java_state): 本包要哪些 Java 专有的环境/状态量、roaming 变量清单、探针表 ----
+    javaStateDeclaration = runtime_bindings.BuildDeclaration(
+        [rpAnims, rpControllers], manifest, runtimeSink.probes)
+    runtime_bindings.ApplyDeclaration(manifest, javaStateDeclaration)
+    declarationLine = runtime_bindings.DeclarationReportLine(javaStateDeclaration)
+    if declarationLine:
+        report.append(declarationLine)
+    runtime_bindings.EndPack()
+
     if not manifest.get("netease"):
         manifest.pop("netease", None)     # 空的兼容段不落盘
     DumpJson(os.path.join(bpDir, "ysm.json"), manifest)
@@ -6830,19 +7363,14 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
         if os.path.isfile(stale):
             os.remove(stale)
             report.append("清理废弃的归零产物: {}".format(os.path.basename(stale)))
-    dedupPairs = DedupPreLayer(packName)
-    if dedupPairs:
-        report.append("pre 层内部去重: 按 Java 通道顺序(后者覆盖前者)删掉 {} 个重复的"
-                      "(骨骼,通道)对 —— 基岩是相加".format(dedupPairs))
-    # 主链压住 pre 层的通道不在这里静态删(见 ApplyChannelOwnership 注末尾), 由逐通道覆盖按状态让位
+    # 主链与 pre 层内部(常驻/门控/跨控制器)的覆盖都不在这里静态删(见 ApplyChannelOwnership 注末尾),
+    # 由逐通道覆盖按状态让位
     loopedPreview = LoopPreviewAnimation(packName, manifest)
     if loopedPreview:
         report.append(u"GUI 展示动画按 Java 强制循环(CapPredicate playLoopAnimation): {}".format(
             u", ".join(u"{}(原 loop={})".format(key, loop) for key, loop in loopedPreview)))
 
-    # 折叠与旁路排在删通道步骤之后: 折出来的条件通道(scale: ["(v.x==1)?1:0", ...])
-    # 若先折叠, 后面的去重会把它当普通通道删掉
-    foldedVariants, skippedVariants = ReconcileConditionalVariants(packName)
+    foldedVariants, skippedVariants = ReconcileConditionalVariants(packName, manifest)
     if foldedVariants:
         report.append(u"条件变体折叠: pre 层静态显隐与 parallel 层条件变体合并为单一所有者 "
                       u"{} 对(火焰/表情/嘴型: 隐藏基线 + 条件显示), 放弃非常量 {} 对".format(
@@ -6865,6 +7393,11 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     # 逐通道覆盖排在所有删通道/改状态步骤之后, 只处理它们剩下的冲突(见 ApplyChannelOwnership 注)
     ownership, _ownershipFiles = ApplyChannelOwnership(packName, manifest=manifest)
     report.extend(OwnershipReportLines(ownership))
+    # 排在逐通道覆盖之后: 伴生动画保留 override 标志, 一并处理(见 EpsilonizeOverrideIdentities 注)
+    epsilonized = EpsilonizeOverrideIdentities(packName, manifest=manifest)
+    if epsilonized:
+        report.append(u"override 动画的恒等常量通道换成微小值 {} 处: 引擎把恒为单位值的通道当成不存在, "
+                      u"清不掉前面的层(Java 写 0 即覆盖; 实机: 持弩时右手腕仍是主链姿态)".format(epsilonized))
 
     # ---- 一次性通道控制器(挥击/使用/受击/死亡重放, 见 BuildOneShotControllerFile 注) ----
     # 排在逐通道覆盖之后: 挥击/使用成员拆出的伴生动画要跟成员进同一状态
@@ -6901,11 +7434,9 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
         report.append(u"运算符优先级显式化(收尾) {} 处: 资源包按 min_engine_version 1.18.0 走旧版 Molang 语义"
                       u"(三元左结合、&& 不比 || 紧), 两种语义可能分叉处补括号".format(precedenceFixes))
 
-    # ---- 合集清单(存在则一并搬运, 触发文件夹分组) ----
-    collectionSrc = os.path.join(os.path.dirname(javaDir), "ysm-pack.json")
-    if collection and os.path.isfile(collectionSrc):
-        DumpJson(os.path.join(BP_MODELS, collection, "ysm-pack.json"), LoadJson(collectionSrc))
-        report.append("合集清单 → ysm_models/{}/ysm-pack.json".format(collection))
+    # ---- 合集清单与封面(存在则一并搬运, 触发文件夹分组) ----
+    if collection:
+        report.extend(PortCollectionManifest(os.path.dirname(javaDir), collection))
     return report
 
 

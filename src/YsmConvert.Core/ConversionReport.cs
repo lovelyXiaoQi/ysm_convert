@@ -10,7 +10,8 @@ public sealed record MolangItem(string Pack, string Kind, string Label, int Coun
 
 public sealed record ValidationItem(string Level, string Text);
 
-public sealed record CollectionWritten(string Dir, string Path, bool Written);
+/// <summary>一个合集清单的落盘结果; Cover = 这次装上的自定义封面纹理路径, Warning = 封面没装上的原因。</summary>
+public sealed record CollectionWritten(string Dir, string Path, bool Written, string? Cover = null, string? Warning = null);
 
 /// <summary>需要开发者过目的一条(告警/置零/体检错误), 带解释。</summary>
 public sealed record AttentionItem(string Pack, string Severity, string Category, string Text, int Count, string Advice, string? Doc);
@@ -32,7 +33,7 @@ public sealed class PackResult
     public List<MolangItem> Molang { get; } = new();
 
     public bool Finished => Ok.HasValue;
-    public int AttentionCount => Errors + Warnings + Notices + Molang.Count(m => m.Attention) + (Ok == false ? 1 : 0);
+    public int AttentionCount => Errors + Warnings + Notices + MolangPresentation.Rows(Molang).Count + (Ok == false ? 1 : 0);
 }
 
 /// <summary>一次内核运行(convert / validate / fix / baseline)的全部结果, 由事件流逐条喂出来。</summary>
@@ -123,7 +124,8 @@ public sealed class ConversionReport
                 return pack;
             }
             case KernelEvent.Collection:
-                Collections.Add(new CollectionWritten(e.Dir ?? "", e.Path ?? "", e.Written ?? false));
+                Collections.Add(new CollectionWritten(e.Dir ?? "", e.Path ?? "", e.Written ?? false,
+                    NullIfEmpty(e.ExtraString("cover")), NullIfEmpty(e.ExtraString("warning"))));
                 return null;
             case KernelEvent.ValidateItem:
                 Validation.Add(new ValidationItem(e.Level ?? "warn", e.Text ?? ""));
@@ -157,7 +159,10 @@ public sealed class ConversionReport
         return pack;
     }
 
-    /// <summary>需要人工过目的全部项目(失败/错误/警告/提醒/置零 molang/体检错误与警告), 带解释。</summary>
+    /// <summary>
+    /// 需要人工过目的全部项目(失败/错误/警告/提醒/置零与中性常量 molang/体检错误与警告), 带解释。
+    /// Severity: error / warn / notice(要看) / info(知道一下: 中性常量、动画名转小写的按包汇总)。
+    /// </summary>
     public List<AttentionItem> BuildAttention()
     {
         var items = new List<AttentionItem>();
@@ -172,10 +177,10 @@ public sealed class ConversionReport
                 var ex = WarningCatalog.ExplainLog(line.Level, line.Text);
                 items.Add(new AttentionItem(pack.Name, line.Level, ex.Category, line.Text.Trim(), 1, ex.Advice, ex.Doc));
             }
-            foreach (var m in pack.Molang.Where(m => m.Attention))
+            foreach (var row in MolangPresentation.Rows(pack.Molang))
             {
-                var ex = WarningCatalog.ExplainMolang(m.Kind, m.Label);
-                items.Add(new AttentionItem(pack.Name, "notice", ex.Category, m.Label, m.Count, ex.Advice, ex.Doc));
+                var ex = WarningCatalog.ExplainMolang(row.Kind, row.Text);
+                items.Add(new AttentionItem(pack.Name, row.Severity, ex.Category, row.Text, row.Count, ex.Advice, ex.Doc));
             }
         }
         foreach (var v in Validation)
@@ -183,6 +188,10 @@ public sealed class ConversionReport
             var ex = WarningCatalog.ExplainValidation(v.Level, v.Text);
             items.Add(new AttentionItem(PackOfValidation(v.Text), v.Level, ex.Category, v.Text, 1, ex.Advice, ex.Doc));
         }
+        foreach (var c in Collections.Where(c => c.Warning is not null))
+            items.Add(new AttentionItem($"合集 {c.Dir}", "warn", "文件夹封面未装上", c.Warning!, 1,
+                "封面要求 PNG、不超过 1MB; 文件夹卡片按 Java 52x90 的比例等比铺满。没装上时游戏里用默认封面, 模型本身不受影响。",
+                WarningCatalog.PackGuideDoc));
         if (FatalError is not null)
             items.Add(new AttentionItem("", "error", "内核未能运行", FatalError, 1, "检查 core/ 目录与 Python 运行时是否完整。", null));
         return items;
@@ -195,6 +204,8 @@ public sealed class ConversionReport
         var colon = text.IndexOf(':');
         return colon > 0 && colon < 80 ? text[..colon].Trim() : "";
     }
+
+    private static string? NullIfEmpty(string? text) => string.IsNullOrEmpty(text) ? null : text;
 
     private static string? FirstLine(string? text)
     {
@@ -230,8 +241,8 @@ public sealed class ConversionReport
                 foreach (var line in pack.Lines.Where(l => l.Level is "error" or "warn" or "notice"))
                     sb.AppendLine("   " + line.Text.Trim());
             }
-            foreach (var m in pack.Molang.Where(m => m.Attention))
-                sb.AppendLine($"   [!] molang/{m.Kind}: {m.Label} x{m.Count}");
+            foreach (var row in MolangPresentation.Rows(pack.Molang))
+                sb.AppendLine($"   {MolangPresentation.Marker(row.Kind)} molang/{row.Kind}: {row.Text}{(row.Count > 1 ? $" x{row.Count}" : "")}");
             if (pack.Error is not null)
             {
                 sb.AppendLine("   ---- 异常 ----");
@@ -239,7 +250,11 @@ public sealed class ConversionReport
             }
         }
         foreach (var c in Collections)
+        {
             sb.AppendLine($"合集清单 {c.Dir}: {(c.Written ? "已写入" : "沿用 Java 源")} {c.Path}");
+            if (c.Cover is not null) sb.AppendLine($"   文件夹封面 → {c.Cover}.png");
+            if (c.Warning is not null) sb.AppendLine($"   [WARN] {c.Warning}");
+        }
         if (ValidationErrors.HasValue || Validation.Count > 0)
         {
             sb.AppendLine();
@@ -273,7 +288,11 @@ public sealed class ConversionReport
                 ["notices"] = p.Notices,
                 ["error"] = p.Error,
                 ["molangAttention"] = new JsonArray(p.Molang.Where(m => m.Attention)
-                    .Select(m => (JsonNode)new JsonObject { ["kind"] = m.Kind, ["label"] = m.Label, ["count"] = m.Count }).ToArray()),
+                    .Select(m => (JsonNode)new JsonObject
+                    {
+                        ["kind"] = m.Kind, ["label"] = m.Label, ["count"] = m.Count,
+                        ["severity"] = MolangPresentation.Severity(m.Kind),
+                    }).ToArray()),
             };
             if (includeLines)
                 obj["lines"] = new JsonArray(p.Lines.Select(l => (JsonNode)new JsonObject { ["level"] = l.Level, ["text"] = l.Text }).ToArray());
@@ -305,7 +324,10 @@ public sealed class ConversionReport
                 ["controllerFiles"] = ControllerFiles,
                 ["items"] = new JsonArray(Validation.Select(v => (JsonNode)new JsonObject { ["level"] = v.Level, ["text"] = v.Text }).ToArray()),
             },
-            ["collections"] = new JsonArray(Collections.Select(c => (JsonNode)new JsonObject { ["dir"] = c.Dir, ["path"] = c.Path, ["written"] = c.Written }).ToArray()),
+            ["collections"] = new JsonArray(Collections.Select(c => (JsonNode)new JsonObject
+            {
+                ["dir"] = c.Dir, ["path"] = c.Path, ["written"] = c.Written, ["cover"] = c.Cover, ["warning"] = c.Warning,
+            }).ToArray()),
             ["packs"] = packs,
             ["attention"] = attention,
             ["stderr"] = new JsonArray(Stderr.Select(s => (JsonNode)JsonValue.Create(s)).ToArray()),

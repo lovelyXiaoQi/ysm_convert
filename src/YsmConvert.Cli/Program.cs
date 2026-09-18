@@ -16,18 +16,22 @@ internal static class Program
           ysmconv discover <目录>... [--json]            发现 Java 模型包(单包 / 合集目录 / 上级目录)
           ysmconv convert <目录>... --out <组件根目录> [选项]
           ysmconv validate --out <组件根目录> [包名...] [--json]
-          ysmconv fix --out <组件根目录> [包名...] [--no-validate] [--json]
+          ysmconv fix --out <组件根目录> [包名...] [--no-validate] [--pretty] [--json]
           ysmconv baseline <Java default 模型目录> --out <组件根目录> [--with-mods]
           ysmconv mcp [--out <缺省组件根目录>]              以 MCP 服务器(stdio)方式运行, 供 AI 调用
 
         convert 选项:
           --component <名>          新建/复用独立组件 <根>/<名>_bp 与 <名>_rp(缺省: 根目录必须已是含行为包+资源包的工程)
           --collection <目录名>     全部包归入这个合集文件夹(ysm_models/<目录名>/<包名>)
-          --collection-name <英文名> --collection-name-zh <中文名> --collection-desc <英文描述> --collection-desc-zh <中文描述>
+          --collection-name <名字>  文件夹在游戏里显示的名字(缺省沿用 Java 合集自带的名字)
+          --collection-cover <PNG>  文件夹封面图(不超过 1MB, 最好是 Java 卡片 52x90 的比例; 缺省用合集自带的 ysm-pack.png)
           --prefix <前缀>           包名统一加前缀(缺省用内核建议名: 拼音化 + 合集前缀)
           --rename <文件夹>=<包名>  逐包指定包名(可多次)
           --with-mods               携带第三方模组联动动画(tacz/slashblade/...)
           --no-validate             转换后不跑资源包体检
+          --pretty                  产物 JSON 按 2 空格缩进(缺省压成一行: 体积约省 70%, 转换也更快)
+          --jobs <N>                同时转换的包数(缺省自动: 逻辑核数的一半、最多 8, 再按可用内存封顶);
+                                    多个包总是每包一个内核进程, 同一进程连续转大包会耗尽内存
           --ref-rp <资源包>         指定 java_default 基线所在资源包(缺省: 产物资源包自带则用它, 否则用内核快照)
           --json                    只输出 JSON 报告(不流式打印日志)
           --report <文件>           把 JSON 报告另存到文件
@@ -127,6 +131,8 @@ internal static class Program
                 ["pythonSource"] = service.Paths.PythonSource,
                 ["kernelRoot"] = service.Paths.KernelRoot,
                 ["docsDir"] = service.Paths.DocsDir,
+                ["wiki"] = YsmLinks.WikiUrl,
+                ["repo"] = YsmLinks.RepoUrl,
                 ["kernel"] = info is null ? null : JsonSerializer.SerializeToNode(info, Pretty),
                 ["kernelError"] = probeError,
                 ["kernelSource"] = source,
@@ -137,7 +143,9 @@ internal static class Program
         Console.WriteLine($"Python:      {service.Paths.PythonExe} ({service.Paths.PythonSource}) 版本 {info?.Python ?? "?"}");
         Console.WriteLine($"内核入口:    {service.Paths.PortCli} (内核 {info?.Kernel ?? "?"}, 拼音库 {(info?.Pinyin == true ? "有" : "无")})");
         Console.WriteLine($"基线资源包:  {service.Paths.BundledRefRp}");
-        Console.WriteLine($"文档目录:    {service.Paths.DocsDir}");
+        Console.WriteLine($"在线文档:    {YsmLinks.WikiUrl}");
+        Console.WriteLine($"开源地址:    {YsmLinks.RepoUrl}");
+        Console.WriteLine($"本地文档:    {service.Paths.DocsDir}(同一批文档的副本, 供 AI 经 MCP 的 ysm_docs 查阅)");
         if (source is JsonObject src)
             Console.WriteLine($"内核来源:    {src["source"]} @ {src["commit"]?.ToString()[..Math.Min(12, src["commit"]?.ToString().Length ?? 0)]} 同步于 {src["syncedAt"]}");
         if (probeError is not null)
@@ -178,8 +186,11 @@ internal static class Program
     // ---------------------------------------------------------------- convert
     private static async Task<int> ConvertAsync(string[] args)
     {
-        var a = ParsedArgs.Parse(args, "json", "with-mods", "no-validate", "details");
+        var a = ParsedArgs.Parse(args, "json", "with-mods", "no-validate", "details", "pretty");
         if (a.Positional.Count == 0) throw new ArgumentException("convert 需要至少一个 Java 包目录");
+        var jobs = 0;
+        if (a.Get("jobs") is { } jobsText && (!int.TryParse(jobsText, out jobs) || jobs < 1))
+            throw new ArgumentException($"--jobs 要一个正整数: {jobsText}");
         var service = CreateService();
         var layout = ResolveLayout(a);
         var discovered = await service.DiscoverAsync(a.Positional);
@@ -195,26 +206,39 @@ internal static class Program
         }
         var packs = ConvertPlan.BuildPacks(discovered, a.Get("prefix"), a.Get("collection"), renames);
         var collections = new List<CollectionSpec>();
-        if (a.Get("collection") is { } dir && (a.Has("collection-name") || a.Has("collection-name-zh") || a.Has("collection-desc") || a.Has("collection-desc-zh")))
+        if (a.Get("collection") is { } dir)
         {
-            collections.Add(new CollectionSpec
+            var spec = new CollectionSpec
             {
                 Dir = dir,
                 Name = a.Get("collection-name"),
-                NameZh = a.Get("collection-name-zh"),
                 Description = a.Get("collection-desc"),
-                DescriptionZh = a.Get("collection-desc-zh"),
-            });
+                CoverImage = a.Get("collection-cover"),
+            };
+            if (!spec.IsEmpty) collections.Add(spec);
+        }
+        else if (a.Has("collection-name") || a.Has("collection-cover"))
+        {
+            throw new ArgumentException("--collection-name / --collection-cover 要和 --collection <目录名> 一起用");
         }
         var request = new ConvertRequest
         {
             Layout = layout,
             Packs = packs,
             Collections = collections,
-            Options = new ConvertOptions { WithMods = a.Has("with-mods"), Validate = !a.Has("no-validate") },
+            Options = new ConvertOptions
+            {
+                WithMods = a.Has("with-mods"),
+                Validate = !a.Has("no-validate"),
+                CompactJson = !a.Has("pretty"),
+                MaxParallel = jobs,
+            },
             RefRp = a.Get("ref-rp"),
         };
         var json = a.Has("json");
+        if (!json && packs.Count > 1)
+            Console.WriteLine($"{packs.Count} 个包, 同时转换 {ConversionService.EffectiveParallelism(jobs, packs.Count)} 个" +
+                              $"{(request.Options.CompactJson ? ", JSON 压成一行" : "")}");
         var report = await service.ConvertAsync(request,
             json ? null : StreamingPrinter(a.Has("details")),
             json ? null : line => Console.Error.WriteLine("  (stderr) " + line));
@@ -234,11 +258,12 @@ internal static class Program
 
     private static async Task<int> FixAsync(string[] args)
     {
-        var a = ParsedArgs.Parse(args, "json", "no-validate", "details");
+        var a = ParsedArgs.Parse(args, "json", "no-validate", "details", "pretty");
         var service = CreateService();
         var layout = ResolveLayout(a);
         var json = a.Has("json");
-        var report = await service.FixAsync(layout, a.Positional, !a.Has("no-validate"), json ? null : StreamingPrinter(a.Has("details")));
+        var report = await service.FixAsync(layout, a.Positional, !a.Has("no-validate"),
+            json ? null : StreamingPrinter(a.Has("details")), compactJson: !a.Has("pretty"));
         return Finish(report, a, json);
     }
 
@@ -282,8 +307,22 @@ internal static class Program
         return OutputTarget.Detect(root);
     }
 
+    /// <summary>
+    /// 流式打印事件。多个包并行时各包事件交错到达, 每个包的行先攒着, 该包完成时整块打印
+    /// (内核本来就是一个包转完才吐出它的日志, 不损失实时性)。调用方已把事件串行化, 这里不用加锁。
+    /// </summary>
     private static Action<KernelEvent> StreamingPrinter(bool details)
     {
+        var pending = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var molang = new MolangPresentation.StreamBuffer();
+        List<string> For(string? pack)
+        {
+            var key = pack ?? "";
+            if (!pending.TryGetValue(key, out var lines))
+                pending[key] = lines = new List<string>();
+            return lines;
+        }
+
         return e =>
         {
             switch (e.Event)
@@ -292,23 +331,30 @@ internal static class Program
                     Console.WriteLine($"内核 {e.ExtraString("kernel")}");
                     break;
                 case KernelEvent.PackStart:
-                    Console.WriteLine($"== [{(e.Index ?? 0) + 1}/{e.Total}] {e.PackName}{(e.JavaDir is null ? "" : "  <- " + e.JavaDir)}");
+                    For(e.PackName).Add($"== {e.PackName}{(e.JavaDir is null ? "" : "  <- " + e.JavaDir)}");
                     break;
                 case KernelEvent.Log:
                     if (details || e.Level is "error" or "warn" or "notice")
-                        Console.WriteLine("   " + e.Text);
+                        For(e.PackName).Add("   " + e.Text);
                     break;
                 case KernelEvent.Molang:
-                    if (e.Attention == true)
-                        Console.WriteLine($"   [!] molang/{e.Kind}: {e.Label} x{e.Count}");
+                    if (molang.Line(e) is { } molangLine)
+                        For(e.PackName).Add("   " + molangLine);
                     break;
                 case KernelEvent.PackDone:
-                    Console.WriteLine(e.Ok == true
-                        ? $"   -> 完成 {e.Seconds:0.0}s  错误 {e.Errors} / 警告 {e.Warnings} / 提醒 {e.Notices}"
-                        : $"   -> 失败: {e.Error?.Trim().Split('\n').LastOrDefault()}");
+                    var block = For(e.PackName);
+                    if (molang.Flush(e.PackName) is { } lowerLine)
+                        block.Add("   " + lowerLine);
+                    block.Add(e.Ok == true
+                        ? $"   -> [{(e.Index ?? 0) + 1}/{e.Total}] 完成 {e.Seconds:0.0}s  错误 {e.Errors} / 警告 {e.Warnings} / 提醒 {e.Notices}"
+                        : $"   -> [{(e.Index ?? 0) + 1}/{e.Total}] 失败: {e.Error?.Trim().Split('\n').LastOrDefault()}");
+                    foreach (var line in block) Console.WriteLine(line);
+                    pending.Remove(e.PackName ?? "");
                     break;
                 case KernelEvent.Collection:
                     Console.WriteLine($"合集清单 {e.Dir}: {(e.Written == true ? "已写入" : "沿用 Java 源")} {e.Path}");
+                    if (e.ExtraString("cover") is { Length: > 0 } cover) Console.WriteLine($"   文件夹封面 → {cover}.png");
+                    if (e.ExtraString("warning") is { Length: > 0 } warning) Console.WriteLine($"   [WARN] {warning}");
                     break;
                 case KernelEvent.ValidateItem:
                     Console.WriteLine($"体检 [{e.Level?.ToUpperInvariant()}] {e.Text}");

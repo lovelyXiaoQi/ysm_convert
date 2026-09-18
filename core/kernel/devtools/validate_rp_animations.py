@@ -156,6 +156,10 @@ _MOLANG_QUOTED = re.compile(r"'[^']*'")
 # 同一字符串里先赋值后读取的(共享动画自身的语句序列)不算
 _INPUT_STATE_VARIABLE_TOKEN = re.compile(
     r"variable\.(ysm_(?:block_hold|item_in_use|use_hold|swing_muted|swing_serial|(?:fp_)?swing_seen))\b(\s*\?\?|\s*=(?!=))?")
+# 主包运行层维护的变量(Java 专有的环境/状态量 ysm_env_*、函数探针 ysm_pb_*、共享动画算的鞘翅追随角, 见
+# packParser._RUNTIME_STATE_VARIABLE_PATTERN): 同样不补 0, 读取必须带 ?? 回落(纸娃娃/预览实体上没人写它们)
+_RUNTIME_STATE_VARIABLE_TOKEN = re.compile(
+    r"variable\.(ysm_(?:env_[a-z0-9_]+|pb_[a-z0-9_]+|elytra_rot_[xyz]))\b(\s*\?\?|\s*=(?!=))?", re.IGNORECASE)
 _KEYFRAME_KEYS = ("pre", "post", "lerp_mode")
 _LOOP_VALUES = (True, False, "hold_on_last_frame")
 
@@ -215,6 +219,15 @@ def _CheckMolangStrings(node, where, errors, warnings=None):
                 assignedInText.add(name)
             elif not suffix and name not in assignedInText:
                 errors.append(u"{} {}: 输入状态变量 variable.{} 裸读(不做初始化, 必须带 ?? 回落): {}".format(
+                    where, u"/".join(str(p) for p in path), name, text[:80]))
+                break
+        assignedInText = set()
+        for match in _RUNTIME_STATE_VARIABLE_TOKEN.finditer(text):
+            name, suffix = match.group(1).lower(), (match.group(2) or u"").strip()
+            if suffix.startswith(u"="):
+                assignedInText.add(name)
+            elif not suffix and name not in assignedInText:
+                errors.append(u"{} {}: 运行层变量 variable.{} 裸读(主包运行层维护, 不做初始化, 必须带 ?? 回落): {}".format(
                     where, u"/".join(str(p) for p in path), name, text[:80]))
                 break
 
@@ -529,8 +542,8 @@ def CheckChannelOwnership(packs, errors):
             errors.append(u"{}: 控制器引用了伴生动画 {} 但动画文件里没有".format(packName, companion))
 
 
-_FINISHED_QUERY = re.compile(r"(?:q|query)\.(?:all_animations_finished|any_animation_finished)")
-_STATE_CLOCK_READ = re.compile(r"variable\.(ysm_t0_[a-z0-9_]+)(\s*\?\?|\s*=(?!=))?")
+_FINISHED_QUERY = re.compile(r"\b(?:q|query)\.(?:all_animations_finished|any_animation_finished)\b")
+_STATE_CLOCK_READ = re.compile(r"variable\.(ysm_t0_[a-z0-9_]+)\b(\s*\?\?|\s*=(?!=))?")
 _OWNERSHIP_WEIGHT_FLOOR = u"0.0001"
 _GENERATED_CONTROLLER_FILES = ("ysm_state.json", "ysm_oneshot.json", "ysm_variable_init.json")
 
@@ -548,6 +561,8 @@ def CheckOwnershipWeights(packs, errors):
     for packName in sorted(os.listdir(ctlBase)):
         if packs and packName not in packs:
             continue
+        if packName == "compat":
+            continue    # 旧版手工资源(按旧版共享状态机的口径调好的, 长期实机可用): 本检查只管移植产物
         ctlDir = os.path.join(ctlBase, packName)
         animDir = os.path.join(RP, "animations", packName)
         if not os.path.isdir(ctlDir) or not os.path.isdir(animDir):
@@ -584,7 +599,11 @@ def CheckOwnershipWeights(packs, errors):
                         for ref, weight in entry.items():
                             companion = _OWNERSHIP_COMPANION.match(ref)
                             if companion is None:
-                                weighted = True
+                                # 带 1e-4 下限的权重(PLAY_ONCE 尾过渡淡出式 clamp(…,0.0001,1), 见 port.FadeControllerOneShots)
+                                # 到不了 0: 不暂停计时, 原生"播完"判据照常成立。(本检查的正则 2026-09-18 前一直是死的
+                                # —— `\b` 被写成了退格符, 复活后这类条目全部误报)
+                                if not (isinstance(weight, _STRING_TYPES) and _OWNERSHIP_WEIGHT_FLOOR in weight):
+                                    weighted = True
                                 continue
                             if overrideFlags.get(ref):
                                 weighted = True

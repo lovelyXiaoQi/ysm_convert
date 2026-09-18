@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace YsmConvert.Core;
 
 /// <summary>一次转换请求(GUI / CLI / MCP 共用的输入形态)。</summary>
@@ -14,6 +16,9 @@ public sealed class ConvertRequest
 /// <summary>门面: 发现 Java 包、移植、体检、修复、移植基线。所有入口都返回同一种报告。</summary>
 public sealed class ConversionService
 {
+    /// <summary>自动并发时每个内核进程预留的内存(GB)。实测大包峰值: 凋灵娘约 0.7GB, 普通包几百 MB。</summary>
+    public const double MemoryBudgetPerProcessGb = 1.5;
+
     public ConversionService(KernelPaths paths)
     {
         Paths = paths;
@@ -28,23 +33,226 @@ public sealed class ConversionService
 
     public Task<KernelInfo?> GetInfoAsync(CancellationToken ct = default) => Runner.GetInfoAsync(ct);
 
-    public Task<ConversionReport> ConvertAsync(ConvertRequest request, Action<KernelEvent>? onEvent = null,
+    /// <summary>自动并发数: 逻辑核数的一半(最多 8), 再按可用内存 / 每进程预算封顶, 至少 1。</summary>
+    public static int AutoParallelism()
+    {
+        var byCpu = Math.Clamp(Environment.ProcessorCount / 2, 1, 8);
+        var availableGb = MemoryStatus.AvailableGb();
+        var byMemory = availableGb > 0 ? Math.Max(1, (int)(availableGb / MemoryBudgetPerProcessGb)) : byCpu;
+        return Math.Min(byCpu, byMemory);
+    }
+
+    public static int EffectiveParallelism(int requested, int packCount) =>
+        Math.Clamp(requested > 0 ? requested : AutoParallelism(), 1, Math.Max(1, packCount));
+
+    public async Task<ConversionReport> ConvertAsync(ConvertRequest request, Action<KernelEvent>? onEvent = null,
         Action<string>? onStderr = null, CancellationToken ct = default)
     {
         var problems = PackNameRules.Validate(request.Packs);
         if (request.Packs.Count == 0) problems.Insert(0, "没有要转换的 Java 包");
+        foreach (var collection in request.Collections)
+            if (collection.CoverProblem() is { } coverProblem) problems.Add(coverProblem);
         if (problems.Count > 0)
             throw new ArgumentException(string.Join("\n", problems));
-        var job = new JobSpec
+        var refRp = ResolveRefRp(request.Layout, request.RefRp);
+        if (request.Packs.Count == 1)
         {
-            Action = "convert",
-            Layout = request.Layout,
-            RefRp = ResolveRefRp(request.Layout, request.RefRp),
-            Packs = request.Packs,
-            Collections = request.Collections,
-            Options = request.Options,
-        };
-        return RunAsync(job, onEvent, onStderr, ct);
+            var job = new JobSpec
+            {
+                Action = "convert",
+                Layout = request.Layout,
+                RefRp = refRp,
+                Packs = request.Packs,
+                Collections = request.Collections,
+                Options = request.Options,
+            };
+            return await RunAsync(job, onEvent, onStderr, ct).ConfigureAwait(false);
+        }
+        return await ConvertPerPackAsync(request, refRp, onEvent, onStderr, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 多个包: 每包一个内核进程, 最多同时跑 <see cref="EffectiveParallelism"/> 个, 全部结束后跑一次收尾任务(finalize)
+    /// 统一写合集清单与体检。并行之外还有一个理由必须拆进程: 同一个 Python 进程连续转多个大包时内存只涨不回,
+    /// 2026-09-18 实测 30 个包串行跑到第 28 个时 MemoryError, 而那个包单独跑峰值只有 0.7GB。
+    /// 共享文件(sound_definitions.json、合集清单与封面)由内核的跨进程锁保护(port_java_pack.SharedFileLock)。
+    /// </summary>
+    private async Task<ConversionReport> ConvertPerPackAsync(ConvertRequest request, string? refRp,
+        Action<KernelEvent>? onEvent, Action<string>? onStderr, CancellationToken ct)
+    {
+        var report = new ConversionReport { Action = "convert", Layout = request.Layout };
+        var gate = new object();
+        var total = request.Packs.Count;
+        var started = 0;
+        var finished = 0;
+        var startSent = false;
+        var outcome = new Dictionary<string, bool>(StringComparer.Ordinal);
+        string? fatal = null;
+
+        // 子进程的事件来自多个读取线程: 串行化后再交给报告与调用方(GUI 投递到界面线程, CLI 直接打印)
+        void Deliver(KernelEvent e)
+        {
+            lock (gate)
+            {
+                report.Apply(e);
+                onEvent?.Invoke(e);
+            }
+        }
+
+        void Stderr(string line)
+        {
+            lock (gate)
+            {
+                report.Stderr.Add(line);
+                onStderr?.Invoke(line);
+            }
+        }
+
+        using var throttle = new SemaphoreSlim(EffectiveParallelism(request.Options.MaxParallel, total));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+        async Task RunOne(PackSpec pack)
+        {
+            await throttle.WaitAsync(linked.Token).ConfigureAwait(false);
+            var sawDone = false;
+            try
+            {
+                var job = new JobSpec
+                {
+                    Action = "convert",
+                    Layout = request.Layout,
+                    RefRp = refRp,
+                    Packs = { pack },
+                    Options = new ConvertOptions
+                    {
+                        WithMods = request.Options.WithMods,
+                        Validate = false,
+                        CompactJson = request.Options.CompactJson,
+                        WriteCollections = false,
+                    },
+                };
+                await Runner.RunJobAsync(job, e =>
+                {
+                    switch (e.Event)
+                    {
+                        case KernelEvent.Start:
+                            lock (gate)
+                            {
+                                if (startSent) return;
+                                startSent = true;
+                            }
+                            e.Packs = total;
+                            Deliver(e);
+                            return;
+                        case KernelEvent.PackStart:
+                            e.Index = Interlocked.Increment(ref started) - 1;
+                            e.Total = total;
+                            Deliver(e);
+                            return;
+                        case KernelEvent.PackDone:
+                            sawDone = true;
+                            lock (gate) outcome[pack.Name] = e.Ok == true;
+                            e.Index = Interlocked.Increment(ref finished) - 1;
+                            e.Total = total;
+                            Deliver(e);
+                            return;
+                        case KernelEvent.Done:
+                            return;     // 子任务各自的 done 不转发, 最后合成一个
+                        default:
+                            Deliver(e);
+                            return;
+                    }
+                }, Stderr, linked.Token).ConfigureAwait(false);
+            }
+            catch (KernelException ex)
+            {
+                // 解释器起不来(缺 VC++ 2008 运行库、内核文件缺失)对每个包都一样: 记一次, 其余子任务不再启动
+                lock (gate) fatal ??= ex.Details is null ? ex.Message : $"{ex.Message}\n{ex.Details}";
+                linked.Cancel();
+            }
+            finally
+            {
+                throttle.Release();
+            }
+            if (!sawDone && !linked.IsCancellationRequested)
+            {
+                // 子进程没发 pack_done 就退出(被杀 / 崩溃): 补一条失败, 报告与进度都要算上它
+                lock (gate) outcome[pack.Name] = false;
+                Deliver(new KernelEvent
+                {
+                    Event = KernelEvent.PackDone,
+                    PackName = pack.Name,
+                    Ok = false,
+                    Error = "内核进程意外退出, 没有报告结果(完整输出见报告的 stderr 段)",
+                    Errors = 1,
+                    Warnings = 0,
+                    Notices = 0,
+                    Seconds = 0,
+                    Index = Interlocked.Increment(ref finished) - 1,
+                    Total = total,
+                });
+            }
+        }
+
+        try
+        {
+            await Task.WhenAll(request.Packs.Select(RunOne)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && fatal is not null)
+        {
+            // 内核起不来引发的连锁取消, 不是用户点了取消
+        }
+        if (fatal is not null)
+        {
+            report.FatalError = fatal;
+            report.ExitCode = -1;
+            return report;
+        }
+        ct.ThrowIfCancellationRequested();
+
+        var succeeded = request.Packs.Where(p => outcome.TryGetValue(p.Name, out var ok) && ok).ToList();
+        var failedCount = total - succeeded.Count;
+        var validationErrors = 0;
+        var needFinalize = succeeded.Count > 0 && (request.Options.Validate || succeeded.Any(p => p.Collection is not null));
+        if (needFinalize)
+        {
+            var finalize = new JobSpec
+            {
+                Action = "finalize",
+                Layout = request.Layout,
+                RefRp = refRp,
+                Packs = succeeded,
+                Collections = request.Collections,
+                Options = new ConvertOptions { Validate = request.Options.Validate, CompactJson = request.Options.CompactJson },
+            };
+            try
+            {
+                await Runner.RunJobAsync(finalize, e =>
+                {
+                    if (e.Event == KernelEvent.Done)
+                    {
+                        validationErrors = e.ValidationErrors ?? 0;
+                        return;
+                    }
+                    if (e.Event != KernelEvent.Start)
+                        Deliver(e);
+                }, Stderr, ct).ConfigureAwait(false);
+            }
+            catch (KernelException ex)
+            {
+                report.FatalError = ex.Details is null ? ex.Message : $"{ex.Message}\n{ex.Details}";
+            }
+        }
+        Deliver(new KernelEvent
+        {
+            Event = KernelEvent.Done,
+            Ok = failedCount == 0 && validationErrors == 0 && report.FatalError is null,
+            PacksOk = succeeded.Count,
+            PacksFailed = failedCount,
+            ValidationErrors = validationErrors,
+        });
+        report.ExitCode = failedCount == 0 ? 0 : 1;
+        return report;
     }
 
     public Task<ConversionReport> ValidateAsync(OutputLayout layout, IEnumerable<string>? packs = null,
@@ -61,7 +269,8 @@ public sealed class ConversionService
     }
 
     public Task<ConversionReport> FixAsync(OutputLayout layout, IEnumerable<string>? packs = null, bool validate = true,
-        Action<KernelEvent>? onEvent = null, Action<string>? onStderr = null, CancellationToken ct = default)
+        Action<KernelEvent>? onEvent = null, Action<string>? onStderr = null, CancellationToken ct = default,
+        bool compactJson = true)
     {
         var job = new JobSpec
         {
@@ -69,7 +278,7 @@ public sealed class ConversionService
             Layout = layout,
             RefRp = ResolveRefRp(layout, null),
             Packs = (packs ?? Array.Empty<string>()).Select(n => new PackSpec { JavaDir = "", Name = n }).ToList(),
-            Options = new ConvertOptions { Validate = validate },
+            Options = new ConvertOptions { Validate = validate, CompactJson = compactJson },
         };
         return RunAsync(job, onEvent, onStderr, ct);
     }
@@ -82,7 +291,8 @@ public sealed class ConversionService
             Action = "baseline",
             Layout = layout,
             Packs = new List<PackSpec> { new() { JavaDir = Path.GetFullPath(javaDefaultDir), Name = "java_default" } },
-            Options = new ConvertOptions { WithMods = withMods, Validate = false },
+            // 基线在 YSM 主工程里入库, 保持缩进
+            Options = new ConvertOptions { WithMods = withMods, Validate = false, CompactJson = false },
         };
         return RunAsync(job, onEvent, onStderr, ct);
     }
@@ -148,17 +358,40 @@ public static class ConvertPlan
         }
         return packs;
     }
+}
 
-    /// <summary>合集的显示信息: 优先任务里给的, 否则从 Java 源旁的 ysm-pack.json 由内核照搬(这里不重复解析)。</summary>
-    public static List<CollectionSpec> BuildCollections(IEnumerable<PackSpec> packs, CollectionSpec? given)
+/// <summary>系统可用内存(GB): 可用物理内存与可用提交额度取小; 取不到时返回 0。</summary>
+internal static class MemoryStatus
+{
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryStatusEx
     {
-        var dirs = packs.Select(p => p.Collection).Where(c => c is not null).Distinct().ToList();
-        var specs = new List<CollectionSpec>();
-        foreach (var dir in dirs)
+        public uint Length;
+        public uint MemoryLoad;
+        public ulong TotalPhys;
+        public ulong AvailPhys;
+        public ulong TotalPageFile;
+        public ulong AvailPageFile;
+        public ulong TotalVirtual;
+        public ulong AvailVirtual;
+        public ulong AvailExtendedVirtual;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx buffer);
+
+    public static double AvailableGb()
+    {
+        try
         {
-            if (given is not null && given.Dir == dir)
-                specs.Add(given);
+            var status = new MemoryStatusEx { Length = (uint)Marshal.SizeOf<MemoryStatusEx>() };
+            if (!GlobalMemoryStatusEx(ref status)) return 0;
+            return Math.Min(status.AvailPhys, status.AvailPageFile) / (1024.0 * 1024 * 1024);
         }
-        return specs;
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return 0;
+        }
     }
 }

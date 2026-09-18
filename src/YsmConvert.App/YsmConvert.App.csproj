@@ -17,9 +17,10 @@
     <ProjectReference Include="..\YsmConvert.Core\YsmConvert.Core.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- 窗口标题栏图标(Window.Icon 走 pack URI, 需要嵌成资源) -->
-    <Resource Include="..\..\icon.ico" Link="icon.ico" />
-  </ItemGroup>
+  <!--
+    窗口标题栏图标不再单独嵌资源: ApplicationIcon 已把图标编进 exe 的 PE 资源, WPF 的 Window 没有显式
+    Icon 时会自动用主模块的图标。早先那条 <Resource Include="..\..\icon.ico" /> 会让 icon.ico 原样
+    出现在发布目录里, 看着像发布包自带的源文件, 容易被当成多余文件删掉(2026-09-18 真删过一次, 构建随即 CS7064)。
+  -->
 
 </Project>

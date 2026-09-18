@@ -46,8 +46,10 @@ public sealed class MainViewModel : ObservableObject
         FixCommand = new RelayCommand(async () => await FixAsync(), () => !IsRunning && _service is not null);
         OpenOutputCommand = new RelayCommand(OpenOutput);
         ExportLogCommand = new RelayCommand(ExportLog, () => _lastReport is not null);
-        OpenDocCommand = new RelayCommand(OpenDoc);
-        OpenDocsFolderCommand = new RelayCommand(() => OpenPath(_service?.Paths.DocsDir));
+        OpenWikiCommand = new RelayCommand(() => OpenUrl(YsmLinks.WikiUrl));
+        OpenRepoCommand = new RelayCommand(() => OpenUrl(YsmLinks.RepoUrl));
+        BrowseCoverCommand = new RelayCommand(BrowseCover, () => !IsRunning);
+        ClearCoverCommand = new RelayCommand(() => CollectionCover = "", () => !IsRunning);
         ApplyCollectionCommand = new RelayCommand(ApplyCollection, () => !IsRunning);
         CopyAttentionCommand = new RelayCommand(CopyAttention, () => Attention.Count > 0);
 
@@ -66,7 +68,10 @@ public sealed class MainViewModel : ObservableObject
     public ICollectionView LogView { get; }
     public ObservableCollection<AttentionEntry> Attention { get; } = new();
     public ObservableCollection<ValidationEntry> ValidationItems { get; } = new();
-    public ObservableCollection<DocInfo> Docs { get; } = new();
+    /// <summary>线上文档与教程(人看的); core/docs 的本地副本只给 AI 通过 MCP 查。</summary>
+    public string WikiUrl => YsmLinks.WikiUrl;
+    /// <summary>转换器本身的开源仓库。</summary>
+    public string RepoUrl => YsmLinks.RepoUrl;
 
     // ---------------------------------------------------------------- settings-backed properties
     public string OutputRoot { get => _settings.OutputRoot; set { if (_settings.OutputRoot != value) { _settings.OutputRoot = value; OnPropertyChanged(); } } }
@@ -77,8 +82,9 @@ public sealed class MainViewModel : ObservableObject
     public bool ValidateAfter { get => _settings.ValidateAfter; set { if (_settings.ValidateAfter != value) { _settings.ValidateAfter = value; OnPropertyChanged(); } } }
     public bool UseCollection { get => _settings.UseCollection; set { if (_settings.UseCollection != value) { _settings.UseCollection = value; OnPropertyChanged(); } } }
     public string CollectionDir { get => _settings.CollectionDir; set { if (_settings.CollectionDir != value) { _settings.CollectionDir = value; OnPropertyChanged(); } } }
-    public string CollectionNameZh { get => _settings.CollectionNameZh; set { if (_settings.CollectionNameZh != value) { _settings.CollectionNameZh = value; OnPropertyChanged(); } } }
-    public string CollectionNameEn { get => _settings.CollectionNameEn; set { if (_settings.CollectionNameEn != value) { _settings.CollectionNameEn = value; OnPropertyChanged(); } } }
+    public string CollectionName { get => _settings.CollectionName; set { if (_settings.CollectionName != value) { _settings.CollectionName = value; OnPropertyChanged(); } } }
+    public string CollectionCover { get => _settings.CollectionCover; set { if (_settings.CollectionCover != value) { _settings.CollectionCover = value; OnPropertyChanged(); } } }
+    public bool CompactJson { get => _settings.CompactJson; set { if (_settings.CompactJson != value) { _settings.CompactJson = value; OnPropertyChanged(); } } }
     public bool ShowDetails
     {
         get => _settings.ShowDetails;
@@ -98,7 +104,7 @@ public sealed class MainViewModel : ObservableObject
         private set
         {
             if (!SetProperty(ref _isRunning, value)) return;
-            foreach (var c in new[] { AddPacksCommand, RemoveSelectedCommand, ClearCommand, BrowseOutputCommand, RunCommand, CancelCommand, ValidateCommand, FixCommand, ApplyCollectionCommand })
+            foreach (var c in new[] { AddPacksCommand, RemoveSelectedCommand, ClearCommand, BrowseOutputCommand, RunCommand, CancelCommand, ValidateCommand, FixCommand, ApplyCollectionCommand, BrowseCoverCommand, ClearCoverCommand })
                 c.RaiseCanExecuteChanged();
         }
     }
@@ -123,10 +129,12 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand FixCommand { get; }
     public RelayCommand OpenOutputCommand { get; }
     public RelayCommand ExportLogCommand { get; }
-    public RelayCommand OpenDocCommand { get; }
-    public RelayCommand OpenDocsFolderCommand { get; }
+    public RelayCommand OpenWikiCommand { get; }
+    public RelayCommand OpenRepoCommand { get; }
     public RelayCommand ApplyCollectionCommand { get; }
     public RelayCommand CopyAttentionCommand { get; }
+    public RelayCommand BrowseCoverCommand { get; }
+    public RelayCommand ClearCoverCommand { get; }
 
     // ---------------------------------------------------------------- kernel
     private async Task InitKernelAsync()
@@ -138,8 +146,6 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
         _service = new ConversionService(paths!);
-        foreach (var doc in new DocsLibrary(paths!.DocsDir).List())
-            Docs.Add(doc);
         try
         {
             await _service.GetInfoAsync();
@@ -237,6 +243,24 @@ public sealed class MainViewModel : ObservableObject
             OutputRoot = dialog.FolderName;
     }
 
+    private void BrowseCover()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "选择文件夹封面图(PNG, 不超过 1MB, 最好是 Java 卡片 52x90 的比例)",
+            Filter = "PNG 图片 (*.png)|*.png",
+        };
+        if (!string.IsNullOrEmpty(CollectionCover) && File.Exists(CollectionCover))
+            dialog.InitialDirectory = Path.GetDirectoryName(CollectionCover);
+        if (dialog.ShowDialog() != true) return;
+        if (new CollectionSpec { Dir = "cover", CoverImage = dialog.FileName }.CoverProblem() is { } problem)
+        {
+            MessageBox.Show(problem, "文件夹封面", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        CollectionCover = dialog.FileName;
+    }
+
     private OutputLayout? ResolveLayout(bool allowCreate)
     {
         if (string.IsNullOrWhiteSpace(OutputRoot))
@@ -287,14 +311,23 @@ public sealed class MainViewModel : ObservableObject
         }
         var collections = new List<CollectionSpec>();
         var dir = CollectionDir.Trim();
-        if (packs.Any(p => p.Collection == dir) && (!string.IsNullOrWhiteSpace(CollectionNameZh) || !string.IsNullOrWhiteSpace(CollectionNameEn)))
-            collections.Add(new CollectionSpec { Dir = dir, NameZh = CollectionNameZh.Trim(), Name = CollectionNameEn.Trim() });
+        var collectionSpec = new CollectionSpec { Dir = dir, Name = CollectionName.Trim(), CoverImage = CollectionCover.Trim() };
+        if (UseCollection && dir.Length > 0 && packs.Any(p => p.Collection == dir) && !collectionSpec.IsEmpty)
+        {
+            if (collectionSpec.CoverProblem() is { } coverProblem)
+            {
+                MessageBox.Show(coverProblem, "文件夹封面有问题", MessageBoxButton.OK, MessageBoxImage.Warning);
+                StatusText = coverProblem;
+                return;
+            }
+            collections.Add(collectionSpec);
+        }
         var request = new ConvertRequest
         {
             Layout = layout,
             Packs = packs,
             Collections = collections,
-            Options = new ConvertOptions { WithMods = WithMods, Validate = ValidateAfter },
+            Options = new ConvertOptions { WithMods = WithMods, Validate = ValidateAfter, CompactJson = CompactJson },
         };
         var byName = enabled.ToDictionary(p => p.Name.Trim());
         foreach (var p in enabled)
@@ -324,7 +357,8 @@ public sealed class MainViewModel : ObservableObject
         if (layout is null) return;
         var names = Packs.Where(p => p.Enabled).Select(p => p.Name.Trim()).ToList();
         var byName = Packs.Where(p => p.Enabled).ToDictionary(p => p.Name.Trim());
-        await ExecuteAsync("修复", byName, names.Count, ct => _service.FixAsync(layout, names, ValidateAfter, e => OnKernelEvent(e, byName), OnStderr, ct));
+        await ExecuteAsync("修复", byName, names.Count,
+            ct => _service.FixAsync(layout, names, ValidateAfter, e => OnKernelEvent(e, byName), OnStderr, ct, CompactJson));
     }
 
     private async Task ExecuteAsync(string verb, Dictionary<string, PackItem> byName, int total,
@@ -333,6 +367,10 @@ public sealed class MainViewModel : ObservableObject
         Logs.Clear();
         Attention.Clear();
         ValidationItems.Clear();
+        _pendingLogs.Clear();
+        _molangStream = new MolangPresentation.StreamBuffer();
+        _runningPacks.Clear();
+        _finishedPacks = 0;
         OnPropertyChanged(nameof(AttentionCount));
         Progress = 0;
         IsIndeterminate = total == 0;
@@ -411,6 +449,29 @@ public sealed class MainViewModel : ObservableObject
             ? $"耗时 {(int)elapsed.TotalHours}:{elapsed.Minutes:00}:{elapsed.Seconds:00}"
             : $"耗时 {elapsed.Minutes}:{elapsed.Seconds:00}.{elapsed.Milliseconds / 100}";
 
+    // 多个包并行转换时各包的事件会交错到达: 日志按包缓冲, 该包完成时整块写入日志面板
+    // (内核本来就是一个包转完才吐出它的全部日志行, 缓冲不损失实时性)
+    private readonly Dictionary<string, List<LogEntry>> _pendingLogs = new(StringComparer.Ordinal);
+    private MolangPresentation.StreamBuffer _molangStream = new();
+    private readonly List<string> _runningPacks = new();
+    private int _finishedPacks;
+
+    private List<LogEntry> PendingFor(string? pack)
+    {
+        var key = pack ?? "";
+        if (!_pendingLogs.TryGetValue(key, out var list))
+            _pendingLogs[key] = list = new List<LogEntry>();
+        return list;
+    }
+
+    private void UpdateRunningStatus(int total)
+    {
+        var running = _runningPacks.Count == 0
+            ? ""
+            : $", 正在转换: {string.Join("、", _runningPacks.Take(3))}{(_runningPacks.Count > 3 ? $" 等 {_runningPacks.Count} 个" : "")}";
+        StatusText = $"已完成 {_finishedPacks}/{total}{running}";
+    }
+
     private void OnKernelEvent(KernelEvent e, Dictionary<string, PackItem> byName)
     {
         _ui.Post(_ =>
@@ -420,30 +481,43 @@ public sealed class MainViewModel : ObservableObject
                 case KernelEvent.PackStart:
                     if (e.PackName is not null && byName.TryGetValue(e.PackName, out var starting))
                         starting.Status = "转换中";
-                    if (e.Total is > 0)
-                        Progress = 100.0 * (e.Index ?? 0) / e.Total.Value;
-                    StatusText = $"[{(e.Index ?? 0) + 1}/{e.Total}] {e.PackName}";
-                    Logs.Add(new LogEntry(e.PackName ?? "", "info", $"== {e.PackName}{(e.JavaDir is null ? "" : "  <- " + e.JavaDir)}"));
+                    if (e.PackName is not null) _runningPacks.Add(e.PackName);
+                    PendingFor(e.PackName).Add(new LogEntry(e.PackName ?? "", "info",
+                        $"== {e.PackName}{(e.JavaDir is null ? "" : "  <- " + e.JavaDir)}"));
+                    UpdateRunningStatus(e.Total ?? byName.Count);
                     break;
                 case KernelEvent.Log:
-                    Logs.Add(new LogEntry(e.PackName ?? "", e.Level ?? "info", e.Text ?? ""));
+                    PendingFor(e.PackName).Add(new LogEntry(e.PackName ?? "", e.Level ?? "info", e.Text ?? ""));
                     break;
                 case KernelEvent.Molang:
-                    if (e.Attention == true)
-                        Logs.Add(new LogEntry(e.PackName ?? "", "notice", $"[!] molang/{e.Kind}: {e.Label} x{e.Count}"));
+                    if (_molangStream.Line(e) is { } molangLine)
+                        PendingFor(e.PackName).Add(new LogEntry(e.PackName ?? "",
+                            MolangPresentation.Severity(e.Kind) == "info" ? "info" : "notice", molangLine));
                     break;
                 case KernelEvent.PackDone:
                     if (e.PackName is not null && byName.TryGetValue(e.PackName, out var done))
                         done.Status = e.Ok == true ? "完成" : "失败";
-                    Logs.Add(new LogEntry(e.PackName ?? "", e.Ok == true ? "info" : "error",
+                    var block = PendingFor(e.PackName);
+                    if (_molangStream.Flush(e.PackName) is { } lowerLine)
+                        block.Add(new LogEntry(e.PackName ?? "", "info", lowerLine));
+                    block.Add(new LogEntry(e.PackName ?? "", e.Ok == true ? "info" : "error",
                         e.Ok == true
                             ? $"-> 完成 {e.Seconds:0.0}s  错误 {e.Errors} / 警告 {e.Warnings} / 提醒 {e.Notices}"
                             : $"-> 失败: {e.Error}"));
+                    foreach (var entry in block) Logs.Add(entry);
+                    _pendingLogs.Remove(e.PackName ?? "");
+                    if (e.PackName is not null) _runningPacks.Remove(e.PackName);
+                    _finishedPacks++;
                     if (e.Total is > 0)
-                        Progress = 100.0 * ((e.Index ?? 0) + 1) / e.Total.Value;
+                        Progress = 100.0 * _finishedPacks / e.Total.Value;
+                    UpdateRunningStatus(e.Total ?? byName.Count);
                     break;
                 case KernelEvent.Collection:
                     Logs.Add(new LogEntry("", "info", $"合集清单 {e.Dir}: {(e.Written == true ? "已写入" : "沿用 Java 源")} {e.Path}"));
+                    if (e.ExtraString("cover") is { Length: > 0 } cover)
+                        Logs.Add(new LogEntry("", "info", $"   文件夹封面 → {cover}.png"));
+                    if (e.ExtraString("warning") is { Length: > 0 } coverWarning)
+                        Logs.Add(new LogEntry("", "warn", $"   [WARN] {coverWarning}"));
                     break;
                 case KernelEvent.ValidateItem:
                     Logs.Add(new LogEntry("", e.Level == "error" ? "error" : "warn", $"体检: {e.Text}"));
@@ -471,17 +545,17 @@ public sealed class MainViewModel : ObservableObject
         Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
     }
 
-    private void OpenDoc(object? parameter)
+    /// <summary>用系统默认浏览器打开网址。</summary>
+    public void OpenUrl(string url)
     {
-        if (_service is null) return;
-        var name = parameter switch
+        try
         {
-            DocInfo d => d.Name,
-            string s => s,
-            _ => null,
-        };
-        if (name is null) return;
-        OpenPath(Path.Combine(_service.Paths.DocsDir, name));
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            StatusText = $"打不开浏览器: {ex.Message}(网址 {url})";
+        }
     }
 
     private void ExportLog()

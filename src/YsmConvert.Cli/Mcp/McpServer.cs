@@ -162,6 +162,10 @@ internal sealed class McpServer
         "YSM 模型转换器: 把 Java 版 YSM 模型包(未加密目录, 含 ysm.json)转换成网易基岩版组件。" +
         "典型流程: ysm_discover 找包 → ysm_convert 转换(返回需要开发者过目的告警清单与产物路径) → 按告警读产物文件手工修改 → " +
         "ysm_validate 复检(0 错误才能进游戏) → 需要时 ysm_fix 对已落盘产物补跑修复规则。告警看不懂用 ysm_explain, 规则细节用 ysm_docs 检索随附文档。" +
+        " 产物 JSON 缺省压成一行; 要逐行阅读或手工改产物时, ysm_convert / ysm_fix 传 pretty=true 按缩进落盘。" +
+        " attention 的 severity: error/warn 要修, notice 要看(molang 置零/退化/未知函数), info 知道即可(中性常量 = 基岩没有的 Java 量按常量处理、动画名转小写按包汇总)。" +
+        " 天气/血量/roaming 存档等 Java 专有量由 YSM 主组件运行层提供(ysm.json 顶级 java_state 声明), 产物要搭配同期或更新的主组件。" +
+        $" 给人看的同一批文档在线上 Wiki: {YsmLinks.WikiUrl}(引导用户去那里, 自己查用 ysm_docs)。" +
         (_defaultOut is null ? "" : $" 缺省输出目录: {_defaultOut}。") +
         (_kernelError is null ? "" : $" 注意: 内核当前不可用({_kernelError}), 只有文档类工具能用。");
 
@@ -208,22 +212,25 @@ internal sealed class McpServer
                    ("out", "string", "组件根目录(缺省用服务器启动时的 --out)", false),
                    ("component", "string", "新建/复用独立组件名(英文数字下划线)", false),
                    ("collection", "string", "把全部包归入这个合集文件夹(目录名)", false),
-                   ("collectionNameZh", "string", "合集中文显示名", false),
-                   ("collectionName", "string", "合集英文显示名", false),
+                   ("collectionName", "string", "文件夹在游戏里显示的名字(缺省沿用 Java 合集自带的名字)", false),
+                   ("collectionCover", "string", "文件夹封面图 PNG 的路径(不超过 1MB, 最好是 Java 卡片 52x90 的比例; 缺省用合集自带的 ysm-pack.png)", false),
                    ("prefix", "string", "包名统一前缀(缺省用内核建议名: 拼音化 + 合集前缀)", false),
                    ("renames", "object", "逐包指定包名: {\"<Java 文件夹名>\": \"<包名>\"}", false),
                    ("withMods", "boolean", "携带第三方模组联动动画, 缺省 false", false),
                    ("validate", "boolean", "转换后跑资源包体检, 缺省 true", false),
+                   ("pretty", "boolean", "产物 JSON 按 2 空格缩进(缺省 false = 压成一行, 体积约省 70%; 要逐行读产物、手工改 bug 时设 true)", false),
+                   ("jobs", "integer", "同时转换的包数(缺省自动; 多个包总是每包一个内核进程)", false),
                    ("refRp", "string", "java_default 基线所在资源包(缺省自动)", false),
                    ("details", "boolean", "报告里带全部内核日志行, 缺省 false", false))),
         Tool("ysm_validate", "对已落盘的产物跑引擎红线体检(molang 语法/资源 ID/空节点/音频登记...)。错误项意味着整份文件会被引擎拒载, 必须修到 0。",
             Schema(("out", "string", "组件根目录", false), ("packs", "string[]", "只体检这些包名(缺省全部)", false))),
         Tool("ysm_fix", "对已落盘的产物就地补跑修复规则(幂等): 控制器死引用剪枝、ysm.json 精简、通道表达式规范化、预览实体变量回填等。Java 源不在手边时用它; 有源的话重新 ysm_convert 更完整。",
-            Schema(("out", "string", "组件根目录", false), ("packs", "string[]", "只修这些包名(缺省全部)", false), ("validate", "boolean", "修完体检, 缺省 true", false))),
+            Schema(("out", "string", "组件根目录", false), ("packs", "string[]", "只修这些包名(缺省全部)", false), ("validate", "boolean", "修完体检, 缺省 true", false),
+                   ("pretty", "boolean", "写回的 JSON 按 2 空格缩进(缺省 false = 压成一行)", false))),
         Tool("ysm_baseline", "把 Java 版内置 default 模型移植成 java_default 基线动画(只产出资源包动画, 不出现在模型列表)。Java 包缺的拉弓/举盾/游泳等动画靠它回落; 只有 YSM 主组件工程需要跑一次。",
             Schema(("javaDefaultDir", "string", "Java 版 assets/ysm/builtin/default 目录", true), ("out", "string", "YSM 主组件工程根目录", false), ("withMods", "boolean", "携带模组联动动画", false))),
         Tool("ysm_explain", "解释一条内核告警/体检文本或 molang 留痕标签: 它意味着什么、要不要处理、该查哪份文档。",
-            Schema(("text", "string", "告警文本或 molang 标签", true), ("kind", "string", "molang 类别(zero/func/warn/lower/map)或 log/validation, 缺省自动", false))),
+            Schema(("text", "string", "告警文本或 molang 标签", true), ("kind", "string", "molang 类别(map/const/zero/func/warn/lower/norm/skip/tick)或 log/validation, 缺省自动", false))),
         Tool("ysm_docs", "随附的 YSM 移植文档(格式速查/移植教程/molang 映射清单/动画机制对照)。不带参数列出文档; name 读整篇; name+section 读某个标题下的章节; query 全文检索。",
             Schema(("name", "string", "文档文件名(如 ysm-java-molang-mapping.md)", false), ("section", "string", "标题包含的文字", false), ("query", "string", "关键字检索", false))),
         Tool("ysm_last_report", "上一次 convert/validate/fix 的完整报告(文本 + JSON)。",
@@ -256,7 +263,8 @@ internal sealed class McpServer
             case "ysm_fix":
             {
                 var layout = ResolveLayout(args, allowCreate: false);
-                var report = await RequireService().FixAsync(layout, StringList(args["packs"]), Bool(args["validate"]) ?? true, ct: ct).ConfigureAwait(false);
+                var report = await RequireService().FixAsync(layout, StringList(args["packs"]), Bool(args["validate"]) ?? true, ct: ct,
+                    compactJson: !(Bool(args["pretty"]) ?? false)).ConfigureAwait(false);
                 _lastReport = report;
                 return ReportText(report, Bool(args["details"]) ?? false);
             }
@@ -331,6 +339,9 @@ internal sealed class McpServer
             ["bundledRefRp"] = _service?.Paths.BundledRefRp,
             ["defaultOut"] = _defaultOut,
             ["docs"] = new JsonArray(_docs.List().Select(d => (JsonNode)new JsonObject { ["name"] = d.Name, ["title"] = d.Title, ["bytes"] = d.Size }).ToArray()),
+            ["wiki"] = YsmLinks.WikiUrl,
+            ["repo"] = YsmLinks.RepoUrl,
+            ["autoParallelism"] = ConversionService.AutoParallelism(),
         };
         return obj.ToJsonString(JsonPretty);
     }
@@ -348,21 +359,28 @@ internal sealed class McpServer
                 if (kv.Value is not null) renames[kv.Key] = kv.Value.GetValue<string>();
         var packs = ConvertPlan.BuildPacks(discovered, args["prefix"]?.GetValue<string>(), args["collection"]?.GetValue<string>(), renames);
         var collections = new List<CollectionSpec>();
-        if (args["collection"]?.GetValue<string>() is { } dir && (args["collectionNameZh"] is not null || args["collectionName"] is not null))
+        if (args["collection"]?.GetValue<string>() is { } dir)
         {
-            collections.Add(new CollectionSpec
+            var spec = new CollectionSpec
             {
                 Dir = dir,
                 Name = args["collectionName"]?.GetValue<string>(),
-                NameZh = args["collectionNameZh"]?.GetValue<string>(),
-            });
+                CoverImage = args["collectionCover"]?.GetValue<string>(),
+            };
+            if (!spec.IsEmpty) collections.Add(spec);
         }
         var request = new ConvertRequest
         {
             Layout = layout,
             Packs = packs,
             Collections = collections,
-            Options = new ConvertOptions { WithMods = Bool(args["withMods"]) ?? false, Validate = Bool(args["validate"]) ?? true },
+            Options = new ConvertOptions
+            {
+                WithMods = Bool(args["withMods"]) ?? false,
+                Validate = Bool(args["validate"]) ?? true,
+                CompactJson = !(Bool(args["pretty"]) ?? false),
+                MaxParallel = Int(args["jobs"]) ?? 0,
+            },
             RefRp = args["refRp"]?.GetValue<string>(),
         };
         var report = await service.ConvertAsync(request, ct: ct).ConfigureAwait(false);
@@ -459,15 +477,26 @@ internal sealed class McpServer
 
     private static Explanation ExplainAny(string text, string? kind)
     {
-        if (kind is "zero" or "func" or "warn" or "lower" or "map")
-            return WarningCatalog.ExplainMolang(kind, text);
+        if (WarningCatalog.IsMolangKind(kind))
+            return WarningCatalog.ExplainMolang(kind!, StripMolangPrefix(text, kind!));
         if (kind == "validation")
             return WarningCatalog.ExplainValidation("error", text);
         var colon = text.IndexOf(':');
-        if (kind is null && colon > 0 && colon < 6 && text[..colon] is "zero" or "func" or "warn" or "lower" or "map")
+        if (kind is null && colon > 0 && colon < 6 && WarningCatalog.IsMolangKind(text[..colon]))
             return WarningCatalog.ExplainMolang(text[..colon], text[(colon + 1)..]);
+        // 日志/报告里的展示形态: "[!] molang/zero: 标签 xN" / "[i] molang/const: ..."
+        var shown = System.Text.RegularExpressions.Regex.Match(text, @"molang/([a-z]+):\s*(.*?)(?:\s+x\d+)?\s*$");
+        if (shown.Success && WarningCatalog.IsMolangKind(shown.Groups[1].Value))
+            return WarningCatalog.ExplainMolang(shown.Groups[1].Value, shown.Groups[2].Value);
         var level = text.TrimStart().StartsWith("[ERROR]") ? "error" : text.TrimStart().StartsWith("[WARN]") ? "warn" : "notice";
         return WarningCatalog.ExplainLog(level, text);
+    }
+
+    /// <summary>"map:is_maid -> 0.0" 这类带类别前缀的原始标签 → 正文(不带前缀原样返回)。</summary>
+    private static string StripMolangPrefix(string text, string kind)
+    {
+        var colon = text.IndexOf(':');
+        return colon > 0 && colon < 6 && WarningCatalog.IsMolangKind(text[..colon]) ? text[(colon + 1)..] : text;
     }
 
     private static List<string> StringList(JsonNode? node)
@@ -479,6 +508,17 @@ internal sealed class McpServer
         else if (node is JsonValue value && value.TryGetValue<string>(out var single))
             list.Add(single);
         return list;
+    }
+
+    private static int? Int(JsonNode? node)
+    {
+        if (node is JsonValue value)
+        {
+            if (value.TryGetValue<int>(out var i)) return i;
+            if (value.TryGetValue<double>(out var d)) return (int)d;
+            if (value.TryGetValue<string>(out var s) && int.TryParse(s, out var parsed)) return parsed;
+        }
+        return null;
     }
 
     private static bool? Bool(JsonNode? node)

@@ -13,8 +13,12 @@ public sealed class AppSettings
     public bool ValidateAfter { get; set; } = true;
     public bool UseCollection { get; set; }
     public string CollectionDir { get; set; } = "";
-    public string CollectionNameZh { get; set; } = "";
-    public string CollectionNameEn { get; set; } = "";
+    /// <summary>文件夹显示名(网易版只显示一个名字)。</summary>
+    public string CollectionName { get; set; } = "";
+    /// <summary>文件夹封面图(PNG)路径, 空 = 用 Java 合集自带的 ysm-pack.png 或默认封面。</summary>
+    public string CollectionCover { get; set; } = "";
+    /// <summary>产物 JSON 压成一行。</summary>
+    public bool CompactJson { get; set; } = true;
     public string LastInputDir { get; set; } = "";
     public bool ShowDetails { get; set; }
 }

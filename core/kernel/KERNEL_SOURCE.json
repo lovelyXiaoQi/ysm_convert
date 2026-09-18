@@ -2,25 +2,26 @@
     "source":  "D:\\MCStudioDownload\\work\\icegamestudio@163.com\\Cpp\\AddOn\\ysm",
     "commit":  "dda9740a1742099628b698c409ea49992585ade8",
     "dirty":  true,
-    "syncedAt":  "2026-09-18T15:44:34",
-    "devtools":  [
-                     "port_cli.py",
-                     "port_java_pack.py",
-                     "molang_syntax.py",
-                     "script_controller.py",
-                     "fix_ported_controllers.py",
-                     "validate_rp_animations.py",
-                     "data_bedrock_queries.json",
-                     "data_engine_binary_tokens.json",
-                     "data_netease_vanilla_tokens.json"
-                 ],
+    "syncedAt":  "2026-09-19T01:07:45",
     "modules":  [
-                    "ysmModelScripts\\__init__.py",
-                    "ysmModelScripts\\data\\__init__.py",
-                    "ysmModelScripts\\data\\baseAnimations.py",
-                    "ysmModelScripts\\data\\molangBase.py",
-                    "ysmModelScripts\\data\\skinBuilder.py",
-                    "ysmModelScripts\\packLoader\\__init__.py",
-                    "ysmModelScripts\\packLoader\\packParser.py"
-                ]
+                    "devtools\\fix_ported_controllers.py",
+                    "devtools\\java_runtime_bindings.py",
+                    "devtools\\molang_syntax.py",
+                    "devtools\\port_cli.py",
+                    "devtools\\port_java_pack.py",
+                    "devtools\\script_controller.py",
+                    "devtools\\validate_rp_animations.py",
+                    "ysm_bp\\ysmModelScripts\\__init__.py",
+                    "ysm_bp\\ysmModelScripts\\data\\__init__.py",
+                    "ysm_bp\\ysmModelScripts\\data\\baseAnimations.py",
+                    "ysm_bp\\ysmModelScripts\\data\\molangBase.py",
+                    "ysm_bp\\ysmModelScripts\\data\\skinBuilder.py",
+                    "ysm_bp\\ysmModelScripts\\packLoader\\__init__.py",
+                    "ysm_bp\\ysmModelScripts\\packLoader\\packParser.py"
+                ],
+    "data":  [
+                 "devtools\\data_bedrock_queries.json",
+                 "devtools\\data_engine_binary_tokens.json",
+                 "devtools\\data_netease_vanilla_tokens.json"
+             ]
 }

@@ -64,7 +64,8 @@ custom/纸板狐模型包/                    你的组件/
 - 资源**只放资源包一份**。主包启动时扫描资源包磁盘,自动索引该命名空间下全部动画/
   控制器 ID 与 molang 变量——不存在"忘了同步另一份"的问题。
 - 一个组件可以放多个 `<包名>/`;Java **合集包**形态(`ysm_models/<合集>/<子包>/ysm.json`
-  + 合集目录 `ysm-pack.json`)同样支持,自动生成选择界面文件夹分组。
+  + 合集目录 `ysm-pack.json`)同样支持,自动生成选择界面文件夹分组。文件夹封面写在 `ysm-pack.json`
+  的 `folder_texture`(资源包纹理路径,图按 Java 口径画 52x90,底部约 20 px 留给名字),不写用默认文件夹图。
 - 无需任何 Python 代码、无需清单注册——放对位置即被发现。
 
 ---
@@ -107,7 +108,7 @@ custom/纸板狐模型包/                    你的组件/
 | `player.animation` | ✅ | **Java 原生 dict 槽位形态原样可用**(`main`/`extra` 进主域,`arm`/`fp_arm` 进第一人称域);另有更灵活的**列表混排**扩展形态(推荐,见第 5 步)。模组联动槽位(`tac`/`carryon`/`parcool`/`swem`/`slashblade`/`tlm`/`immersive_melodies`/`irons_spell_books`)的处置见第 5.6 节 |
 | `player.animation_controllers` | ✅ | 照抄;文件内全部控制器导入并**常开**(对齐 Java"控制器加载即接管") |
 | `player.texture` | ✅ | 字符串与 `{uv}` 形态照抄(皮肤名=文件名去扩展);**PBR(`normal`/`specular`)忽略**;另有 `{"皮肤名": "真实路径"}` 扩展形态(皮肤名与文件名不一致/共享贴图) |
-| `projectiles` / `vehicles` / `arrow` | ✅ | 对象形态(2.5.0)与 `match` 数组形态(2.5.2+)都支持,废弃字段 `files.arrow` 按 `minecraft:arrow` 弹射物转换;实体 ID 自动映射 JE↔BE 差异(`minecraft:trident`→`thrown_trident`、`fishing_bobber`→`fishing_hook`);**`#实体tag` 匹配不支持**,请展开写具体实体 ID;`controller` 字段支持;播放按 Java 通道语义:只有谓词状态键(弹射物 `water`/`fire`/`ground`/`air`,载具 `water`/`ground`/`fly`/`forward`/`idle`/`has_ride`/`not_ride`)与 `parallel0-7`(载具另有 `pre_parallel0-7`)直接播,其余动画只注册;模型文件名里的大写/点号自动规整(`GMA_T.50` → `gma_t_50`);载具按 Java 硬编码缩放 0.7(自动外包根骨骼)、第一乘客写入且下车不撤随实体存档,船/运输船/矿车因引擎硬编码渲染改走客户端替身实体(矿车朝向按车底轨道推) |
+| `projectiles` / `vehicles` / `arrow` | ✅ | 对象形态(2.5.0)与 `match` 数组形态(2.5.2+)都支持,废弃字段 `files.arrow` 按 `minecraft:arrow` 弹射物转换;实体 ID 自动映射 JE↔BE 差异(`minecraft:trident`→`thrown_trident`、`fishing_bobber`→`fishing_hook`);**`#实体tag` 匹配不支持**,请展开写具体实体 ID;`controller` 字段支持(通道名 `projectile.parallel_0-7`/`projectile.main` 等按名接管同名通道,其余通道照常自动播;箭类的 `ysm.in_ground` 近似为在地判据);播放按 Java 通道语义:只有谓词状态键(弹射物 `water`/`fire`/`ground`/`air`,载具 `water`/`ground`/`fly`/`forward`/`idle`/`has_ride`/`not_ride`)与 `parallel0-7`(载具另有 `pre_parallel0-7`)直接播,其余动画只注册;模型文件名里的大写/点号自动规整(`GMA_T.50` → `gma_t_50`);载具按 Java 硬编码缩放 0.7(自动外包根骨骼)、第一乘客写入且下车不撤随实体存档,船/运输船/矿车是引擎硬编码渲染,直接换上后由运行层在根骨骼上补朝向(矿车照 Java 按车底轨道形状定) |
 | `sound_path` | ✅ | 音效自动移植(2026-09-16):`sounds/`(或 `files.sound_path`/`files.player.sound_path` 指定的目录)里的 ogg 随动画音频关键帧一起搬到 `ysm_rp/sounds/ysm/<包>/`,定义与注册由工具生成;原版音效 ID(含 `:`)两边命名不同,需人工对照 |
 | `function_path` | ❌ | 自定义函数(`functions/*.molang`)暂不支持:过程式脚本,无表达式等价物(见映射文档§三) |
 | `language_path` | 🔶 | 移植工具读 `lang/zh_cn.json`(或 `files.language_path`)把中文显示文本**烘进 ysm.json**:模型名/简介/作者、轮盘条目名(值为 `#按钮` 时顶替按钮名)、配置表单标题/说明/单选项名。`.desc` 悬浮说明与皮肤显示名(`files.player.texture.<名>`)不烘;主包运行期不读语言文件,手写包请直接写中文 |
@@ -245,12 +246,14 @@ token 会让整份动画文件静默作废**。逐文件处理:
 1. 搜 `ysm.` 与 `ctrl.` ——逐条按[映射清单](ysm-java-molang-mapping.md)替换
    (高频条目见附录 §5.2);
 2. **同名陷阱**必查:`query.head_x_rotation`/`head_y_rotation` 两边**轴向相反**、
-   `query.ground_speed`/`query.yaw_speed` 网易噪声不可用(替换见附录);
+   `query.ground_speed` 在 Java 是摩擦后速度、`query.yaw_speed` 网易噪声不可用(替换见附录);
 3. 赋值语句**补分号**:`"v.x=math.cos(q.anim_time)*5"` → 结尾加 `;`(Java 宽容,
    基岩必须是完整语句——官方 main 动画就有 9 处,漏了直接废 46 条动画);
 4. `??`(空值合并)基岩原生支持,但主包会把变量自动初始化为 0,`??` 永不触发——
    改写为变量本身,默认值写进顶级 `initialize`(保住"未设置取默认"语义);
-5. `v.roaming.<名>` 扁平化为 `v.roaming_<名>`(丢持久化,重进游戏重置);
+5. `v.roaming.<名>` 扁平化为 `v.roaming_<名>`;持久化与多人同步由主包运行层接管(2026-09-18:本机轮询到变化就报给
+   服务端,并进存档的模型分桶,其他客户端按桶回灌 —— 轮盘换装重进游戏还在、后进视野的玩家也看得到;变量清单由
+   移植工具写进 ysm.json 顶级 `java_state.roaming`,上限同 Java 的 64 个);
 6. Java timeline 里的 `ysm.particle()` 调用**自动转成**基岩动画原生 `particle_effects`
    关键帧(粒子 ID 换成原版基岩粒子、位置打成根骨骼 locator、效果键登记进
    `files.player.particle_effect`,见 molang 映射表);`ysm.play_sound()` 仍置零删除;动画
@@ -264,7 +267,8 @@ token 会让整份动画文件静默作废**。逐文件处理:
    无限长(timeline 只跑一次、永不 finished),工具显式写成 1e6 秒(凋灵娘 `voice_set_N` 轮盘键
    靠它只设一次 `v.voice_short=N`);有关键帧的写成末关键帧时间。
 8. **Java 容错、基岩不容错的写法**(2026-09-17 官方酒狐合集 7 个包因此整份文件拒载):Java 标识符不分
-   大小写(`YSM.head_yaw` 要先按小写映射)、`ysm.bone_rot('骨骼').x` 这类结构体成员访问要连 `.x` 一起替换、
+   大小写(`YSM.head_yaw` 要先按小写映射)、`ysm.bone_pos('骨骼').x` 这类结构体成员访问要连 `.x` 一起替换
+   (`ysm.bone_rot('骨骼').x` 例外:工具改成骨骼旋转回读变量,头发逐节跟随链照常工作,见映射清单第三节)、
    作者笔误(把 `0` 打成字母 `O`、多一个右括号)Java 只让这一个值变 0 —— 基岩任何一个表达式解析失败,
    **整份文件**的动画全部作废。工具最后一步按 Java 口径把解析不了的值落 0 / 删条目并在报告里逐条
    `[!] zero:基岩解析不了…` 留痕,手工移植时对照 [molang 映射表 §六](ysm-java-molang-mapping.md) 的实测表自查;
@@ -382,9 +386,9 @@ Java 2.3.0 起支持的基岩版动画控制器格式,网易**原生就是它**,
   (播 `not_ride`),直到下一个第一乘客上车覆盖 —— 与 Java 一致;
 - 载具动画里的 `sound_effects` 关键帧照常登记(ogg + `sound_definitions` + `files.player.sound_effect`,
   与玩家侧同一套),运行层给载具注册音效表;
-- 船/运输船/矿车在基岩是**引擎硬编码渲染**(换在实体上的几何根本不画),运行层改用客户端替身实体顶上,
-  作者侧无需额外配置。矿车的实体朝向在基岩恒为 0,替身按**车底轨道**定朝向、按行驶方向定车头正反 ——
-  轨道弯道处的朝向按两端角平分线取,和 Java 一样不做上坡俯仰。
+- 船/运输船/矿车在基岩是**引擎硬编码渲染**,模型照样直接换在载具身上,但引擎不再按朝向转它,运行层在载具
+  根骨骼上补转角,作者侧无需额外配置:船朝行驶方向;矿车照 Java 按**车底轨道形状**定朝向(轨道两个出口的连线,
+  与行驶方向无关,弯道取两出口连线),和 Java 一样不做上坡俯仰。
 
 ### 第 9 步:预览实体定义(基岩独有)
 
@@ -461,7 +465,7 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
 |---|---|---|---|
 | 疾跑判定 | `isSprinting()` 状态位 | 移动速度阈值(0.87) | 速度药水/特殊移动下 run/walk 切换点略不同 |
 | `jump` | "腾空"(含下落) | 垂直速度门控(引擎 `is_on_ground` 走路会抖,已做防抖) | 短坠落的姿态时序略不同 |
-| **通道分层与混合** | 按通道注册顺序,每个 (骨骼, 通道) 由**最后写它的通道**决定(`pre_parallel→vehicle→pre_main→main→post_main→hold→swing→use→carry_on→cap→parallel→armor`,同族按控制器名排序)。只有**内置**并行通道(裸 `parallel0-7` 恒播)旋转做加法;作者用控制器接管的通道(含 `player.parallel_N`)位移/旋转/缩放**全是覆盖** | 引擎**逐通道相加、缩放相乘**(2026-09-16 实机探针);主包复刻:条件动画/轮盘动画带 `override_previous_animation`;pre/主链/parallel 不带(标志会吃掉状态淡化),冲突由移植工具在数据层解决 —— 总是同时在播的直接删早层通道,晚层是**控制器条件状态**的用伴生动画 `<键>__own<N>` + 占用变量按状态让出(`ApplyChannelOwnership`,带 override 的条件动画同样拆,伴生精确 0 让位);animate 表里带伴生的晚层宿主倒排在最前(占用变量当帧生效,顺排会在切状态那一帧闪一下),override 条件动画按 Java 通道顺序排在后 | 转换包无感。**手写移植时注意**:持剑/持镰这类控制器动画在 Java 里是整套姿态覆盖主链,基岩直接相加会全身旋转翻倍;前置层用 `scale 0` 藏起、晚层攻击动画再放出来的特效,基岩 0×1 永远不可见(坚守者娘持剑攻击特效缺失)。建议经移植工具出包,或让同一骨骼通道只由一条动画写 |
+| **通道分层与混合** | 按通道注册顺序,每个 (骨骼, 通道) 由**最后写它的通道**决定(`pre_parallel→vehicle→pre_main→main→post_main→hold→swing→use→carry_on→cap→parallel→armor`,同族按控制器名排序)。只有**内置**并行通道(裸 `parallel0-7` 恒播)旋转做加法;作者用控制器接管的通道(含 `player.parallel_N`)位移/旋转/缩放**全是覆盖** | 引擎**逐通道相加、缩放相乘**(2026-09-16 实机探针);主包复刻:条件动画/轮盘动画带 `override_previous_animation`(注意它**按骨骼整体**重置 —— 只写了位移的 override 动画也会把该骨骼的旋转清掉;恒为 0/1 的常量通道则被引擎当成不存在,清不掉前层,移植工具补成看不见的微小值);pre/主链/parallel 不带(标志会吃掉状态淡化),冲突由移植工具在数据层解决 —— 总是同时在播的直接删早层通道,晚层是**控制器条件状态**的用伴生动画 `<键>__own<N>` + 占用变量按状态让出(`ApplyChannelOwnership`,带 override 的条件动画同样拆,伴生精确 0 让位);animate 表里带伴生的晚层宿主倒排在最前(占用变量当帧生效,顺排会在切状态那一帧闪一下),override 条件动画按 Java 通道顺序排在后 | 转换包无感。**手写移植时注意**:持剑/持镰这类控制器动画在 Java 里是整套姿态覆盖主链,基岩直接相加会全身旋转翻倍;前置层用 `scale 0` 藏起、晚层攻击动画再放出来的特效,基岩 0×1 永远不可见(坚守者娘持剑攻击特效缺失)。建议经移植工具出包,或让同一骨骼通道只由一条动画写 |
 | **伴生动画 `<键>__own<N>`** | 无此概念 | 移植工具生成:原动画里会被晚层覆盖的通道搬进它,与原动画同状态播放,权重读 `variable.ysm_ownset_<n>`(晚层控制器状态进入时重算)。不带 override 的伴生让出时保留 1e-4 权重(基岩权重 0 会暂停计时);带 override 的(手持/挥击/使用条件动画)精确 0 让位,直挂条件动画的核心权重在 ysm.json 顶级 `channel_ownership`、挥击/使用的写在一次性状态机里;GUI 预览与纸娃娃里主包把它跟着原动画一起播 | 键名后缀 `__own<数字>` 视为工具保留,**别给自己的动画起这种名字**(修复工具会把它当伴生并回原动画);`variable.ysm_own_*` / `variable.ysm_ownset_*` / `variable.ysm_t0_*` 同为保留变量,`channel_ownership` 由工具维护、不要手写 |
 | **关键帧只写 `post`** | `post` 同时当 `pre` | 线性入段取**通道默认值**(scale 1、rotation/position 0),段内会朝默认值插值再跳回 | 实机:凋灵娘火焰精灵帧莫名缩放。工具给所有只写 post 的帧补同值 `pre`;手写时 `{"post": …, "lerp_mode": "linear"}` 请同时写 `pre`(Blockbench 导出的平滑帧不受影响) |
 | **catmullrom 的分段归属** | 段 [i, i+1] 任一端是 catmullrom 就走样条 | 关键帧 i 的 `lerp_mode` 只管出边;为它预计算样条的四帧 i-1..i+2 必须全是常量,否则日志报 `Precomputed cubic interpolation requires keyframes have constant data`、整段退化 | 工具移植期按 Java 语义换算出边标记,再把窗口内有表达式的 catmullrom 改 linear;`validate_rp_animations.py` 对残留报错 |
@@ -515,14 +519,17 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
 - **未定义变量**:Java 读取缺省 0;基岩必须初始化——主包自动扫描你动画/控制器里的
   全部 `v.*` 补初始化,**体验对齐**,无需手写;
 - **Java 专有名**约 100 个 `ysm.*`/`ctrl.*`/`query.*` 需替换(见映射清单);其中
-  `head_x/y_rotation` 轴向陷阱、`ground_speed`/`yaw_speed` 噪声替换最容易踩;
+  `head_x/y_rotation` 轴向陷阱、`ground_speed`/`input_*` 运动量口径、`yaw_speed` 噪声替换最容易踩;
 - **物理**:`ysm.second_order`/`first_order` 由移植工具改写成 molang 状态积分
   (调用处变成 `v.ysm_so_<键拼音>_y`,积分语句提到表达式前面),头发/尾巴/胸部的
   "Q 弹"随动手感与 Java 一致;键必须是字符串字面量(表达式键退化为取输入并告警);
 - **过渡**:Java 主链通道的 0.1s 起始过渡由生成的 `ysm_state` 状态机复刻(直挂
   animate 条目是零过渡硬切),主链成员的 `loop` 按 Java 强制语义改写(睡觉/坐下
   等在 JSON 里写成不循环也会循环;`death`/`attacked` 改 `hold_on_last_frame` 供淡出);
-- `v.roaming.*` 持久化域降级为会话级变量。
+- `v.roaming.*` 的存档与同步不在 molang 里而在主包运行层(约 0.1 秒轮询一次,别的玩家看到的变化比 Java 晚一两拍);
+- 天气/露天/维度/空气值/光照/血量(远程玩家)/药水等级/附魔等级/相对方块等 Java 专有量由主包运行层按 tick 写回
+  (映射清单第七节),刷新频率按量不同是每 1~15 个脚本 tick 一次(空气值逐 tick,天气约 1 秒、维度约半秒),不是逐帧;
+  光照只有合成亮度,分不出方块光与天空光。
 
 ### 4.4 网易独有增强(Java 做不到的)
 
@@ -544,13 +551,14 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
 |---|---|---|
 | `query.head_x_rotation` | `query.mod.ysm_head_yaw` | ⚠️ Java 此名是**偏航**(同名反轴陷阱) |
 | `query.head_y_rotation` | `query.mod.ysm_head_pitch` | ⚠️ Java 此名是**俯仰** |
-| `query.ground_speed` / `ysm.ground_speed2` | `((query.modified_move_speed>0.05)?query.modified_move_speed*1.9:0)` | 网易原生 `ground_speed` 帧间乱跳不可用(实测);低于走路阈值钳 0,作者状态机的 `==0` 静止判据在冰面/潜行微动时仍成立 |
+| `query.ground_speed` | `query.mod.ysm_ground_speed` | Java 是 `getDeltaMovement` **摩擦后**速度(步行≈2.36、创造飞行≈9.9);主包按实际位移逐帧计算 × 摩擦系数(地面 0.546/空中 0.91/水 0.8/鞘翅 0.99),静止精确为 0,作者状态机的 `==0` 静止判据成立 |
+| `ysm.ground_speed2` | `query.mod.ysm_ground_speed2` | 每 tick 水平位移 × 20(格/秒);飞行/下落时照样有值(早先的 `modified_move_speed×1.9` 只是走路步频量,末影龙娘疾跑飞行前倾因此只有几度) |
 | `query.yaw_speed` | `query.mod.ysm_yaw_speed` | 网易原生噪声不可用,主包提供平滑值(度/秒) |
 | `ysm.time_delta` | `query.delta_time` | 作除数,不可置零 |
 | `ysm.attack_time` | `(variable.attack_time*(1-(variable.ysm_swing_muted??0)))` | 同为原版挥手进度;使用物品期间开始的挥动读作 0(Java 没有这次挥动) |
 | `ysm.swinging` | `((variable.attack_time*(1-(variable.ysm_swing_muted??0)))>0.0)` | 同上 |
 | `ysm.is_close_eyes` | `query.mod.ysm_is_close_eyes` | 4.5s 周期眨眼 |
-| `ysm.input_vertical` / `_horizontal` | `query.mod.ysm_input_vertical` / `_horizontal` | |
+| `ysm.input_vertical` / `_horizontal` | `query.mod.ysm_move_vertical` / `_horizontal` | Java 按**实际位移方向**相对视线算(cos/sin,向右为正),不是按键;`ysm.xxa`/`zza` 才是按键量(向左为正) |
 | `ysm.has_mainhand` / `has_offhand` | `query.is_item_equipped(0/1)` | |
 | `ysm.on_ladder` | `query.mod.ysm_is_on_ladder` | |
 | `ctrl.fly` | `query.mod.ysm_is_flying` | |
@@ -605,7 +613,8 @@ python devtools/port_java_pack.py .ref/ysm-java-src/src/main/resources/assets/ys
 ```
 
 合集目录(带 `ysm-pack.json`)里的每个子包各跑一次,`--collection` 相同即归入同一个选择界面文件夹,
-包名建议带合集前缀防资源 ID 冲突:
+包名建议带合集前缀防资源 ID 冲突。合集目录里的 `ysm-pack.png`(Java 合集封面)会被拷进资源包
+`textures/ui/ysm_packs/<合集>.png` 并写进清单的 `folder_texture`,文件夹直接显示 Java 同款封面:
 
 ```bash
 for d in .ref/ysm-java-src/src/main/resources/assets/ysm/builtin/wine_fox/[0-9][0-9]_*; do

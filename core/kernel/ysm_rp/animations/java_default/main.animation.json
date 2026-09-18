@@ -12281,7 +12281,7 @@
           "rotation": [
             8, 
             0, 
-            "0.5*0.0"
+            "0.5*(variable.ysm_elytra_rot_z??-15.0)"
           ]
         }, 
         "LeftForeArm": {
@@ -12300,7 +12300,7 @@
           "rotation": [
             8, 
             0, 
-            "-(0.5*0.0)"
+            "-(0.5*(variable.ysm_elytra_rot_z??-15.0))"
           ]
         }, 
         "RightForeArm": {
@@ -12759,7 +12759,7 @@
         }, 
         "UpBody": {
           "rotation": [
-            "10+(((query.modified_move_speed>0.05)?query.modified_move_speed*1.9:0)>0?math.sin(query.anim_time*720)*2 : 0)", 
+            "10+(query.mod.ysm_ground_speed>0?math.sin(query.anim_time*720)*2 : 0)", 
             0, 
             0
           ], 
@@ -12920,7 +12920,7 @@
         }, 
         "Head": {
           "rotation": [
-            "-10-(((query.modified_move_speed>0.05)?query.modified_move_speed*1.9:0)>0?math.sin(30+query.anim_time*720)*2 : 0)", 
+            "-10-(query.mod.ysm_ground_speed>0?math.sin(30+query.anim_time*720)*2 : 0)", 
             0, 
             0
           ], 
@@ -12932,14 +12932,14 @@
         }, 
         "LongHair": {
           "rotation": [
-            "12.5-(((query.modified_move_speed>0.05)?query.modified_move_speed*1.9:0)>0?math.sin(-120+query.anim_time*720)*3 : 0)", 
+            "12.5-(query.mod.ysm_ground_speed>0?math.sin(-120+query.anim_time*720)*3 : 0)", 
             0, 
             0
           ]
         }, 
         "molang": {
           "rotation": [
-            "v.bv=((query.modified_move_speed>0.05)?query.modified_move_speed*1.9:0)>0?math.cos(2*query.anim_time*360/(24/24))*5 : 0;return v.bv;", 
+            "v.bv=query.mod.ysm_ground_speed>0?math.cos(2*query.anim_time*360/(24/24))*5 : 0;return v.bv;", 
             0, 
             0
           ]
@@ -18881,7 +18881,7 @@
             23
           ], 
           "scale": [
-            1, 
+            1.001, 
             1, 
             1
           ]
@@ -18893,19 +18893,19 @@
             -0.26112
           ], 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
         }, 
         "UpperBody": {
           "rotation": [
-            0, 
+            0.01, 
             0, 
             0
           ], 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -18917,19 +18917,19 @@
             0
           ], 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
         }, 
         "LeftForeArm": {
           "rotation": [
-            0, 
+            0.01, 
             0, 
             0
           ], 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -18953,7 +18953,7 @@
             ]
           }, 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -18965,7 +18965,7 @@
             0
           ], 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -18977,7 +18977,7 @@
             0
           ], 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -18989,7 +18989,7 @@
             0
           ], 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -19001,7 +19001,7 @@
             0
           ], 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -19025,7 +19025,7 @@
             ]
           }, 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -19037,7 +19037,7 @@
             0
           ], 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -19049,7 +19049,7 @@
             0
           ], 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -19075,12 +19075,12 @@
         }, 
         "AllHead": {
           "rotation": [
-            0, 
+            0.01, 
             0, 
             0
           ], 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -19092,7 +19092,7 @@
             0
           ], 
           "position": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -19127,21 +19127,21 @@
         }, 
         "FLongHair": {
           "rotation": [
-            0, 
+            0.01, 
             0, 
             0
           ]
         }, 
         "ElytraLocator": {
           "rotation": [
-            0, 
+            0.01, 
             0, 
             0
           ]
         }, 
         "MLongHair": {
           "rotation": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -25702,14 +25702,14 @@
         }, 
         "RightHand": {
           "rotation": [
-            0, 
+            0.01, 
             0, 
             0
           ]
         }, 
         "LeftHand": {
           "rotation": [
-            0, 
+            0.01, 
             0, 
             0
           ]
@@ -25744,14 +25744,14 @@
         }, 
         "Breast": {
           "rotation": [
-            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbuchuizhi_t,0,0.1);v.ysm_so_xiongbuchuizhi_t=q.life_time;v.ysm_so_in=(math.clamp(q.vertical_speed+v.bv,-30,30));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbuchuizhi_x)/v.ysm_so_dt:0;v.ysm_so_xiongbuchuizhi_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00281448,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.031831*0.5,v.ysm_so_dt*0.031831));v.ysm_so_xiongbuchuizhi_y=v.ysm_so_xiongbuchuizhi_y+v.ysm_so_dt*v.ysm_so_xiongbuchuizhi_yd;v.ysm_so_xiongbuchuizhi_yd=v.ysm_so_xiongbuchuizhi_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_xiongbuchuizhi_y-0.031831*v.ysm_so_xiongbuchuizhi_yd)/v.ysm_so_k2s;v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbushuiping_t,0,0.1);v.ysm_so_xiongbushuiping_t=q.life_time;v.ysm_so_in=(math.clamp(((query.modified_move_speed>0.05)?query.modified_move_speed*1.9:0)+v.bg,0,20));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbushuiping_x)/v.ysm_so_dt:0;v.ysm_so_xiongbushuiping_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.0795775*0.5,v.ysm_so_dt*0.0795775));v.ysm_so_xiongbushuiping_y=v.ysm_so_xiongbushuiping_y+v.ysm_so_dt*v.ysm_so_xiongbushuiping_yd;v.ysm_so_xiongbushuiping_yd=v.ysm_so_xiongbushuiping_yd+v.ysm_so_dt*(v.ysm_so_in+0.0397887*v.ysm_so_xd-v.ysm_so_xiongbushuiping_y-0.0795775*v.ysm_so_xiongbushuiping_yd)/v.ysm_so_k2s;return v.ysm_so_xiongbuchuizhi_y+v.ysm_so_xiongbushuiping_y;", 
+            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbuchuizhi_t,0,0.1);v.ysm_so_xiongbuchuizhi_t=q.life_time;v.ysm_so_in=(math.clamp(q.vertical_speed+v.bv,-30,30));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbuchuizhi_x)/v.ysm_so_dt:0;v.ysm_so_xiongbuchuizhi_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00281448,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.031831*0.5,v.ysm_so_dt*0.031831));v.ysm_so_xiongbuchuizhi_y=v.ysm_so_xiongbuchuizhi_y+v.ysm_so_dt*v.ysm_so_xiongbuchuizhi_yd;v.ysm_so_xiongbuchuizhi_yd=v.ysm_so_xiongbuchuizhi_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_xiongbuchuizhi_y-0.031831*v.ysm_so_xiongbuchuizhi_yd)/v.ysm_so_k2s;v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbushuiping_t,0,0.1);v.ysm_so_xiongbushuiping_t=q.life_time;v.ysm_so_in=(math.clamp(query.mod.ysm_ground_speed+v.bg,0,20));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbushuiping_x)/v.ysm_so_dt:0;v.ysm_so_xiongbushuiping_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.0795775*0.5,v.ysm_so_dt*0.0795775));v.ysm_so_xiongbushuiping_y=v.ysm_so_xiongbushuiping_y+v.ysm_so_dt*v.ysm_so_xiongbushuiping_yd;v.ysm_so_xiongbushuiping_yd=v.ysm_so_xiongbushuiping_yd+v.ysm_so_dt*(v.ysm_so_in+0.0397887*v.ysm_so_xd-v.ysm_so_xiongbushuiping_y-0.0795775*v.ysm_so_xiongbushuiping_yd)/v.ysm_so_k2s;return v.ysm_so_xiongbuchuizhi_y+v.ysm_so_xiongbushuiping_y;", 
             "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbujiaosudu_t,0,0.1);v.ysm_so_xiongbujiaosudu_t=q.life_time;v.ysm_so_in=(math.clamp(-0.01*query.mod.ysm_yaw_speed,-30,30));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbujiaosudu_x)/v.ysm_so_dt:0;v.ysm_so_xiongbujiaosudu_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00281448,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.031831*0.5,v.ysm_so_dt*0.031831));v.ysm_so_xiongbujiaosudu_y=v.ysm_so_xiongbujiaosudu_y+v.ysm_so_dt*v.ysm_so_xiongbujiaosudu_yd;v.ysm_so_xiongbujiaosudu_yd=v.ysm_so_xiongbujiaosudu_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_xiongbujiaosudu_y-0.031831*v.ysm_so_xiongbujiaosudu_yd)/v.ysm_so_k2s;return v.ysm_so_xiongbujiaosudu_y;", 
             0
           ], 
           "scale": [
-            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbuchuizhi_t,0,0.1);v.ysm_so_xiongbuchuizhi_t=q.life_time;v.ysm_so_in=(math.clamp(q.vertical_speed+v.bv,-30,30));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbuchuizhi_x)/v.ysm_so_dt:0;v.ysm_so_xiongbuchuizhi_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00281448,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.031831*0.5,v.ysm_so_dt*0.031831));v.ysm_so_xiongbuchuizhi_y=v.ysm_so_xiongbuchuizhi_y+v.ysm_so_dt*v.ysm_so_xiongbuchuizhi_yd;v.ysm_so_xiongbuchuizhi_yd=v.ysm_so_xiongbuchuizhi_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_xiongbuchuizhi_y-0.031831*v.ysm_so_xiongbuchuizhi_yd)/v.ysm_so_k2s;v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbushuiping_t,0,0.1);v.ysm_so_xiongbushuiping_t=q.life_time;v.ysm_so_in=(math.clamp(((query.modified_move_speed>0.05)?query.modified_move_speed*1.9:0)+v.bg,0,20));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbushuiping_x)/v.ysm_so_dt:0;v.ysm_so_xiongbushuiping_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.0795775*0.5,v.ysm_so_dt*0.0795775));v.ysm_so_xiongbushuiping_y=v.ysm_so_xiongbushuiping_y+v.ysm_so_dt*v.ysm_so_xiongbushuiping_yd;v.ysm_so_xiongbushuiping_yd=v.ysm_so_xiongbushuiping_yd+v.ysm_so_dt*(v.ysm_so_in+0.0397887*v.ysm_so_xd-v.ysm_so_xiongbushuiping_y-0.0795775*v.ysm_so_xiongbushuiping_yd)/v.ysm_so_k2s;return 1-0.002*(v.ysm_so_xiongbuchuizhi_y+v.ysm_so_xiongbushuiping_y);", 
-            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbuchuizhi_t,0,0.1);v.ysm_so_xiongbuchuizhi_t=q.life_time;v.ysm_so_in=(math.clamp(q.vertical_speed+v.bv,-30,30));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbuchuizhi_x)/v.ysm_so_dt:0;v.ysm_so_xiongbuchuizhi_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00281448,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.031831*0.5,v.ysm_so_dt*0.031831));v.ysm_so_xiongbuchuizhi_y=v.ysm_so_xiongbuchuizhi_y+v.ysm_so_dt*v.ysm_so_xiongbuchuizhi_yd;v.ysm_so_xiongbuchuizhi_yd=v.ysm_so_xiongbuchuizhi_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_xiongbuchuizhi_y-0.031831*v.ysm_so_xiongbuchuizhi_yd)/v.ysm_so_k2s;v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbushuiping_t,0,0.1);v.ysm_so_xiongbushuiping_t=q.life_time;v.ysm_so_in=(math.clamp(((query.modified_move_speed>0.05)?query.modified_move_speed*1.9:0)+v.bg,0,20));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbushuiping_x)/v.ysm_so_dt:0;v.ysm_so_xiongbushuiping_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.0795775*0.5,v.ysm_so_dt*0.0795775));v.ysm_so_xiongbushuiping_y=v.ysm_so_xiongbushuiping_y+v.ysm_so_dt*v.ysm_so_xiongbushuiping_yd;v.ysm_so_xiongbushuiping_yd=v.ysm_so_xiongbushuiping_yd+v.ysm_so_dt*(v.ysm_so_in+0.0397887*v.ysm_so_xd-v.ysm_so_xiongbushuiping_y-0.0795775*v.ysm_so_xiongbushuiping_yd)/v.ysm_so_k2s;return 1+0.01*(v.ysm_so_xiongbuchuizhi_y+v.ysm_so_xiongbushuiping_y);", 
-            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbuchuizhi_t,0,0.1);v.ysm_so_xiongbuchuizhi_t=q.life_time;v.ysm_so_in=(math.clamp(q.vertical_speed+v.bv,-30,30));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbuchuizhi_x)/v.ysm_so_dt:0;v.ysm_so_xiongbuchuizhi_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00281448,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.031831*0.5,v.ysm_so_dt*0.031831));v.ysm_so_xiongbuchuizhi_y=v.ysm_so_xiongbuchuizhi_y+v.ysm_so_dt*v.ysm_so_xiongbuchuizhi_yd;v.ysm_so_xiongbuchuizhi_yd=v.ysm_so_xiongbuchuizhi_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_xiongbuchuizhi_y-0.031831*v.ysm_so_xiongbuchuizhi_yd)/v.ysm_so_k2s;v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbushuiping_t,0,0.1);v.ysm_so_xiongbushuiping_t=q.life_time;v.ysm_so_in=(math.clamp(((query.modified_move_speed>0.05)?query.modified_move_speed*1.9:0)+v.bg,0,20));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbushuiping_x)/v.ysm_so_dt:0;v.ysm_so_xiongbushuiping_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.0795775*0.5,v.ysm_so_dt*0.0795775));v.ysm_so_xiongbushuiping_y=v.ysm_so_xiongbushuiping_y+v.ysm_so_dt*v.ysm_so_xiongbushuiping_yd;v.ysm_so_xiongbushuiping_yd=v.ysm_so_xiongbushuiping_yd+v.ysm_so_dt*(v.ysm_so_in+0.0397887*v.ysm_so_xd-v.ysm_so_xiongbushuiping_y-0.0795775*v.ysm_so_xiongbushuiping_yd)/v.ysm_so_k2s;return 1-0.008*(v.ysm_so_xiongbuchuizhi_y+v.ysm_so_xiongbushuiping_y);"
+            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbuchuizhi_t,0,0.1);v.ysm_so_xiongbuchuizhi_t=q.life_time;v.ysm_so_in=(math.clamp(q.vertical_speed+v.bv,-30,30));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbuchuizhi_x)/v.ysm_so_dt:0;v.ysm_so_xiongbuchuizhi_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00281448,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.031831*0.5,v.ysm_so_dt*0.031831));v.ysm_so_xiongbuchuizhi_y=v.ysm_so_xiongbuchuizhi_y+v.ysm_so_dt*v.ysm_so_xiongbuchuizhi_yd;v.ysm_so_xiongbuchuizhi_yd=v.ysm_so_xiongbuchuizhi_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_xiongbuchuizhi_y-0.031831*v.ysm_so_xiongbuchuizhi_yd)/v.ysm_so_k2s;v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbushuiping_t,0,0.1);v.ysm_so_xiongbushuiping_t=q.life_time;v.ysm_so_in=(math.clamp(query.mod.ysm_ground_speed+v.bg,0,20));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbushuiping_x)/v.ysm_so_dt:0;v.ysm_so_xiongbushuiping_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.0795775*0.5,v.ysm_so_dt*0.0795775));v.ysm_so_xiongbushuiping_y=v.ysm_so_xiongbushuiping_y+v.ysm_so_dt*v.ysm_so_xiongbushuiping_yd;v.ysm_so_xiongbushuiping_yd=v.ysm_so_xiongbushuiping_yd+v.ysm_so_dt*(v.ysm_so_in+0.0397887*v.ysm_so_xd-v.ysm_so_xiongbushuiping_y-0.0795775*v.ysm_so_xiongbushuiping_yd)/v.ysm_so_k2s;return 1-0.002*(v.ysm_so_xiongbuchuizhi_y+v.ysm_so_xiongbushuiping_y);", 
+            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbuchuizhi_t,0,0.1);v.ysm_so_xiongbuchuizhi_t=q.life_time;v.ysm_so_in=(math.clamp(q.vertical_speed+v.bv,-30,30));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbuchuizhi_x)/v.ysm_so_dt:0;v.ysm_so_xiongbuchuizhi_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00281448,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.031831*0.5,v.ysm_so_dt*0.031831));v.ysm_so_xiongbuchuizhi_y=v.ysm_so_xiongbuchuizhi_y+v.ysm_so_dt*v.ysm_so_xiongbuchuizhi_yd;v.ysm_so_xiongbuchuizhi_yd=v.ysm_so_xiongbuchuizhi_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_xiongbuchuizhi_y-0.031831*v.ysm_so_xiongbuchuizhi_yd)/v.ysm_so_k2s;v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbushuiping_t,0,0.1);v.ysm_so_xiongbushuiping_t=q.life_time;v.ysm_so_in=(math.clamp(query.mod.ysm_ground_speed+v.bg,0,20));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbushuiping_x)/v.ysm_so_dt:0;v.ysm_so_xiongbushuiping_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.0795775*0.5,v.ysm_so_dt*0.0795775));v.ysm_so_xiongbushuiping_y=v.ysm_so_xiongbushuiping_y+v.ysm_so_dt*v.ysm_so_xiongbushuiping_yd;v.ysm_so_xiongbushuiping_yd=v.ysm_so_xiongbushuiping_yd+v.ysm_so_dt*(v.ysm_so_in+0.0397887*v.ysm_so_xd-v.ysm_so_xiongbushuiping_y-0.0795775*v.ysm_so_xiongbushuiping_yd)/v.ysm_so_k2s;return 1+0.01*(v.ysm_so_xiongbuchuizhi_y+v.ysm_so_xiongbushuiping_y);", 
+            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbuchuizhi_t,0,0.1);v.ysm_so_xiongbuchuizhi_t=q.life_time;v.ysm_so_in=(math.clamp(q.vertical_speed+v.bv,-30,30));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbuchuizhi_x)/v.ysm_so_dt:0;v.ysm_so_xiongbuchuizhi_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00281448,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.031831*0.5,v.ysm_so_dt*0.031831));v.ysm_so_xiongbuchuizhi_y=v.ysm_so_xiongbuchuizhi_y+v.ysm_so_dt*v.ysm_so_xiongbuchuizhi_yd;v.ysm_so_xiongbuchuizhi_yd=v.ysm_so_xiongbuchuizhi_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_xiongbuchuizhi_y-0.031831*v.ysm_so_xiongbuchuizhi_yd)/v.ysm_so_k2s;v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_xiongbushuiping_t,0,0.1);v.ysm_so_xiongbushuiping_t=q.life_time;v.ysm_so_in=(math.clamp(query.mod.ysm_ground_speed+v.bg,0,20));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_xiongbushuiping_x)/v.ysm_so_dt:0;v.ysm_so_xiongbushuiping_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.0795775*0.5,v.ysm_so_dt*0.0795775));v.ysm_so_xiongbushuiping_y=v.ysm_so_xiongbushuiping_y+v.ysm_so_dt*v.ysm_so_xiongbushuiping_yd;v.ysm_so_xiongbushuiping_yd=v.ysm_so_xiongbushuiping_yd+v.ysm_so_dt*(v.ysm_so_in+0.0397887*v.ysm_so_xd-v.ysm_so_xiongbushuiping_y-0.0795775*v.ysm_so_xiongbushuiping_yd)/v.ysm_so_k2s;return 1-0.008*(v.ysm_so_xiongbuchuizhi_y+v.ysm_so_xiongbushuiping_y);"
           ]
         }
       }, 
@@ -25769,14 +25769,14 @@
         }, 
         "ElytraLocator": {
           "rotation": [
-            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_toufachuizhi_t,0,0.1);v.ysm_so_toufachuizhi_t=q.life_time;v.ysm_so_in=(math.clamp(-3*q.vertical_speed+v.hv,-10,120));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_toufachuizhi_x)/v.ysm_so_dt:0;v.ysm_so_toufachuizhi_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.095493*0.5,v.ysm_so_dt*0.095493));v.ysm_so_toufachuizhi_y=v.ysm_so_toufachuizhi_y+v.ysm_so_dt*v.ysm_so_toufachuizhi_yd;v.ysm_so_toufachuizhi_yd=v.ysm_so_toufachuizhi_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_toufachuizhi_y-0.095493*v.ysm_so_toufachuizhi_yd)/v.ysm_so_k2s;v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_toufashuiping_t,0,0.1);v.ysm_so_toufashuiping_t=q.life_time;v.ysm_so_in=(math.clamp(((query.modified_move_speed>0.05)?query.modified_move_speed*1.9:0)+v.hg,0,20));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_toufashuiping_x)/v.ysm_so_dt:0;v.ysm_so_toufashuiping_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.095493*0.5,v.ysm_so_dt*0.095493));v.ysm_so_toufashuiping_y=v.ysm_so_toufashuiping_y+v.ysm_so_dt*v.ysm_so_toufashuiping_yd;v.ysm_so_toufashuiping_yd=v.ysm_so_toufashuiping_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_toufashuiping_y-0.095493*v.ysm_so_toufashuiping_yd)/v.ysm_so_k2s;return 0.6*v.ysm_so_toufachuizhi_y+0.6*v.ysm_so_toufashuiping_y;", 
+            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_toufachuizhi_t,0,0.1);v.ysm_so_toufachuizhi_t=q.life_time;v.ysm_so_in=(math.clamp(-3*q.vertical_speed+v.hv,-10,120));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_toufachuizhi_x)/v.ysm_so_dt:0;v.ysm_so_toufachuizhi_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.095493*0.5,v.ysm_so_dt*0.095493));v.ysm_so_toufachuizhi_y=v.ysm_so_toufachuizhi_y+v.ysm_so_dt*v.ysm_so_toufachuizhi_yd;v.ysm_so_toufachuizhi_yd=v.ysm_so_toufachuizhi_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_toufachuizhi_y-0.095493*v.ysm_so_toufachuizhi_yd)/v.ysm_so_k2s;v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_toufashuiping_t,0,0.1);v.ysm_so_toufashuiping_t=q.life_time;v.ysm_so_in=(math.clamp(query.mod.ysm_ground_speed+v.hg,0,20));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_toufashuiping_x)/v.ysm_so_dt:0;v.ysm_so_toufashuiping_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.095493*0.5,v.ysm_so_dt*0.095493));v.ysm_so_toufashuiping_y=v.ysm_so_toufashuiping_y+v.ysm_so_dt*v.ysm_so_toufashuiping_yd;v.ysm_so_toufashuiping_yd=v.ysm_so_toufashuiping_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_toufashuiping_y-0.095493*v.ysm_so_toufashuiping_yd)/v.ysm_so_k2s;return 0.6*v.ysm_so_toufachuizhi_y+0.6*v.ysm_so_toufashuiping_y;", 
             0, 
             "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_toufajiaosudu_t,0,0.1);v.ysm_so_toufajiaosudu_t=q.life_time;v.ysm_so_in=(math.clamp(-0.02*query.mod.ysm_yaw_speed,-60,60));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_toufajiaosudu_x)/v.ysm_so_dt:0;v.ysm_so_toufajiaosudu_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.095493*0.5,v.ysm_so_dt*0.095493));v.ysm_so_toufajiaosudu_y=v.ysm_so_toufajiaosudu_y+v.ysm_so_dt*v.ysm_so_toufajiaosudu_yd;v.ysm_so_toufajiaosudu_yd=v.ysm_so_toufajiaosudu_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_toufajiaosudu_y-0.095493*v.ysm_so_toufajiaosudu_yd)/v.ysm_so_k2s;return v.ysm_so_toufajiaosudu_y;"
           ]
         }, 
         "MLongHair": {
           "rotation": [
-            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_toufachuizhi_t,0,0.1);v.ysm_so_toufachuizhi_t=q.life_time;v.ysm_so_in=(math.clamp(-3*q.vertical_speed+v.hv,-10,120));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_toufachuizhi_x)/v.ysm_so_dt:0;v.ysm_so_toufachuizhi_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.095493*0.5,v.ysm_so_dt*0.095493));v.ysm_so_toufachuizhi_y=v.ysm_so_toufachuizhi_y+v.ysm_so_dt*v.ysm_so_toufachuizhi_yd;v.ysm_so_toufachuizhi_yd=v.ysm_so_toufachuizhi_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_toufachuizhi_y-0.095493*v.ysm_so_toufachuizhi_yd)/v.ysm_so_k2s;v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_toufashuiping_t,0,0.1);v.ysm_so_toufashuiping_t=q.life_time;v.ysm_so_in=(math.clamp(((query.modified_move_speed>0.05)?query.modified_move_speed*1.9:0)+v.hg,0,20));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_toufashuiping_x)/v.ysm_so_dt:0;v.ysm_so_toufashuiping_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.095493*0.5,v.ysm_so_dt*0.095493));v.ysm_so_toufashuiping_y=v.ysm_so_toufashuiping_y+v.ysm_so_dt*v.ysm_so_toufashuiping_yd;v.ysm_so_toufashuiping_yd=v.ysm_so_toufashuiping_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_toufashuiping_y-0.095493*v.ysm_so_toufashuiping_yd)/v.ysm_so_k2s;return v.ysm_so_toufachuizhi_y+v.ysm_so_toufashuiping_y;", 
+            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_toufachuizhi_t,0,0.1);v.ysm_so_toufachuizhi_t=q.life_time;v.ysm_so_in=(math.clamp(-3*q.vertical_speed+v.hv,-10,120));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_toufachuizhi_x)/v.ysm_so_dt:0;v.ysm_so_toufachuizhi_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.095493*0.5,v.ysm_so_dt*0.095493));v.ysm_so_toufachuizhi_y=v.ysm_so_toufachuizhi_y+v.ysm_so_dt*v.ysm_so_toufachuizhi_yd;v.ysm_so_toufachuizhi_yd=v.ysm_so_toufachuizhi_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_toufachuizhi_y-0.095493*v.ysm_so_toufachuizhi_yd)/v.ysm_so_k2s;v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_toufashuiping_t,0,0.1);v.ysm_so_toufashuiping_t=q.life_time;v.ysm_so_in=(math.clamp(query.mod.ysm_ground_speed+v.hg,0,20));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_toufashuiping_x)/v.ysm_so_dt:0;v.ysm_so_toufashuiping_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.095493*0.5,v.ysm_so_dt*0.095493));v.ysm_so_toufashuiping_y=v.ysm_so_toufashuiping_y+v.ysm_so_dt*v.ysm_so_toufashuiping_yd;v.ysm_so_toufashuiping_yd=v.ysm_so_toufashuiping_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_toufashuiping_y-0.095493*v.ysm_so_toufashuiping_yd)/v.ysm_so_k2s;return v.ysm_so_toufachuizhi_y+v.ysm_so_toufashuiping_y;", 
             0, 
             "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_toufajiaosudu_t,0,0.1);v.ysm_so_toufajiaosudu_t=q.life_time;v.ysm_so_in=(math.clamp(0.02*query.mod.ysm_yaw_speed,-60,60));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_toufajiaosudu_x)/v.ysm_so_dt:0;v.ysm_so_toufajiaosudu_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.00633257,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.095493*0.5,v.ysm_so_dt*0.095493));v.ysm_so_toufajiaosudu_y=v.ysm_so_toufajiaosudu_y+v.ysm_so_dt*v.ysm_so_toufajiaosudu_yd;v.ysm_so_toufajiaosudu_yd=v.ysm_so_toufajiaosudu_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_toufajiaosudu_y-0.095493*v.ysm_so_toufajiaosudu_yd)/v.ysm_so_k2s;return v.ysm_so_toufajiaosudu_y;"
           ]
