@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -13,7 +14,9 @@ namespace YsmConvert.Cli.Mcp;
 internal sealed class McpServer
 {
     private const string ServerName = "ysm-convert";
-    private const string ServerVersion = "0.1.0";
+    // 跟随程序集版本(Directory.Build.props 的 <Version>, 发版流水线按 tag 递增后经 -p:Version 覆盖), 去掉 SDK 附加的 "+提交号"
+    private static readonly string ServerVersion =
+        typeof(McpServer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
     private static readonly string[] KnownProtocolVersions = { "2025-06-18", "2025-03-26", "2024-11-05" };
 
     private readonly ConversionService? _service;

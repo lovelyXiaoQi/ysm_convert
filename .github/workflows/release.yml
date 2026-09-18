@@ -1,0 +1,127 @@
+# 一键发版: 仓库页 Actions → Release → Run workflow, 选版本递增位后运行。
+# 算版本号 → 生成便携 Python 2.7(core/python) → 单元测试 → build/publish.ps1 → 打 zip → 建 tag 与 Release 并上传 zip。
+# 版本号以 tag 为准: 在最新的 vX.Y.Z 上按所选位递增, 还没有 tag 时用 Directory.Build.props 的 <Version>;
+# props 的版本比递增结果高时用 props 的(想直接发 1.0.0 就把 props 改成 1.0.0)。经 -p:Version 写进 exe, 不回写仓库。
+# Release 附件单个文件上限 2 GiB、总量不限, 整包 zip(约 64 MB)直接上传。
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 版本递增位
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write   # 建 tag 与 Release
+
+concurrency:
+  group: release    # 连点两次时排队执行; 后一次看到当前提交已经发过版就报错, 不会重复发
+
+env:
+  # core/python 的来源与开发机一致: 官方 2.7.18 全用户安装 + 同版本的 pypinyin / enum34, 再由 make-python.ps1 裁剪
+  PYTHON_MSI_URL: https://www.python.org/ftp/python/2.7.18/python-2.7.18.amd64.msi
+  PYTHON_MSI_SHA256: B74A3AFA1E0BF2A6FC566A7B70D15C9BFABBA3756FB077797D16FFFA27800C05
+  PYPINYIN_VERSION: 0.49.0
+  ENUM34_VERSION: 1.1.10
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      # runner 的 git 默认 autocrlf=true, 会把内核 .py/.json、文档检出成 CRLF; 关掉, 让发布包与开发机工作区逐字节一致
+      - run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # 要全部 tag 与提交历史: 算版本号、写更新内容
+
+      - name: 计算版本号
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          $released = git tag --points-at HEAD --list 'v*'
+          if ($released) { throw "当前提交已经发布为 $released, 有新提交再发版" }
+          $props = [version]([xml](Get-Content -Raw Directory.Build.props)).SelectSingleNode('//Version').InnerText
+          $props = [version]::new($props.Major, $props.Minor, [math]::Max($props.Build, 0))
+          $last = git tag --list 'v*' | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } |
+                  ForEach-Object { [version]$_.Substring(1) } | Sort-Object -Descending | Select-Object -First 1
+          if (-not $last) {
+            $next = $props
+          } else {
+            $next = switch ($env:BUMP) {
+              'major' { [version]::new($last.Major + 1, 0, 0) }
+              'minor' { [version]::new($last.Major, $last.Minor + 1, 0) }
+              default { [version]::new($last.Major, $last.Minor, $last.Build + 1) }
+            }
+            if ($props -gt $next) { $next = $props }
+          }
+          "VERSION=$next" >> $env:GITHUB_ENV
+          "PREV_TAG=$(if ($last) { "v$last" })" >> $env:GITHUB_ENV
+          Write-Host "本次发布 v$next, 上一版 $(if ($last) { "v$last" } else { '(无)' })"
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: 生成便携 Python 2.7(core/python)
+        run: |
+          # wheel 由 runner 自带的 Python 3 按 2.7 的兼容标签下载(py2 自带的 pip 太旧), 装好 2.7 后再离线安装
+          $wheels = Join-Path $env:RUNNER_TEMP wheels
+          python -m pip download --disable-pip-version-check --no-deps --only-binary=:all: --python-version 2.7 `
+            --dest $wheels "pypinyin==$env:PYPINYIN_VERSION" "enum34==$env:ENUM34_VERSION"
+          if ($LASTEXITCODE) { throw "下载 pypinyin / enum34 失败" }
+
+          # 全用户安装: python27.dll 进 System32、VC++ 2008 运行库进 WinSxS, 与开发机的 C:\Python27 同形
+          $msi = Join-Path $env:RUNNER_TEMP python-2.7.18.amd64.msi
+          Invoke-WebRequest $env:PYTHON_MSI_URL -OutFile $msi -MaximumRetryCount 3 -RetryIntervalSec 5
+          if ((Get-FileHash $msi -Algorithm SHA256).Hash -ne $env:PYTHON_MSI_SHA256) { throw "Python 安装包 SHA256 不符" }
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart ALLUSERS=1 TARGETDIR=C:\Python27" -Wait -PassThru
+          if ($p.ExitCode -notin 0, 3010) { throw "安装 Python 2.7.18 失败(msiexec 退出码 $($p.ExitCode))" }
+          C:\Python27\python.exe -m pip install --disable-pip-version-check --no-index --no-deps --find-links $wheels `
+            "pypinyin==$env:PYPINYIN_VERSION" "enum34==$env:ENUM34_VERSION"
+          if ($LASTEXITCODE) { throw "安装 pypinyin / enum34 失败" }
+
+          ./build/make-python.ps1
+          # make-python 找不到 msvcr90 只警告; 发布包缺了它, 没装 VC++ 2008 的机器上内核起不来
+          if (-not (Test-Path core/python/Microsoft.VC90.CRT/msvcr90.dll)) { throw "core/python 缺私有 VC++ 2008 运行库" }
+
+      - name: 单元测试
+        run: dotnet test YsmConvert.slnx -c Release
+
+      - name: 发布到 dist/YsmConvert
+        run: ./build/publish.ps1 -Version $env:VERSION
+
+      - name: 打包 zip
+        run: |
+          $zip = "YsmConvert-v$env:VERSION-win-x64.zip"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          # 带顶层目录 YsmConvert/: 解压出来是一个文件夹, 而不是散开的 700 多个文件
+          [IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path dist/YsmConvert).Path, (Join-Path $pwd $zip),
+                                                         [IO.Compression.CompressionLevel]::Optimal, $true)
+          "ZIP=$zip" >> $env:GITHUB_ENV
+          Write-Host ("{0}: {1:N1} MB" -f $zip, ((Get-Item $zip).Length / 1MB))
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v$env:VERSION"
+          # 更新内容 = 上一个 tag 以来的提交标题; 用 --output 让 git 直接写 UTF-8 文件, 中文不经控制台代码页转码
+          $range = if ($env:PREV_TAG) { "$env:PREV_TAG..HEAD" } else { 'HEAD' }
+          git log $range --no-merges --pretty=format:'- %s (%h)' --output=changes.txt
+          $notes = @('## 更新内容', '') + (Get-Content -Encoding utf8 changes.txt)
+          if ($env:PREV_TAG) {
+            $notes += '', "完整改动: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/compare/$env:PREV_TAG...$tag"
+          }
+          $notes += '', '## 下载与运行', '',
+            ('下载 `{0}`, 解压到任意目录, 运行 `YsmConvert.exe`(图形界面)或 `ysmconv.exe`(命令行 / MCP)。' -f $env:ZIP),
+            '.NET 运行时与便携 Python 2.7 都在包里, 不用另装。exe 没有代码签名, 首次运行被 SmartScreen 拦下时点"更多信息"再点"仍要运行"。'
+          $notes | Set-Content -Encoding utf8 notes.md
+          gh release create $tag $env:ZIP --target $env:GITHUB_SHA --title "YSM Convert $tag" --notes-file notes.md

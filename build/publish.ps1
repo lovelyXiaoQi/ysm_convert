@@ -10,12 +10,16 @@
 
 .PARAMETER SelfContained
   缺省 $true。设为 $false 则发布框架依赖版(体积小, 需要目标机装 .NET 10 桌面运行时)。
+.PARAMETER Version
+  写进两个 exe 的版本号(文件属性里的版本、MCP 的 serverInfo)。缺省取 Directory.Build.props 的 <Version>;
+  发版流水线 .github/workflows/release.yml 按 tag 递增出版本号后从这里传入。
 .PARAMETER KernelOnly
   只把 core/(kernel / docs / python)重新拷进已有的 dist, 不重新发布 exe —— 改了内核、GUI 又开着的时候用。
 #>
 param(
     [bool]$SelfContained = $true,
     [string]$Runtime = "win-x64",
+    [string]$Version,
     [switch]$KernelOnly
 )
 $ErrorActionPreference = "Stop"
@@ -69,6 +73,7 @@ New-Item -ItemType Directory -Force $dist | Out-Null
 
 $sc = if ($SelfContained) { "true" } else { "false" }
 $common = @("-c", "Release", "-r", $Runtime, "--self-contained", $sc, "-o", $dist, "-p:PublishSingleFile=false", "-p:DebugType=none")
+if ($Version) { $common += "-p:Version=$Version" }
 dotnet publish (Join-Path $repoRoot "src\YsmConvert.App") @common
 if ($LASTEXITCODE -ne 0) { throw "发布 GUI 失败" }
 dotnet publish (Join-Path $repoRoot "src\YsmConvert.Cli") @common
