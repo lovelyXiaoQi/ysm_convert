@@ -40,26 +40,18 @@ catmull-rom 要靠**相邻关键帧的值**算切线,而表达式值逐帧变化
 warden `use_mainhand.cls.bow` 的 `UpBody` t=0.0 是 `[10.07, -64.58, -11.12]` + catmullrom,
 紧邻 t=0.5 的表达式帧 —— 0→0.5 整段退化成"停在起点值,到 0.5 再跳过去"。
 
-**判据来自 CSM 的既成事实**(它转换同一批 Java YSM 包且工作正常,全库 30 文件 / 3742 通道):
-
-| 关键帧形态 | 挨着表达式(自身或邻居) | 远离表达式 |
-|---|---|---|
-| `lerp_mode: catmullrom` | **0 处** | 68 处 |
-| 只写 `post` 不写 `pre` | **0 处** | 8346 处 |
-
-右列量很大且工作正常 —— 所以这不是"CSM 不用 catmullrom / 不用仅 post",而是它
-**精确避开表达式的邻域**。我们修复前:三个移植包共 48 处邻域违例(warden 24 / sahmet 34 /
-wither 34,含表达式帧自身),`compat/ysm_tacz.animation.json` 另有 37 处 catmullrom 违例。
+修复前:三个移植包共 48 处邻域违例(warden 24 / sahmet 34 / wither 34,含表达式帧自身),
+`compat/ysm_tacz.animation.json` 另有 37 处 catmullrom 违例。
 
 **两条规则的分量不一样,别混为一谈:**
 
 ① **`catmullrom` → `linear`(致命)。** 这条是实机可复现的破坏。
-② **仅 `post` 的补一份同值 `pre`(对齐 CSM,非致命)。** 见下方旁证。
+② **仅 `post` 的补一份同值 `pre`。** 值恰好等于通道默认值、或是 catmullrom 平滑帧时无害,
+其余线性入段会从默认值插过来(见上方更正)。
 
 **旁证 / 对照组:内置 `wine_fox` 与 `wine_fox_jk`**(原版长期实机可用,不是移植产物)——
 它们有 81 处"表达式 + 仅 post"的关键帧、成片存在且表现正常,但**挨着表达式的 catmullrom
-是 0 处**。这把两条规则彻底分开了:仅 `post` 本身不致命(补 `pre` 只是与 CSM 形态对齐、
-语义等价的无害改写),真正会把整段插值打废的是 **catmullrom 落在表达式邻域**。
+是 0 处**。真正会把整段插值打废的是 **catmullrom 落在表达式邻域**。
 
 实机症状(warden/wither 拉弓)分两轮:
 - 第一轮:`UpBody`/`AllBody`/`Arm`/`Head` 的偏航是 `-75 + 按 head_yaw 回正` 的表达式且带
@@ -77,8 +69,7 @@ wither 34,含表达式帧自身),`compat/ysm_tacz.animation.json` 另有 37 处 
 实机:第一次拉弓正常,射出后再拉,动画直接从末帧起步(弓一上来就是放大 2 倍的终态)。
 这与仓库早已为挥击/受击/死亡解过的是同一个问题(`BuildOneShotControllers`),
 现已把 `use_mainhand`/`use_offhand` 两族一并纳入(`_ONESHOT_USE_CHANNELS`)。
-CSM 同样把 use 动画塞进控制器状态(`controller.animation.csm.player.custom_use` 的
-`on_use` 态)而非直挂。**与挥击的差别**:use 成员状态在触发期间一直停留 ——
+**与挥击的差别**:use 成员状态在触发期间一直停留 ——
 use 动画多为 `hold_on_last_frame`,按 `all_animations_finished` 出态会在拉满弓/
 举着盾时提前掉回 idle,姿态当场归位。
 
@@ -199,7 +190,7 @@ Java 的 `#minecraft:swords` 这类原版 tag **在基岩不存在**(基岩是�
 | `has_helmet` 等 4 槽 | ≈ `query.is_item_name_any('slot.armor.head', <护甲物品枚举>)` | 原版全量护甲+南瓜/头颅;官方"换装设计"玩法靠它 |
 | `has_elytra` | ✅ `query.is_item_name_any('slot.armor.chest','minecraft:elytra')` | |
 | `mainhand/offhand_charged_crossbow` | ✅ `query.item_is_charged(0/1)` | |
-| `in_ground`(箭类投射物) | ≈ `query.is_on_ground` | Java = 箭插在方块里(`IArrowExtraInfo.isInGround`);基岩近似为在地判据,与主包弹射物 `ground` 谓词、CSM 箭矢主控制器同口径。用在替换实体的控制器里(末影龙娘末影剑:落地后火焰播完一轮再熄灭);`on_ground_time` 无对应,落残余置零 |
+| `in_ground`(箭类投射物) | ≈ `query.is_on_ground` | Java = 箭插在方块里(`IArrowExtraInfo.isInGround`);基岩近似为在地判据,与主包弹射物 `ground` 谓词同口径。用在替换实体的控制器里(末影龙娘末影剑:落地后火焰播完一轮再熄灭);`on_ground_time` 无对应,落残余置零 |
 | `ctrl.<主状态>` | ✅ `((variable.ysm_ctrl_main??0)==序号)` | **Java 互斥语义**(`CtrlBinding.testCondition`): 每帧按优先级找出**第一个**成立的主状态缓存, `ctrl.X` 只在它是 X 时为真; 骑乘时全假、YSM 预览实体全假。优先级(序号): death 1 / riptide 2(基岩无判据, 恒假) / sleep 3 / swim 4 / climb 5 / climbing 6 / ladder_up 7 / ladder_stillness 8 / ladder_down 9 / fly 10 / elytra_fly 11 / swim_stand 12 / attacked 13 / jump 14 / sneak 15 / sneaking 16 / run 17 / walk 18 / idle 19。主包共享动画 `animation.ysm.java_ctrl_state`(animate 表紧跟 `java_input_state`)逐帧写 `variable.ysm_ctrl_main`, 判据表 `port_java_pack._CTRL_MAIN_PRIORITY`。早先逐个独立映射, 滑翔/创造飞行时 `ctrl.jump` 也为真(末影龙娘 post_main 在滑翔时跑进"跳跃下坠") |
 | (ctrl.jump 判据) | ≈ `((variable.ysm_airborne??0)>0.5)` | Java 含下落。`variable.ysm_airborne` 是主包共享的 `animation.ysm.java_input_state`(animate 表首位)逐帧更新的**帧间闩锁**:进入要求 `!is_on_ground&&!is_in_water&&(vertical_speed>0\|\|<-4)`(挡住走路时 `is_on_ground` 逐帧翻转),留在腾空只看 `!is_on_ground&&!is_in_water`;裸的 `!is_on_ground` 或带最高点死区的判据都会让作者状态机在最高点/落地各抽一次(凋灵娘实测) |
 | (ctrl.sneak / sneaking 判据) | ≈ `query.is_sneaking&&query.modified_move_speed>0.05` / `query.is_sneaking` | 注意 sneak=移动、sneaking=兜底(Java L45-46,别记反);"在地"由优先级更高的 jump 已先判保证 |
@@ -359,7 +350,12 @@ direct-variable reference`):按 Java 优先级、剥掉括号后,左侧是变量
 收剑归 0;弩射出的箭 `(variable.ysm_env_shoot_item??'')=='minecraft:crossbow'` 为 1、箭上带着主人的 roaming 值;站立时鞘翅角
 (15, 0, -15);15 号头发:视角俯仰跳变后 hairc1 经 `bone_rot` 回读比 hairb1 晚约 0.1 秒到峰值、随后阻尼衰减(Java 逐节跟随的效果);
 roaming 本机改值 → 服务端分桶 → 回执不乒乓(隔 0.15 秒连写 3、1,4 秒内停在 1)、远程玩家的桶变了本机上该实体跟着变、换模型再换回
-从桶里恢复且初始值没冲掉存档。未实机:重进世界、载具快照、滑翔/潜行下的鞘翅角趋近、真甩鱼竿、梯子/细雪/维度/准星(目前没有包用到)。
+从桶里恢复且初始值没冲掉存档。
+
+**第二轮(2026-09-19,重启 + 重置存档后)**:重载世界后 roaming 自动恢复(修了"存档恢复的属性登录时不下发客户端",见 CLAUDE.md);
+骑乘中主人改 roaming,船上跟着变(修了广播早于属性同步);悬空强制滑翔时鞘翅角收敛到 (19.9, 0, -88.4),与按实时速度算出的
+f≈0.977 吻合;注入需求后维度 `=='minecraft:overworld'` 为 1、准星对着金合欢木时类型 `'block'`、ID 比较为 1。仍未实机:潜行下的
+鞘翅角(键鼠模式下 `ChangeSneakState` 不生效,服务端置潜行位会被客户端输入逐帧覆盖)、真甩鱼竿、梯子/细雪(目前没有包用到)。
 
 探针只认**常量参数**;参数是表达式的调用照旧置常量并告警。仍未接的:`keyboard`/`mouse`(本机按键)、`sync`/`@sync`、
 `play_sound`/`stop_sound`、`fn.*` 与事件脚本 —— 属于脚本层,需要"molang 通知 Python"的通道;方块/群系 **tag** 类查询

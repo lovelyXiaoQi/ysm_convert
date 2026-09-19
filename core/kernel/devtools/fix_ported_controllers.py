@@ -62,23 +62,33 @@ port_java_pack.py 后补的三条转换规则只对"再跑一次移植"生效, �
 
 用法: python fix_ported_controllers.py [包名 ...]   (缺省修全部 JSON 包)
 """
+
+import io
 import os
 import re
 import sys
-import io
-import json
 from collections import OrderedDict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import port_java_pack as port  # noqa: E402  复用同一套规则实现
 import java_runtime_bindings as runtime_bindings  # noqa: E402  主包运行层声明(java_state)
+import port_java_pack as port  # noqa: E402  复用同一套规则实现
 from ysmModelScripts.packLoader.packParser import (  # noqa: E402
-    _ITEM_IN_USE_TEST, _ItemTagTest, _JAVA_ATTACK_TIME,
-    _LEGACY_ITEM_IN_USE_TEST, _LEGACY_USE_MAINHAND_GATE, _LEGACY_USE_OFFHAND_GATE,
-    _MAINHAND_BLOCKING_TEST, _OFFHAND_IN_USE_TEST,
-    _USE_DURATION_SIGNAL, _USE_MAINHAND_GATE, _USE_OFFHAND_GATE,
-    _V1_OFFHAND_IN_USE_TEST, _V2_ITEM_IN_USE_TEST, _V2_MAINHAND_BLOCKING_TEST,
-    _V2_USE_MAINHAND_GATE, _V3_USE_DURATION_SIGNAL,
+    _ITEM_IN_USE_TEST,
+    _JAVA_ATTACK_TIME,
+    _LEGACY_ITEM_IN_USE_TEST,
+    _LEGACY_USE_MAINHAND_GATE,
+    _LEGACY_USE_OFFHAND_GATE,
+    _MAINHAND_BLOCKING_TEST,
+    _OFFHAND_IN_USE_TEST,
+    _USE_DURATION_SIGNAL,
+    _USE_MAINHAND_GATE,
+    _USE_OFFHAND_GATE,
+    _V1_OFFHAND_IN_USE_TEST,
+    _V2_ITEM_IN_USE_TEST,
+    _V2_MAINHAND_BLOCKING_TEST,
+    _V2_USE_MAINHAND_GATE,
+    _V3_USE_DURATION_SIGNAL,
+    _ItemTagTest,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -98,33 +108,54 @@ def SetLayout(rp=None, bpModels=None, refRp=None, root=None):
         ROOT = root
     port.SetLayout(rp=rp, bpModels=bpModels, refRp=refRp, root=root)
 
+
 # ctrl.* 旧展开(修复前落盘形态) → 新展开(当前 _CTRL_NAME_MAP)。精确整串替换:
 # 只有这些展开是移植器合成的、模式唯一的文本, 不会误伤作者手写条件(其中
 # swim_stand 等水域语境的 is_on_ground 语义正确, 不在替换之列)。
 _CTRL_NOW = dict(port._CTRL_NAME_MAP)
 _OLD_TO_NEW_EXPANSIONS = [
-    ("(query.is_on_ground&&query.modified_move_speed<=0.05"
-     "&&!query.is_riding&&!query.is_sneaking)", _CTRL_NOW["idle"]),
-    ("(query.is_on_ground&&query.modified_move_speed>0.05"
-     "&&!query.is_sprinting&&!query.is_sneaking)", _CTRL_NOW["walk"]),
+    (
+        "(query.is_on_ground&&query.modified_move_speed<=0.05&&!query.is_riding&&!query.is_sneaking)",
+        _CTRL_NOW["idle"],
+    ),
+    (
+        "(query.is_on_ground&&query.modified_move_speed>0.05&&!query.is_sprinting&&!query.is_sneaking)",
+        _CTRL_NOW["walk"],
+    ),
     ("(query.is_on_ground&&query.is_sprinting)", _CTRL_NOW["run"]),
     ("(!query.is_on_ground&&!query.is_in_water)", _CTRL_NOW["jump"]),
     # 2026-09-03 之前的"稳定地面"死区版展开 → 闩锁版(见 port._AIRBORNE_LATCH 注)
-    ("(!(query.is_on_ground||(query.vertical_speed<=0&&query.vertical_speed>-4))"
-     "&&!query.is_in_water)", _CTRL_NOW["jump"]),
-    ("((query.is_on_ground||(query.vertical_speed<=0&&query.vertical_speed>-4))"
-     "&&query.modified_move_speed<=0.05&&!query.is_riding&&!query.is_sneaking)", _CTRL_NOW["idle"]),
-    ("((query.is_on_ground||(query.vertical_speed<=0&&query.vertical_speed>-4))"
-     "&&query.modified_move_speed>0.05&&!query.is_sprinting&&!query.is_sneaking)", _CTRL_NOW["walk"]),
-    ("((query.is_on_ground||(query.vertical_speed<=0&&query.vertical_speed>-4))"
-     "&&query.is_sprinting)", _CTRL_NOW["run"]),
+    (
+        "(!(query.is_on_ground||(query.vertical_speed<=0&&query.vertical_speed>-4))&&!query.is_in_water)",
+        _CTRL_NOW["jump"],
+    ),
+    (
+        "((query.is_on_ground||(query.vertical_speed<=0&&query.vertical_speed>-4))"
+        "&&query.modified_move_speed<=0.05&&!query.is_riding&&!query.is_sneaking)",
+        _CTRL_NOW["idle"],
+    ),
+    (
+        "((query.is_on_ground||(query.vertical_speed<=0&&query.vertical_speed>-4))"
+        "&&query.modified_move_speed>0.05&&!query.is_sprinting&&!query.is_sneaking)",
+        _CTRL_NOW["walk"],
+    ),
+    (
+        "((query.is_on_ground||(query.vertical_speed<=0&&query.vertical_speed>-4))&&query.is_sprinting)",
+        _CTRL_NOW["run"],
+    ),
     # 2026-09-18 之前逐个独立映射的展开 → Java 互斥语义(读 variable.ysm_ctrl_main, 见 port._CTRL_MAIN_PRIORITY 注)。
     # 闩锁系 idle/walk/run 含 jump 的展开串, 必须先于 jump 替换; 裸查询形态(query.is_gliding / is_sleeping /
     # is_sneaking)与 attacked 的 (query.hurt_time>0) 分不清是否作者手写, 不迁(语义也几乎一致)
-    ("((!((variable.ysm_airborne??0)>0.5))&&query.modified_move_speed<=0.05"
-     "&&!query.is_riding&&!query.is_sneaking)", _CTRL_NOW["idle"]),
-    ("((!((variable.ysm_airborne??0)>0.5))&&query.modified_move_speed>0.05"
-     "&&!query.is_sprinting&&!query.is_sneaking)", _CTRL_NOW["walk"]),
+    (
+        "((!((variable.ysm_airborne??0)>0.5))&&query.modified_move_speed<=0.05"
+        "&&!query.is_riding&&!query.is_sneaking)",
+        _CTRL_NOW["idle"],
+    ),
+    (
+        "((!((variable.ysm_airborne??0)>0.5))&&query.modified_move_speed>0.05"
+        "&&!query.is_sprinting&&!query.is_sneaking)",
+        _CTRL_NOW["walk"],
+    ),
     ("((!((variable.ysm_airborne??0)>0.5))&&query.is_sprinting)", _CTRL_NOW["run"]),
     ("((variable.ysm_airborne??0)>0.5)", _CTRL_NOW["jump"]),
     ("(query.is_sneaking&&query.modified_move_speed>0.05)", _CTRL_NOW["sneak"]),
@@ -167,10 +198,10 @@ def _CollectPackAnimKeys(packName):
             data = port.LoadJson(os.path.join(animDir, name))
         except ValueError:
             continue
-        for animId in (data.get("animations") or {}):
+        for animId in data.get("animations") or {}:
             for prefix in prefixes:
                 if animId.startswith(prefix):
-                    shortKey = str(animId[len(prefix):])
+                    shortKey = str(animId[len(prefix) :])
                     keys.add(shortKey)
                     if prefix.endswith("_arm."):
                         # arm 键同时以 fp_ 前缀注册(解析器 _LoadArmAnimations), 一次性
@@ -192,8 +223,12 @@ def _FixControllers(packName, knownKeys, report):
     referencedParallels = []
     if not os.path.isdir(ctlDir):
         return referencedParallels
-    generated = (port.STATE_FILE, port.ONESHOT_FILE, port.VARIABLE_INIT_FILE,
-                 port.STATE_RESET_CONTROLLER_FILE)
+    generated = (
+        port.STATE_FILE,
+        port.ONESHOT_FILE,
+        port.VARIABLE_INIT_FILE,
+        port.STATE_RESET_CONTROLLER_FILE,
+    )
     for name in sorted(os.listdir(ctlDir)):
         if not name.endswith(".json") or name in generated:
             continue
@@ -211,8 +246,7 @@ def _FixControllers(packName, knownKeys, report):
             # 多键条目取首键 / apply 条件布尔化) + Java 四元数过渡 → blend_via_shortest_path。
             # blend_transition 的 Java→基岩归属重映射**不在此**(非幂等, 只在移植期做一次)
             javaFixes += port.NormalizeJavaControllerStates(body)
-            port._PruneControllerBody(body, knownKeys, prunedRefs, prunedTransitions,
-                                      emptiedStates)
+            port._PruneControllerBody(body, knownKeys, prunedRefs, prunedTransitions, emptiedStates)
             javaFixes += port.ApplyShortestPathBlend(body)
         # 表达式迁移(旧展开 → 闩锁/死区)与残缺前缀清理**先于**旁路转移: 旁路的复合条件要基于
         # 最终形态, 否则第二遍会按新形态再生成一批(幂等性守护逮到)。残缺前缀实例: 凋灵娘
@@ -228,39 +262,54 @@ def _FixControllers(packName, knownKeys, report):
             if not isinstance(body, dict):
                 continue
             referencedParallels += port._CollectParallelRefs(body)
-        text = port.SerializeForDisk(data)      # 落盘格式跟随 port.JSON_COMPACT(转换器可切成压一行)
+        text = port.SerializeForDisk(data)  # 落盘格式跟随 port.JSON_COMPACT(转换器可切成压一行)
         port.WriteBytes(path, text.encode("utf-8"))
         notes = []
         if javaFixes:
-            notes.append(u"控制器状态按 Java 语义规范化 {} 处(blend 曲线→数字 / 状态级音效粒子删除 / "
-                         u"多键条目取首键 / apply 条件布尔化 / blend_via_shortest_path)".format(javaFixes))
+            notes.append(
+                "控制器状态按 Java 语义规范化 {} 处(blend 曲线→数字 / 状态级音效粒子删除 / "
+                "多键条目取首键 / apply 条件布尔化 / blend_via_shortest_path)".format(javaFixes)
+            )
         if danglingFixes:
-            notes.append(u"清理残缺 Java 前缀 {} 处(引擎 unrecognized token)".format(danglingFixes))
+            notes.append("清理残缺 Java 前缀 {} 处(引擎 unrecognized token)".format(danglingFixes))
         if guardHits:
-            notes.append(u"基岩解析不了的表达式按 Java 口径处置 {} 处(整份文件拒载): {}".format(
-                len(guardHits), u"; ".join(u"{} {}".format(port.FormatSlotPath(path), problem)
-                                           for path, _text, problem in guardHits[:4])))
+            notes.append(
+                "基岩解析不了的表达式按 Java 口径处置 {} 处(整份文件拒载): {}".format(
+                    len(guardHits),
+                    "; ".join(
+                        "{} {}".format(port.FormatSlotPath(path), problem)
+                        for path, _text, problem in guardHits[:4]
+                    ),
+                )
+            )
         if emptiedStates:
             # 空 animations 数组 = 整份控制器文件被网易引擎拒载(见
             # port._PruneControllerBody 注释), 单独高亮报告
-            notes.append(u"删空数组键 {} 处(animations {} / transitions {}) —— "
-                         u"空 animations 会让整份文件拒载".format(
-                             len(emptiedStates),
-                             emptiedStates.count("animations"),
-                             emptiedStates.count("transitions")))
+            notes.append(
+                "删空数组键 {} 处(animations {} / transitions {}) —— 空 animations 会让整份文件拒载".format(
+                    len(emptiedStates), emptiedStates.count("animations"), emptiedStates.count("transitions")
+                )
+            )
         if prunedRefs:
-            notes.append(u"剪死引用 {} 处({})".format(
-                len(prunedRefs), u", ".join(sorted(set(prunedRefs))[:6])
-                + (u" ..." if len(set(prunedRefs)) > 6 else u"")))
+            notes.append(
+                "剪死引用 {} 处({})".format(
+                    len(prunedRefs),
+                    ", ".join(sorted(set(prunedRefs))[:6]) + (" ..." if len(set(prunedRefs)) > 6 else ""),
+                )
+            )
         if prunedTransitions:
-            notes.append(u"剪非法转移 {} 处({})".format(
-                len(prunedTransitions), u", ".join(sorted(set(prunedTransitions))[:4])))
+            notes.append(
+                "剪非法转移 {} 处({})".format(
+                    len(prunedTransitions), ", ".join(sorted(set(prunedTransitions))[:4])
+                )
+            )
         if stableFixes:
-            notes.append(u"表达式整串迁移 {} 处(稳定地面判据 / ctrl.use 分手门 / "
-                         u"is_using_item→原版使用判据 / Java 物品 tag→基岩内置 tag / "
-                         u"无 else 三元补 `: 0`)".format(stableFixes))
-        report.append(u"  控制器 {}: {}".format(
-            name, u"; ".join(notes) if notes else u"无需修改"))
+            notes.append(
+                "表达式整串迁移 {} 处(稳定地面判据 / ctrl.use 分手门 / "
+                "is_using_item→原版使用判据 / Java 物品 tag→基岩内置 tag / "
+                "无 else 三元补 `: 0`)".format(stableFixes)
+            )
+        report.append("  控制器 {}: {}".format(name, "; ".join(notes) if notes else "无需修改"))
     return referencedParallels
 
 
@@ -283,38 +332,46 @@ def _FixManifest(packName, referencedParallels, report):
         neteaseInit = list(netease.pop("initialize", None) or [])
         if neteaseInit:
             topInit = list(manifest.get("initialize") or [])
-            declared = set(entry.split("=")[0].strip() for entry in topInit
-                           if isinstance(entry, (str, unicode)))          # noqa: F821
-            merged = topInit + [entry for entry in neteaseInit
-                                if not (isinstance(entry, (str, unicode))  # noqa: F821
-                                        and entry.split("=")[0].strip() in declared)]
+            declared = set(
+                entry.split("=")[0].strip() for entry in topInit if isinstance(entry, (str, unicode))
+            )  # noqa: F821
+            merged = topInit + [
+                entry
+                for entry in neteaseInit
+                if not (
+                    isinstance(entry, (str, unicode))  # noqa: F821
+                    and entry.split("=")[0].strip() in declared
+                )
+            ]
             manifest["initialize"] = merged
             changed = True
-            report.append(u"  ysm.json: initialize {} 条 netease → 顶层".format(len(merged)))
+            report.append("  ysm.json: initialize {} 条 netease → 顶层".format(len(merged)))
         dropped = [key for key in _OBSOLETE_NETEASE_KEYS if key in netease]
         for key in dropped:
             del netease[key]
         if dropped:
             changed = True
-            report.append(u"  ysm.json: 删掉可自动推导的字段 {}".format(u", ".join(dropped)))
+            report.append("  ysm.json: 删掉可自动推导的字段 {}".format(", ".join(dropped)))
         if not netease:
             del manifest["netease"]
             changed = True
-            report.append(u"  ysm.json: 删掉空的 netease 兼容段")
+            report.append("  ysm.json: 删掉空的 netease 兼容段")
     flattened = port._FlattenRoamingStrings(manifest.get("properties"))
     if flattened:
         changed = True
-        report.append(u"  ysm.json: 表单变量 v.roaming.* 扁平化 {} 处".format(flattened))
+        report.append("  ysm.json: 表单变量 v.roaming.* 扁平化 {} 处".format(flattened))
     if changed:
         port.DumpJson(path, manifest)
     else:
-        report.append(u"  ysm.json: 无需修改")
+        report.append("  ysm.json: 无需修改")
 
 
 _GUI_RENDER_CONTROLLER = "controller.render.ysm_pack_gui"
 _ENTITY_BASE_INIT = [
-    "variable.ysm_skin = 0.0;", "variable.ysm_gui = 0.0;",
-    "variable.ysm_show = 0.0;", "variable.ysm_preview = 0.0;",
+    "variable.ysm_skin = 0.0;",
+    "variable.ysm_gui = 0.0;",
+    "variable.ysm_show = 0.0;",
+    "variable.ysm_preview = 0.0;",
     "variable.ysm_light = 0.0;",
 ]
 
@@ -350,9 +407,9 @@ def _FixEntityInitialize(packName, report):
     manifest = port.LoadJson(manifestPath)
     newInit = _ENTITY_BASE_INIT + port.BuildPackVariableDefaults(manifest, _ScanPackVars(packName))
     entity = port.LoadJson(entityPath)
-    description = ((entity.get("minecraft:client_entity") or {}).get("description"))
+    description = (entity.get("minecraft:client_entity") or {}).get("description")
     if not isinstance(description, dict):
-        report.append(u"  [WARN] 预览实体定义结构异常, 跳过 initialize 回填")
+        report.append("  [WARN] 预览实体定义结构异常, 跳过 initialize 回填")
         return
     scripts = description.setdefault("scripts", OrderedDict())
     changed = False
@@ -363,20 +420,22 @@ def _FixEntityInitialize(packName, report):
     materials = description.get("materials")
     if isinstance(materials, dict) and materials.get("default") in ("saury", "bloom", "entity"):
         materials["default"] = "bloom_nocull"
-        report.append(u"  预览实体材质 default → bloom_nocull(不剔除背面, 对齐 Java)")
+        report.append("  预览实体材质 default → bloom_nocull(不剔除背面, 对齐 Java)")
         changed = True
     if isinstance(controllers, list) and controllers != [_GUI_RENDER_CONTROLLER]:
         description["render_controllers"] = [_GUI_RENDER_CONTROLLER]
-        report.append(u"  预览实体 GUI 控制器 {} → {}".format(
-            u", ".join(controllers), _GUI_RENDER_CONTROLLER))
+        report.append("  预览实体 GUI 控制器 {} → {}".format(", ".join(controllers), _GUI_RENDER_CONTROLLER))
         changed = True
     if list(scripts.get("initialize") or []) != newInit:
         scripts["initialize"] = newInit
-        report.append(u"  预览实体 initialize 回填包变量 {} 条(共 {} 条)".format(
-            len(newInit) - len(_ENTITY_BASE_INIT), len(newInit)))
+        report.append(
+            "  预览实体 initialize 回填包变量 {} 条(共 {} 条)".format(
+                len(newInit) - len(_ENTITY_BASE_INIT), len(newInit)
+            )
+        )
         changed = True
     if not changed:
-        report.append(u"  预览实体定义: 无需修改")
+        report.append("  预览实体定义: 无需修改")
         return
     port.DumpJson(entityPath, entity)
 
@@ -394,14 +453,17 @@ def _FixVariableInitController(packName, report):
     if controller is None:
         if os.path.isfile(path):
             os.remove(path)
-            report.append(u"  变量初始化控制器: 包无可初始化变量, 删除遗留文件")
+            report.append("  变量初始化控制器: 包无可初始化变量, 删除遗留文件")
         return
     if os.path.isfile(path) and port.LoadJson(path) == controller:
-        report.append(u"  变量初始化控制器: 已是最新({} 条变量)".format(len(initLines)))
+        report.append("  变量初始化控制器: 已是最新({} 条变量)".format(len(initLines)))
         return
     port.DumpJson(path, controller)
-    report.append(u"  变量初始化控制器 {}: 重建({} 条变量, 每渲染实例执行一次)".format(
-        port.VARIABLE_INIT_FILE, len(initLines)))
+    report.append(
+        "  变量初始化控制器 {}: 重建({} 条变量, 每渲染实例执行一次)".format(
+            port.VARIABLE_INIT_FILE, len(initLines)
+        )
+    )
 
 
 def _FixOneShotControllers(packName, report, ownership=None):
@@ -413,15 +475,16 @@ def _FixOneShotControllers(packName, report, ownership=None):
     if fileBody is None:
         if os.path.isfile(path):
             os.remove(path)
-            report.append(u"  一次性通道控制器: 包无挥击/受击/死亡动画, 删除遗留文件")
+            report.append("  一次性通道控制器: 包无挥击/受击/死亡动画, 删除遗留文件")
         return
-    names = u", ".join(k.split(".")[-1] for k in fileBody["animation_controllers"])
+    names = ", ".join(k.split(".")[-1] for k in fileBody["animation_controllers"])
     if os.path.isfile(path) and port.LoadJson(path) == fileBody:
-        report.append(u"  一次性通道控制器: 已是最新({})".format(names))
+        report.append("  一次性通道控制器: 已是最新({})".format(names))
         return
     port.DumpJson(path, fileBody)
-    report.append(u"  一次性通道控制器 {}: 重建({}) —— 直挂条目不重放, 改由状态机驱动".format(
-        port.ONESHOT_FILE, names))
+    report.append(
+        "  一次性通道控制器 {}: 重建({}) —— 直挂条目不重放, 改由状态机驱动".format(port.ONESHOT_FILE, names)
+    )
 
 
 def _OwnershipSnapshot(packName):
@@ -431,7 +494,8 @@ def _OwnershipSnapshot(packName):
     manifestPath = port.PackManifestPath(packName)
     if os.path.isfile(manifestPath):
         snapshot[port.OWNERSHIP_MANIFEST_KEY] = port._SerializeJson(
-            port.LoadJson(manifestPath).get(port.OWNERSHIP_MANIFEST_KEY))
+            port.LoadJson(manifestPath).get(port.OWNERSHIP_MANIFEST_KEY)
+        )
     return snapshot
 
 
@@ -443,15 +507,18 @@ def _FixStateChainController(packName, report, ownership=None):
     if fileBody is None:
         if os.path.isfile(path):
             os.remove(path)
-            report.append(u"  主链状态机: 包无主链动画, 删除遗留文件")
+            report.append("  主链状态机: 包无主链动画, 删除遗留文件")
         return
     stateCount = len(list(fileBody["animation_controllers"].values())[0]["states"])
     if os.path.isfile(path) and port.LoadJson(path) == fileBody:
-        report.append(u"  主链状态机: 已是最新({} 个状态)".format(stateCount))
+        report.append("  主链状态机: 已是最新({} 个状态)".format(stateCount))
         return
     port.DumpJson(path, fileBody)
-    report.append(u"  主链状态机 {}: 重建({} 个状态, 切换交叉淡化 0.1s) —— 直挂条目零过渡硬切, "
-                  u"改由状态机驱动".format(port.STATE_FILE, stateCount))
+    report.append(
+        "  主链状态机 {}: 重建({} 个状态, 切换交叉淡化 0.1s) —— 直挂条目零过渡硬切, 改由状态机驱动".format(
+            port.STATE_FILE, stateCount
+        )
+    )
 
 
 def _CollectPreKeys(packName):
@@ -491,15 +558,17 @@ def _NeutralizeDanglingInData(node):
 # 按同一括号里判据的槽位补回分手门。迁移后形态以 "(query.is_using_item&&!(" / "&&(("
 # 开头, 不再匹配本正则 —— 幂等。
 _OLD_USE_GATE_PATTERN = re.compile(
-    r"\(query\.is_using_item&&(query\.[A-Za-z_]+\('slot\.weapon\.(mainhand|offhand)'[^()]*\))\)")
+    r"\(query\.is_using_item&&(query\.[A-Za-z_]+\('slot\.weapon\.(mainhand|offhand)'[^()]*\))\)"
+)
 
 
 def _MigrateUseGate(text):
     """裸 is_using_item 门 → 按槽位分手的门; 返回 (新串, 替换数)"""
+
     def _Replace(match):
-        gate = (port._USE_OFFHAND_GATE if match.group(2) == "offhand"
-                else port._USE_MAINHAND_GATE)
+        gate = port._USE_OFFHAND_GATE if match.group(2) == "offhand" else port._USE_MAINHAND_GATE
         return "({}&&{})".format(gate, match.group(1))
+
     return _OLD_USE_GATE_PATTERN.subn(_Replace, text)
 
 
@@ -520,7 +589,8 @@ _TAG_CALL_PATTERN = re.compile(
     r"|\(query\.equipped_item_any_tag\((?P<vetoed>[^()]*)\)"
     r"(?:&&!\(variable\.ysm_sword_veto_(?:main|off)\?\?0\)"
     r"|(?:&&!\(query\.get_equipped_item_name\('(?:main_hand|off_hand)'\)=='[A-Za-z0-9_.]+'\))+)\)"
-    r"|query\.equipped_item_any_tag\((?P<bare>[^()]*)\)")
+    r"|query\.equipped_item_any_tag\((?P<bare>[^()]*)\)"
+)
 
 
 def _MigrateItemTags(text):
@@ -535,11 +605,12 @@ def _MigrateItemTags(text):
             args = match.group("bare")
         parts = [part.strip().strip("'\"") for part in args.split(",")]
         if len(parts) < 2 or not all(parts):
-            return match.group(0)          # 形态不认识就原样留着
+            return match.group(0)  # 形态不认识就原样留着
         rebuilt = _ItemTagTest(parts[0], parts[1:])
         if rebuilt != match.group(0):
             counter[0] += 1
         return rebuilt
+
     return _TAG_CALL_PATTERN.sub(_Replace, text), counter[0]
 
 
@@ -553,8 +624,7 @@ def _MigrateItemUseSignal(text):
     """
     if "query.is_using_item" not in text:
         return text, 0
-    return text.replace("query.is_using_item", _ITEM_IN_USE_TEST), \
-        text.count("query.is_using_item")
+    return text.replace("query.is_using_item", _ITEM_IN_USE_TEST), text.count("query.is_using_item")
 
 
 def _MigrateLegacyBlockingGates(text):
@@ -568,14 +638,16 @@ def _MigrateLegacyBlockingGates(text):
     先换整条门控, 再换剩余的"使用中"判据与单手格挡判据; 现行串不含任何旧串 —— 幂等。
     """
     fixes = 0
-    for oldExpr, newExpr in ((_V3_USE_DURATION_SIGNAL, _USE_DURATION_SIGNAL),
-                             (_LEGACY_USE_MAINHAND_GATE, _USE_MAINHAND_GATE),
-                             (_LEGACY_USE_OFFHAND_GATE, _USE_OFFHAND_GATE),
-                             (_V2_USE_MAINHAND_GATE, _USE_MAINHAND_GATE),
-                             (_V2_ITEM_IN_USE_TEST, _ITEM_IN_USE_TEST),
-                             (_LEGACY_ITEM_IN_USE_TEST, _ITEM_IN_USE_TEST),
-                             (_V2_MAINHAND_BLOCKING_TEST, _MAINHAND_BLOCKING_TEST),
-                             (_V1_OFFHAND_IN_USE_TEST, _OFFHAND_IN_USE_TEST)):
+    for oldExpr, newExpr in (
+        (_V3_USE_DURATION_SIGNAL, _USE_DURATION_SIGNAL),
+        (_LEGACY_USE_MAINHAND_GATE, _USE_MAINHAND_GATE),
+        (_LEGACY_USE_OFFHAND_GATE, _USE_OFFHAND_GATE),
+        (_V2_USE_MAINHAND_GATE, _USE_MAINHAND_GATE),
+        (_V2_ITEM_IN_USE_TEST, _ITEM_IN_USE_TEST),
+        (_LEGACY_ITEM_IN_USE_TEST, _ITEM_IN_USE_TEST),
+        (_V2_MAINHAND_BLOCKING_TEST, _MAINHAND_BLOCKING_TEST),
+        (_V1_OFFHAND_IN_USE_TEST, _OFFHAND_IN_USE_TEST),
+    ):
         if oldExpr in text:
             fixes += text.count(oldExpr)
             text = text.replace(oldExpr, newExpr)
@@ -687,11 +759,13 @@ def _BindTimelineParticles(body):
         return 0
     fixes = 0
     for value in effects.values():
-        for entry in (value if isinstance(value, list) else [value]):
+        for entry in value if isinstance(value, list) else [value]:
             if not isinstance(entry, dict):
                 continue
-            if str(entry.get("effect", "")).startswith(port._PARTICLE_LOCATOR_PREFIX) \
-                    and entry.get("bind_to_actor") is not False:
+            if (
+                str(entry.get("effect", "")).startswith(port._PARTICLE_LOCATOR_PREFIX)
+                and entry.get("bind_to_actor") is not False
+            ):
                 entry["bind_to_actor"] = False
                 fixes += 1
     return fixes
@@ -730,7 +804,6 @@ def _FixAnimationChannels(packName, report):
             vectorFixes += v
             stmtFixes += s
             # 表达式关键帧形态规范化: catmullrom→linear + 仅 post 补 pre
-            # (CSM 全库这两种形态各 0 处; 见 port.NormalizeExpressionKeyframes)。
             # 排在补收尾帧之前
             lerpFixes += port.NormalizeExpressionKeyframes(body)
             # 关键帧结束到 animation_length 之间的空档补"保持末值"帧
@@ -743,12 +816,16 @@ def _FixAnimationChannels(packName, report):
             # **必须用注册键**(去 animation.<ns>. 两段)而不是 ID 末段: 条件/骑乘键含点,
             # 末段取法会把 carryon.cls.princess 读成 princess → 主链判定落空, 移植工具与
             # 本工具产物打架(幂等性守护逮到)
-            shortKey = animId.split(".", 2)[-1] if animId.startswith(playerPrefixes) \
-                else animId.split(".")[-1]
+            shortKey = (
+                animId.split(".", 2)[-1] if animId.startswith(playerPrefixes) else animId.split(".")[-1]
+            )
             # 玩家 parallel/pre 控制器的引用集按短键匹配, 只对玩家侧命名空间有意义: 替换实体(弹射物/载具)的
             # 同名键套上会误伤(末影龙娘玩家侧的表情 fire / 末影剑火焰与投射物动画同名), 与移植工具同口径不带
-            wantOverride = port._ShouldOverridePrevious(shortKey, additiveKeys, preKeys) \
-                if animId.startswith(playerPrefixes) else port._ShouldOverridePrevious(shortKey)
+            wantOverride = (
+                port._ShouldOverridePrevious(shortKey, additiveKeys, preKeys)
+                if animId.startswith(playerPrefixes)
+                else port._ShouldOverridePrevious(shortKey)
+            )
             if wantOverride and body.get("override_previous_animation") is not True:
                 body["override_previous_animation"] = True
                 overrideFixes += 1
@@ -757,7 +834,7 @@ def _FixAnimationChannels(packName, report):
                 overrideFixes += 1
             # 主链/一次性通道成员的 loop 按 Java 运行语义(见 port.ApplyJavaLoopSemantics)
             if animId.startswith(playerPrefixes):
-                registeredKey = animId.split(".", 2)[-1]   # 去 animation.<ns>. 两段
+                registeredKey = animId.split(".", 2)[-1]  # 去 animation.<ns>. 两段
                 if port.ApplyJavaLoopSemantics(registeredKey, body):
                     loopFixes += 1
             # 旧展开/替换式整串迁移(ground_speed 死区等), 通道与 timeline 文本一并
@@ -780,41 +857,64 @@ def _FixAnimationChannels(packName, report):
             particleFixes += _BindTimelineParticles(body)
             # 最后一道: 基岩解析不了的表达式按 Java 口径处置(见 devtools/molang_syntax.py 注)
             guardHits += [(animId, hit) for hit in port.GuardAnimationMolang(body)]
-        if not (vectorFixes or stmtFixes or overrideFixes or tailFixes or loopFixes
-                or sanitizeFixes or timelineFixes or lerpFixes or gateFixes or particleFixes
-                or guardHits):
+        if not (
+            vectorFixes
+            or stmtFixes
+            or overrideFixes
+            or tailFixes
+            or loopFixes
+            or sanitizeFixes
+            or timelineFixes
+            or lerpFixes
+            or gateFixes
+            or particleFixes
+            or guardHits
+        ):
             continue
         port.DumpJson(path, data)
         notes = []
         if lerpFixes:
-            notes.append(u"表达式关键帧形态规范化 {} 处"
-                         u"(catmullrom→linear: 样条要靠相邻帧值算切线; 仅 post 补 pre: "
-                         u"缺 pre 的表达式帧是阶跃, 蓄力会跳变)".format(lerpFixes))
+            notes.append(
+                "表达式关键帧形态规范化 {} 处"
+                "(catmullrom→linear: 样条要靠相邻帧值算切线; 仅 post 补 pre: "
+                "缺 pre 的表达式帧是阶跃, 蓄力会跳变)".format(lerpFixes)
+            )
         if stmtFixes:
-            notes.append(u"通道表达式返回值规范化 {} 处".format(stmtFixes))
+            notes.append("通道表达式返回值规范化 {} 处".format(stmtFixes))
         if vectorFixes:
-            notes.append(u"标量通道展开 {} 处".format(vectorFixes))
+            notes.append("标量通道展开 {} 处".format(vectorFixes))
         if tailFixes:
-            notes.append(u"补收尾保持帧 {} 处(封住末帧到 animation_length 的空档)".format(tailFixes))
+            notes.append("补收尾保持帧 {} 处(封住末帧到 animation_length 的空档)".format(tailFixes))
         if overrideFixes:
-            notes.append(u"override_previous_animation 标志 {} 处".format(overrideFixes))
+            notes.append("override_previous_animation 标志 {} 处".format(overrideFixes))
         if loopFixes:
-            notes.append(u"loop 按 Java 主链/一次性通道语义改写 {} 条".format(loopFixes))
+            notes.append("loop 按 Java 主链/一次性通道语义改写 {} 条".format(loopFixes))
         if timelineFixes:
-            notes.append(u"timeline 按 Java 语义规范化 {} 处(声明语句改写 / 每 tick 脚本长度 / "
-                         u"超出长度的条目: 循环挪到下一圈 0.0 最前, 单次挪到结尾)".format(timelineFixes))
+            notes.append(
+                "timeline 按 Java 语义规范化 {} 处(声明语句改写 / 每 tick 脚本长度 / "
+                "超出长度的条目: 循环挪到下一圈 0.0 最前, 单次挪到结尾)".format(timelineFixes)
+            )
         if sanitizeFixes:
-            notes.append(u"清理引擎拒载的空节点 {} 处(空 bones 会作废整份文件)".format(sanitizeFixes))
+            notes.append("清理引擎拒载的空节点 {} 处(空 bones 会作废整份文件)".format(sanitizeFixes))
         if gateFixes:
-            notes.append(u"纸娃娃无实体的查询包界面门控 {} 处(position / is_item_name_any 刷屏)".format(gateFixes))
+            notes.append(
+                "纸娃娃无实体的查询包界面门控 {} 处(position / is_item_name_any 刷屏)".format(gateFixes)
+            )
         if particleFixes:
-            notes.append(u"粒子关键帧补 bind_to_actor:false {} 处(Java 粒子在世界坐标不随身)".format(particleFixes))
+            notes.append(
+                "粒子关键帧补 bind_to_actor:false {} 处(Java 粒子在世界坐标不随身)".format(particleFixes)
+            )
         if guardHits:
-            notes.append(u"基岩解析不了的表达式按 Java 口径处置 {} 处(整份文件拒载): {}".format(
-                len(guardHits), u"; ".join(
-                    u"{} {} {}".format(animId.split(".", 2)[-1], port.FormatSlotPath(path), problem)
-                    for animId, (path, _text, problem) in guardHits[:4])))
-        report.append(u"  动画 {}: {}".format(name, u", ".join(notes)))
+            notes.append(
+                "基岩解析不了的表达式按 Java 口径处置 {} 处(整份文件拒载): {}".format(
+                    len(guardHits),
+                    "; ".join(
+                        "{} {} {}".format(animId.split(".", 2)[-1], port.FormatSlotPath(path), problem)
+                        for animId, (path, _text, problem) in guardHits[:4]
+                    ),
+                )
+            )
+        report.append("  动画 {}: {}".format(name, ", ".join(notes)))
 
 
 def _WrapProjectileGeometries(packName, report):
@@ -825,15 +925,19 @@ def _WrapProjectileGeometries(packName, report):
     manifest = port.LoadJson(manifestPath)
     wrapped = []
     for section, _entityIds, entry, modelSegment, _namespaceSegment in port.ReplacedTargets(
-            manifest.get("files")):
+        manifest.get("files")
+    ):
         if section != "projectiles":
             continue
         geoPath = os.path.join(RP, "models", "entity", packName, "{}.geo.json".format(modelSegment))
         if os.path.isfile(geoPath) and port.WrapProjectileGeometry(geoPath):
             wrapped.append(modelSegment)
     if wrapped:
-        report.append(u"  投射物几何外包朝向根骨骼 {}: {}(Java 模型前方 +X, 运行层在根上播朝向与 0.7 缩放)".format(
-            port.PROJECTILE_ROOT_BONE, u", ".join(wrapped)))
+        report.append(
+            "  投射物几何外包朝向根骨骼 {}: {}(Java 模型前方 +X, 运行层在根上播朝向与缩放: Java 写死 0.7, 同玩家换算成 0.8)".format(
+                port.PROJECTILE_ROOT_BONE, ", ".join(wrapped)
+            )
+        )
 
 
 def _WrapVehicleGeometries(packName, report):
@@ -844,15 +948,19 @@ def _WrapVehicleGeometries(packName, report):
     manifest = port.LoadJson(manifestPath)
     wrapped = []
     for section, _entityIds, _entry, modelSegment, _namespaceSegment in port.ReplacedTargets(
-            manifest.get("files")):
+        manifest.get("files")
+    ):
         if section != "vehicles" or modelSegment in wrapped:
             continue
         geoPath = os.path.join(RP, "models", "entity", packName, "{}.geo.json".format(modelSegment))
         if os.path.isfile(geoPath) and port.WrapVehicleGeometry(geoPath):
             wrapped.append(modelSegment)
     if wrapped:
-        report.append(u"  载具几何外包缩放根骨骼 {}: {}(运行层在根上播 Java 硬编码的 0.7 缩放)".format(
-            port.VEHICLE_ROOT_BONE, u", ".join(wrapped)))
+        report.append(
+            "  载具几何外包缩放根骨骼 {}: {}(运行层在根上播缩放: Java 硬编码 0.7, 同玩家换算成 0.8)".format(
+                port.VEHICLE_ROOT_BONE, ", ".join(wrapped)
+            )
+        )
 
 
 def _WrapGlideRoot(packName, report):
@@ -863,8 +971,11 @@ def _WrapGlideRoot(packName, report):
     """
     geoPath = os.path.join(RP, "models", "entity", packName, "main.geo.json")
     if os.path.isfile(geoPath) and port.WrapGlideRootGeometry(geoPath):
-        report.append(u"  主几何外包滑翔根骨骼 {}(主包在它上面反向旋转, 还原 Java 的鞘翅姿态)".format(
-            port.GLIDE_ROOT_BONE))
+        report.append(
+            "  主几何外包滑翔根骨骼 {}(主包在它上面反向旋转, 还原 Java 的鞘翅姿态)".format(
+                port.GLIDE_ROOT_BONE
+            )
+        )
 
 
 def _RebuildFirstPersonArm(packName, report):
@@ -890,8 +1001,7 @@ def _RebuildFirstPersonArm(packName, report):
     if os.path.isfile(mainPath):
         mainGeos = port.LoadJson(mainPath).get("minecraft:geometry") or []
         if mainGeos and isinstance(mainGeos[0], dict):
-            mainBones = dict((bone.get("name"), bone)
-                             for bone in (mainGeos[0].get("bones") or []))
+            mainBones = dict((bone.get("name"), bone) for bone in (mainGeos[0].get("bones") or []))
     ancestors = []
     for bone in bones:
         if str(bone.get("name", "")).lower() not in ("rightarm", "leftarm"):
@@ -908,8 +1018,7 @@ def _RebuildFirstPersonArm(packName, report):
         reference = mainBones.get(name)
         if bone.get("cubes") or reference is None:
             continue
-        if bone.get("pivot") == reference.get("pivot") \
-                and bone.get("rotation") == reference.get("rotation"):
+        if bone.get("pivot") == reference.get("pivot") and bone.get("rotation") == reference.get("rotation"):
             grafted.append(name)
     if grafted:
         keep = [bone for bone in bones if bone.get("name") not in grafted]
@@ -918,16 +1027,22 @@ def _RebuildFirstPersonArm(packName, report):
                 bone.pop("parent", None)
         geos[0]["bones"] = keep
         port.DumpJson(geoPath, data)
-        report.append(u"  手臂几何摘掉嫁接的主几何父链 {} 根(第一人称用原版手臂骨架包装, 不再需要父链): {}".format(
-            len(grafted), u", ".join(grafted[:6])))
+        report.append(
+            "  手臂几何摘掉嫁接的主几何父链 {} 根(第一人称用原版手臂骨架包装, 不再需要父链): {}".format(
+                len(grafted), ", ".join(grafted[:6])
+            )
+        )
     renames, notes = port.BuildFirstPersonArmGeometry(geoPath)
     if notes:
-        report.append(u"  手臂几何重建为原版手臂骨架包装(对齐 Java 的 ∓4/-4.8 纯平移映射):")
+        report.append("  手臂几何重建为原版手臂骨架包装(对齐 Java 的 ∓4/-4.8 纯平移映射):")
         report.extend(notes)
     if renames:
-        report.append(u"  [WARN] 手臂骨骼改名 {} —— 若该包 fp_arm 动画写过这些骨骼, "
-                      u"请从 Java 源重新移植(修复工具拿不到原名表)".format(
-                          u", ".join(u"{}→{}".format(old, new) for old, new in sorted(renames.items()))))
+        report.append(
+            "  [WARN] 手臂骨骼改名 {} —— 若该包 fp_arm 动画写过这些骨骼, "
+            "请从 Java 源重新移植(修复工具拿不到原名表)".format(
+                ", ".join("{}→{}".format(old, new) for old, new in sorted(renames.items()))
+            )
+        )
 
 
 def _FixJavaStateDeclaration(packName, report):
@@ -939,15 +1054,21 @@ def _FixJavaStateDeclaration(packName, report):
     manifest = port.LoadJson(manifestPath)
     declaration = runtime_bindings.BuildDeclaration(
         [os.path.join(RP, "animations", packName), os.path.join(RP, "animation_controllers", packName)],
-        manifest)
+        manifest,
+    )
     if runtime_bindings.ApplyDeclaration(manifest, declaration):
         port.DumpJson(manifestPath, manifest)
-        report.append(u"  " + (runtime_bindings.DeclarationReportLine(declaration)
-                              or u"java_state(顶层): 产物里已没有运行层落点, 已撤掉声明"))
+        report.append(
+            "  "
+            + (
+                runtime_bindings.DeclarationReportLine(declaration)
+                or "java_state(顶层): 产物里已没有运行层落点, 已撤掉声明"
+            )
+        )
 
 
 def FixPack(packName):
-    report = [u"== {}".format(packName)]
+    report = ["== {}".format(packName)]
     # Java 逐通道覆盖的伴生动画/占用变量先整体撤掉, 让下面每一步看到与移植期相同的数据
     # (移植期它排在最后), 末尾再重新应用并与起始内容比对 —— 全流程幂等
     ownershipBefore = _OwnershipSnapshot(packName)
@@ -955,7 +1076,7 @@ def FixPack(packName):
     _FixAnimationChannels(packName, report)
     knownKeys = _CollectPackAnimKeys(packName)
     if not knownKeys:
-        report.append(u"  [WARN] RP 动画目录缺席或为空, 跳过(死引用剪枝需要动画全集)")
+        report.append("  [WARN] RP 动画目录缺席或为空, 跳过(死引用剪枝需要动画全集)")
         return report
     referencedParallels = _FixControllers(packName, knownKeys, report)
     _FixManifest(packName, referencedParallels, report)
@@ -966,76 +1087,98 @@ def FixPack(packName):
     # 玩家纸娃娃的每实例变量初始化控制器(与预览实体同口径的变量默认值, 接口注册)
     _FixVariableInitController(packName, report)
     # 清掉废弃产物: 归零动画/控制器、GUI 预览副本
-    for stale in (os.path.join(RP, "animations", packName, port.STATE_RESET_FILE),
-                  os.path.join(RP, "animations", packName, port.GUI_BASE_FILE),
-                  os.path.join(RP, "animation_controllers", packName,
-                               port.STATE_RESET_CONTROLLER_FILE)):
+    for stale in (
+        os.path.join(RP, "animations", packName, port.STATE_RESET_FILE),
+        os.path.join(RP, "animations", packName, port.GUI_BASE_FILE),
+        os.path.join(RP, "animation_controllers", packName, port.STATE_RESET_CONTROLLER_FILE),
+    ):
         if os.path.isfile(stale):
             os.remove(stale)
-            report.append(u"  清理废弃的归零产物: {}".format(os.path.basename(stale)))
+            report.append("  清理废弃的归零产物: {}".format(os.path.basename(stale)))
     droppedPreRefs = port.DropPreControllerMainChainRefs(packName)
     if droppedPreRefs:
-        report.append(u"  pre 通道控制器摘掉对主链成员的冗余引用 {} 处(主链由状态机播, 同播叠成两倍): {}".format(
-            len(droppedPreRefs), u", ".join(u"{}.{}:{}".format(*item) for item in droppedPreRefs[:6])))
+        report.append(
+            "  pre 通道控制器摘掉对主链成员的冗余引用 {} 处(主链由状态机播, 同播叠成两倍): {}".format(
+                len(droppedPreRefs), ", ".join("{}.{}:{}".format(*item) for item in droppedPreRefs[:6])
+            )
+        )
     # 主链与 pre 层内部的覆盖都由逐通道覆盖按状态让位(port.ApplyChannelOwnership 注末尾); 早先静态删掉的
     # pre 层通道(大酒狐爱心/ZZZ 的隐藏缩放、K 螺诺亚待机摆尾)补不回来 —— 这类包请从 Java 源重新移植
     loopedPreview = port.LoopPreviewAnimation(packName)
     if loopedPreview:
-        report.append(u"  GUI 展示动画按 Java 强制循环(CapPredicate playLoopAnimation): {}".format(
-            u", ".join(u"{}(原 loop={})".format(key, loop) for key, loop in loopedPreview)))
+        report.append(
+            "  GUI 展示动画按 Java 强制循环(CapPredicate playLoopAnimation): {}".format(
+                ", ".join("{}(原 loop={})".format(key, loop) for key, loop in loopedPreview)
+            )
+        )
     foldedVariants, skippedVariants = port.ReconcileConditionalVariants(packName)
     if foldedVariants:
-        report.append(u"  条件变体折叠 {} 对(pre 静态显隐 + parallel 条件变体 → 单一所有者), "
-                      u"放弃非常量 {} 对".format(foldedVariants, skippedVariants))
+        report.append(
+            "  条件变体折叠 {} 对(pre 静态显隐 + parallel 条件变体 → 单一所有者), 放弃非常量 {} 对".format(
+                foldedVariants, skippedVariants
+            )
+        )
     for geoFile, action, heldItemBones in port.EnsureHeldItemBones(
-            os.path.join(RP, "models", "entity", packName)):
+        os.path.join(RP, "models", "entity", packName)
+    ):
         if action == "added":
-            report.append(u"  手持物品定位骨骼[{}]: 补 {}(基岩靠 rightItem/leftItem 骨骼挂手持物; "
-                          u"arm 几何缺了就是第一人称弓/弩/盾不显示或严重偏移)".format(
-                              geoFile,
-                              u", ".join(u"{}→{}".format(bone, parent)
-                                         for bone, parent in heldItemBones)))
+            report.append(
+                "  手持物品定位骨骼[{}]: 补 {}(基岩靠 rightItem/leftItem 骨骼挂手持物; "
+                "arm 几何缺了就是第一人称弓/弩/盾不显示或严重偏移)".format(
+                    geoFile, ", ".join("{}→{}".format(bone, parent) for bone, parent in heldItemBones)
+                )
+            )
         else:
-            report.append(u"  手持物品定位骨骼[{}]: 旧生成物挪到新挂点 {}(主几何 pivot 放在定位骨骼上, "
-                          u"对齐 CSM 与作者自制基岩版; 摆位由主包物品修正动画补)".format(
-                              geoFile,
-                              u", ".join(u"{}→{}".format(bone, parent)
-                                         for bone, parent in heldItemBones)))
+            report.append(
+                "  手持物品定位骨骼[{}]: 旧生成物挪到新挂点 {}(主几何 pivot 放在定位骨骼上, "
+                "对齐作者自制基岩版; 摆位由主包物品修正动画补)".format(
+                    geoFile, ", ".join("{}→{}".format(bone, parent) for bone, parent in heldItemBones)
+                )
+            )
     hubBypasses = port.BypassEmptyHubStatesInPack(packName)
     if hubBypasses:
-        report.append(u"  空中转状态旁路转移 {} 条(落地/切换不再经绑定姿态)".format(hubBypasses))
+        report.append("  空中转状态旁路转移 {} 条(落地/切换不再经绑定姿态)".format(hubBypasses))
     # 作者状态里 Java PLAY_ONCE 动画的尾过渡淡出(见 port.FadeControllerOneShots 注): 排在补 hold 之前,
     # 之后 loop 已是 hold 认不出; 已移植产物里的淡出式本身就是标记, 这里只补新出现的
     fadedOneShots = port.FadeControllerOneShots(packName)
     if fadedOneShots:
-        report.append(u"  作者状态里的 PLAY_ONCE 动画补尾过渡淡出 {} 处: {}".format(
-            len(fadedOneShots), u", ".join(u"{}.{}:{}".format(*item) for item in fadedOneShots[:8])))
+        report.append(
+            "  作者状态里的 PLAY_ONCE 动画补尾过渡淡出 {} 处: {}".format(
+                len(fadedOneShots), ", ".join("{}.{}:{}".format(*item) for item in fadedOneShots[:8])
+            )
+        )
     heldOneShots = port.HoldControllerOneShots(packName)
     if heldOneShots:
-        report.append(u"  控制器状态的一次性动画补 hold_on_last_frame {} 条"
-                      u"(基岩 loop:false 播完即撤 —— 出态前会漏一帧底层姿态; "
-                      u"Java 的尾过渡由淡出权重复刻): {}".format(
-                          len(heldOneShots), u", ".join(heldOneShots)))
+        report.append(
+            "  控制器状态的一次性动画补 hold_on_last_frame {} 条"
+            "(基岩 loop:false 播完即撤 —— 出态前会漏一帧底层姿态; "
+            "Java 的尾过渡由淡出权重复刻): {}".format(len(heldOneShots), ", ".join(heldOneShots))
+        )
     # Java 逐通道覆盖(伴生动画 + 占用变量, 见 port.ApplyChannelOwnership 注)
     ownership, _written = port.ApplyChannelOwnership(packName)
     ownershipLines = port.OwnershipReportLines(ownership)
     if _OwnershipSnapshot(packName) == ownershipBefore:
-        report.append(u"  逐通道覆盖伴生动画: 已是最新({} 条)".format(ownership.CompanionCount()))
+        report.append("  逐通道覆盖伴生动画: 已是最新({} 条)".format(ownership.CompanionCount()))
     else:
-        report.extend(u"  " + line for line in ownershipLines or [u"逐通道覆盖伴生动画: 已清除"])
+        report.extend("  " + line for line in ownershipLines or ["逐通道覆盖伴生动画: 已清除"])
     # override 动画(含伴生)的恒等常量通道 → 微小值(见 port.EpsilonizeOverrideIdentities 注); 幂等
     epsilonized = port.EpsilonizeOverrideIdentities(packName)
     if epsilonized:
-        report.append(u"  override 动画的恒等常量通道换成微小值 {} 处(引擎把单位值通道当成不存在, "
-                      u"清不掉前面的层)".format(epsilonized))
+        report.append(
+            "  override 动画的恒等常量通道换成微小值 {} 处(引擎把单位值通道当成不存在, "
+            "清不掉前面的层)".format(epsilonized)
+        )
     # 一次性通道(挥击/使用/受击/死亡)状态机: 直挂 animate 条目对不循环动画不重放; 排在逐通道覆盖
     # 之后 —— 挥击/使用成员拆出的伴生动画要跟成员进同一状态
     _FixOneShotControllers(packName, report, ownership=ownership)
     # 作者状态机里会与 Java 分叉的"动画播完"判据(见 port.RewriteFinishedQueries 注)
     finishedRewrites = port.RewriteFinishedQueries(packName, ownership=ownership)
     if finishedRewrites:
-        report.append(u"  \"动画播完\"判据按 Java 口径改写 {} 个状态(基岩权重 0 的条目暂停计时, "
-                      u"原生判据永不成立)".format(finishedRewrites))
+        report.append(
+            '  "动画播完"判据按 Java 口径改写 {} 个状态(基岩权重 0 的条目暂停计时, 原生判据永不成立)'.format(
+                finishedRewrites
+            )
+        )
     # Java 主链状态机: 状态动画切换的交叉淡化(直挂条目零过渡硬切)
     _FixStateChainController(packName, report, ownership=ownership)
     _WrapProjectileGeometries(packName, report)
@@ -1045,8 +1188,11 @@ def FixPack(packName):
     # 收尾: 资源包按旧版 Molang 语义解析, 两种语义可能分叉处补括号(见 molang_syntax.ExplicitPrecedence 注)
     precedence = port.ExplicitPackPrecedence(packName)
     if precedence:
-        report.append(u"  运算符优先级显式化 {} 处(三元左结合 / && 与 || 同级的旧版 Molang 语义下与 Java 同值)".format(
-            precedence))
+        report.append(
+            "  运算符优先级显式化 {} 处(三元左结合 / && 与 || 同级的旧版 Molang 语义下与 Java 同值)".format(
+                precedence
+            )
+        )
     return report
 
 
@@ -1059,8 +1205,11 @@ def _AllPackNames():
         if os.path.isfile(os.path.join(BP_MODELS, name, "ysm.json")):
             names.append(name)
         elif os.path.isdir(os.path.join(BP_MODELS, name)):
-            names.extend(child for child in sorted(os.listdir(os.path.join(BP_MODELS, name)))
-                         if os.path.isfile(os.path.join(BP_MODELS, name, child, "ysm.json")))
+            names.extend(
+                child
+                for child in sorted(os.listdir(os.path.join(BP_MODELS, name)))
+                if os.path.isfile(os.path.join(BP_MODELS, name, child, "ysm.json"))
+            )
     return names
 
 
@@ -1068,8 +1217,7 @@ def main():
     packs = sys.argv[1:]
     if not packs:
         allPacks = _AllPackNames()
-        packs = [name for name in allPacks
-                 if os.path.isdir(os.path.join(RP, "animation_controllers", name))]
+        packs = [name for name in allPacks if os.path.isdir(os.path.join(RP, "animation_controllers", name))]
         # 无控制器目录的包也可能需要 ysm.json 扁平化 —— 单独补一轮
         flatOnly = [name for name in allPacks if name not in packs]
     else:
@@ -1078,7 +1226,7 @@ def main():
         for line in FixPack(packName):
             print(line.encode("utf-8") if isinstance(line, unicode) else line)  # noqa: F821
     for packName in flatOnly:
-        report = [u"== {}(仅 ysm.json 体检)".format(packName)]
+        report = ["== {}(仅 ysm.json 体检)".format(packName)]
         _FixManifest(packName, [], report)
         for line in report:
             print(line.encode("utf-8") if isinstance(line, unicode) else line)  # noqa: F821

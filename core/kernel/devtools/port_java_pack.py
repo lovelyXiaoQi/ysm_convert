@@ -370,11 +370,9 @@ def RewriteGeometry(srcPath, dstPath, identifier, report=None):
 #   **Java arm 模型坐标 (x, y, z) ≡ 原版手臂骨架坐标系的 (x∓4, y-4.8, z)**(右臂 -4/左臂 +4),
 #   且**刚性挂在原版手臂骨骼上** —— 原版那套挥击/换物/走路摆动照样整体套在它身上。
 #
-# 双旁证: ① Java 自带 CC0 `default/models/arm.json` 右臂 cube x∈[-3.45,-0.2] y∈[16.83,30.95],
+# 旁证: Java 自带 CC0 `default/models/arm.json` 右臂 cube x∈[-3.45,-0.2] y∈[16.83,30.95],
 # 按上式移位后 x∈[-7.45,-4.2] y∈[12.03,26.15], 原版 rightArm cube 是 x∈[-8,-4] y∈[12,24]
-# —— 手部底端对到 0.03px; ② CSM 的转换产物同样把 x 移 ∓4(.ref/csm 的 ysm/default/arm.json)。
-# ⚠️ CSM 的 y **不移**, 改在动画里用 `-this` 抹掉原版 empty_hand 的 -10 —— 与 Java 差约 +14px,
-# 别照抄它的 y。
+# —— 手部底端对到 0.03px。y 也必须移: 只移 x、再在动画里抹掉原版 empty_hand 的 -10, 会与 Java 差约 +14px。
 #
 # 基岩侧同构: 把 arm 几何重建成"原版手臂骨架(包装骨骼) + 移位后的 Java 子树",
 # 让原版第一人称动画原样驱动包装骨骼:
@@ -828,7 +826,7 @@ _JAVA_NAME_MAP = [
     ("elytra_rot_y", "0.0"),
     # —— 投射物(箭类)绑定(YSMBinding.abstractArrowVar): 替换实体的动画/控制器里用 ——
     # Java inGround = 箭插在方块里; 基岩近似为在地判据(与 packParser._PROJECTILE_CHANNELS 的 ground
-    # 谓词、CSM 箭矢主控制器同口径)。末影龙娘的末影剑: 落地后火焰播完一轮再熄灭
+    # 谓词同口径)。末影龙娘的末影剑: 落地后火焰播完一轮再熄灭
     ("in_ground", "query.is_on_ground"),
     ("is_spectral_arrow", "0.0"),             # 基岩没有光灵箭
 ]
@@ -2224,15 +2222,8 @@ def NormalizeExpressionKeyframes(body):
 
     以下为旧版(±1 邻域)的历史注释, 结论方向正确、窗口偏窄: 关键在于两条规则的
     作用域是**"表达式帧 ∪ 它的前后邻居"**, 而不只是表达式帧自己 —— 插值是**帧间**行为,
-    一段区间的两端只要有一头是表达式, 这段就受限。CSM 全库统计(30 文件 / 3742 通道):
-
-    | 形态                      | 挨着表达式 | 远离表达式 |
-    |---------------------------|-----------|-----------|
-    | `lerp_mode: catmullrom`   |   **0**   |    68     |
-    | 只写 `post` 不写 `pre`     |   **0**   |   8346    |
-
-    远离表达式的那两列量很大且工作正常 —— 所以这不是"CSM 不用 catmullrom/post", 而是
-    **精确地避开表达式的邻域**。
+    一段区间的两端只要有一头是表达式, 这段就受限; 远离表达式的 catmullrom 帧照常工作,
+    要避开的是**表达式的邻域**。
 
     ① `catmullrom` → `linear`。catmull-rom 要靠**相邻关键帧的值**算切线, 邻居是表达式
        (逐帧变化)时样条没有良定义。实机(2026-09-05 warden/wither): 拉弓时按 head_yaw
@@ -3029,11 +3020,11 @@ def WriteSoundResources(packName, javaDir, soundDirRel, sink):
 # 基岩只能一根, 取基名那个。创作者已自己写了 rightItem/leftItem 的包原样保留(可手工微调)。
 #
 # **pivot 与前推量**(_HELD_ITEM_FORWARDS): 主几何(第三人称/纸娃娃)的物品骨骼 pivot **就在定位
-# 骨骼上**(2026-09-17 起) —— 与 CSM(同样把 Java YSM 模型搬到网易基岩的模组, .ref/csm)和作者自制的
-# 基岩版凋灵娘(.ref/bedrock_wither 的 ys_wither.json: rightItem pivot == RightHandLocator pivot)一致。
+# 骨骼上**(2026-09-17 起) —— 与作者自制的基岩版凋灵娘(.ref/bedrock_wither 的 ys_wither.json:
+# rightItem pivot == RightHandLocator pivot)一致。
 # Java 的手持物画在定位骨骼原点(再平移 (0,-1px,-1.6px)、转 -90° 套物品显示变换), 定位骨骼的缩放
 # 不会挪动物品位置; 早先 z 前推 1 时, 拉弓动画把定位骨骼放大到 2 倍会把物品一并往前甩 2 格。两套持物
-# 变换的差由主包按物品类别叠的修正动画补(packParser._JavaItemFixAnimates, 数值取自 CSM)。
+# 变换的差由主包按物品类别叠的修正动画补(packParser._JavaItemFixAnimates, 数值按实际效果调出)。
 # 旧产物(主几何前推 1)由 MigrateHeldItemBones 按"形状完全等于生成物"识别后挪到新挂点。
 #
 # **第一人称同样要补**(model.arm 声明的独立手臂几何): 基岩的第一人称手持物是同一套
@@ -6393,8 +6384,7 @@ def HoldControllerOneShots(packName):
     三个参考包的兜底 use_mainhand/use_offhand(0.375s)在 Java 是 PLAY_ONCE, 持续使用时 Java 会收回姿态。
 
     `hold_on_last_frame` 不影响出态: 它同样计入 `all_animations_finished`(仓库的挥击/
-    受击/死亡通道一直这么用)。判据旁证: CSM 全库 578 条动画里 loop 为 true(473)或
-    hold_on_last_frame(101), **裸的不循环动画只有 4 条**且都不挂在控制器状态上。
+    受击/死亡通道一直这么用)。
 
     只动"被控制器状态引用"的那些 —— 直挂 animate 条目的动画不受此约束(它们由播放条件
     决定去留, 补 hold 反而会让条件消失后姿态赖着不走)。
@@ -6538,10 +6528,11 @@ PROJECTILE_FIX_BONE = "ysm_projectile_fix"
 def WrapProjectileGeometry(geoPath):
     """投射物几何外包一层朝向根骨骼; 返回是否改动(幂等)。
 
-    Java(GeoProjectilesRenderer): 绕 Y 转 (yRot-90)、绕 Z 转 xRot, 再按模型宽高缩放(缺省 0.7) —— 模型空间的
+    Java(GeoProjectilesRenderer): 绕 Y 转 (yRot-90)、绕 Z 转 xRot, 再按写死的宽高缩放 0.7(基岩按玩家同一换算比取 0.8,
+    packParser.JAVA_TO_NETEASE_SCALE) —— 模型空间的
     "前方"是 +X。基岩原版箭矢靠 `body` 骨骼上的 animation.arrow.move 转向(旧版内置箭矢几何的根骨骼就叫 body),
     Java 模型的根骨骼五花八门(Root / ysmGlowRoot / bow+crossbow 两个并列根 / bone2 / trident ...), 原版动画够不着,
-    箭矢不随射击方向与下坠转向(2026-09-17 用户反馈)。照 CSM(.ref/csm 投射物几何 root → CSM_ROOT_90_FIX)外包:
+    箭矢不随射击方向与下坠转向(2026-09-17 用户反馈)。外包:
     新根 ysm_projectile_root(运行层在它上面播朝向与缩放, packParser._PROJECTILE_ORIENT_ANIMATIONS) → 修正骨骼
     ysm_projectile_fix(Y -90°: Java 的 +X 前方转到基岩的前方) → 原来的全部根骨骼。
     """
@@ -6576,7 +6567,8 @@ def WrapVehicleGeometry(geoPath):
 
     Java(CustomVehicleEntity/GeoEntityRenderer): YP(180 - 偏航) 后硬编码缩放 0.7, 不读 ysm.json 的缩放; 朝向约定与
     基岩实体相同。模型根骨骼五花八门(Ship / bone6 / Car ...), 运行层够不着 —— 外包新根 ysm_vehicle_root, 主包在它上面播
-    animation.ysm.vehicle_root(packParser._WithVehicleRoot): 缩放 0.7, 船/矿车另补 Y 旋转(引擎硬编码渲染的实体换成数据
+    animation.ysm.vehicle_root(packParser._WithVehicleRoot): 缩放 0.8(Java 0.7 按玩家同一换算比 ×0.8/0.7, 与骑手相对大小
+    一致), 船/矿车另补 Y 旋转(引擎硬编码渲染的实体换成数据
     驱动渲染后不再转模型, 见业务包 client/render/vehicleOrient)。已带投射物朝向根的几何(同一模型两用)不再包。
     """
     data = LoadJson(geoPath)
@@ -7087,11 +7079,11 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                         os.path.join(rpModels, "{}.geo.json".format(modelSegment)), identifier)
         if section == "projectiles" and WrapProjectileGeometry(
                 os.path.join(rpModels, "{}.geo.json".format(modelSegment))):
-            report.append(u"  投射物几何外包朝向根骨骼 {} → {}(Y -90°): 运行层在根上播 Java 的朝向与 0.7 缩放".format(
+            report.append(u"  投射物几何外包朝向根骨骼 {} → {}(Y -90°): 运行层在根上播 Java 的朝向与缩放(0.7 换算为 0.8)".format(
                 PROJECTILE_ROOT_BONE, PROJECTILE_FIX_BONE))
         if section == "vehicles" and WrapVehicleGeometry(
                 os.path.join(rpModels, "{}.geo.json".format(modelSegment))):
-            report.append(u"  载具几何外包缩放根骨骼 {}: 运行层在根上播 Java 硬编码的 0.7 缩放".format(
+            report.append(u"  载具几何外包缩放根骨骼 {}: 运行层在根上播 Java 硬编码的缩放(0.7 换算为 0.8)".format(
                 VEHICLE_ROOT_BONE))
         animRel = entry.get("animation")
         replacedNamespace = "{}_{}".format(packName, namespaceSegment)

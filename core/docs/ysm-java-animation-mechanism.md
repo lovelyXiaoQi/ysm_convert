@@ -380,23 +380,18 @@ Java 第一人称的手持物由原版 `ItemInHandRenderer` 画在屏幕空间,�
 | 环节 | 基岩机制 | 移植要求 |
 |---|---|---|
 | 绑定 | 弓/弩/盾/三叉戟/望远镜/重锤是 **attachable**:或者几何骨骼直接叫 `rightitem`(原版 `bow.geo.json`),或者写 `binding: q.item_slot_to_bone_name(c.item_slot)`(`shield.geo.json`);普通物品由引擎画在同名骨骼上 | 主几何必须有 `rightItem`/`leftItem`(第三人称缺了就是"弓弩盾不显示、普通物品掉回实体原点");第一人称的手持物绑在原版体型锚点上,不再依赖 arm 几何的这两根骨骼(移植工具 `_HELD_ITEM_GEOMETRIES` 两份几何都补,只为同构) |
-| 摆位 | 原版 attachable 动画自带 `c.is_first_person ? … : …` 分支,数值按**原版几何**标定(`rightItem` pivot `[-6,15,1]`,父 `rightArm` pivot `[-5,22,0]`);网易原版 `animation.player.first_person.empty_hand` 自己就用 `q.get_default_bone_pivot` 把 `rightitem` 归一到"手臂 pivot 下方 7 格" | **锚点换骨架**(对齐 CSM,2026-09-04):第一人称下把 `default` 几何键换成原版体型 `geometry.default_steve`(`playerRender.ApplyItemAnchorGeometry`——装载时按当前视角初始化,`PerspChangeClientEvent` 时切换),本体渲染走独占 `ysm` 键不受影响;资源包**不覆盖**任何 `animation.player.first_person.*` 原版 ID,原版第一人称动画原样驱动锚点骨架 → 任何附着物/普通手持物都落在原版位置。例外是 `first_person_empty_hand` 键:`q.get_default_bone_pivot` 实机对部分模型读到 `ysm` 键上的模型主几何(2026-09-18,07 JK 酒狐两手物品骨骼偏 [0,6,1]),新版模型把该键改挂 `animation.ysm.fp.empty_hand`(手臂摆位同原版、物品归一按 default_steve 写成常量 [0,0,-1])。模型手臂的额外摆位(`animation.ysm.fp.*`:空手臂差量 `[-4,-4,-5]` + 设置里的 `empty_hand_x/y/z`、`UpBody` 偏航跟随、走路摆臂、呼吸起伏)全部带主手空手门 `!q.is_item_equipped(0)`——锚点骨架与模型手臂共用 `rightarm` 等骨骼名(引擎匹配不分大小写),手持物品时锚点只看到原版数值。旧版 py 副包不换锚点(其本体仍由原版 `third_person` 控制器渲染 `default` 键),只共享上述空手门动画 |
+| 摆位 | 原版 attachable 动画自带 `c.is_first_person ? … : …` 分支,数值按**原版几何**标定(`rightItem` pivot `[-6,15,1]`,父 `rightArm` pivot `[-5,22,0]`);网易原版 `animation.player.first_person.empty_hand` 自己就用 `q.get_default_bone_pivot` 把 `rightitem` 归一到"手臂 pivot 下方 7 格" | **锚点换骨架**(2026-09-04):第一人称下把 `default` 几何键换成原版体型 `geometry.default_steve`(`playerRender.ApplyItemAnchorGeometry`——装载时按当前视角初始化,`PerspChangeClientEvent` 时切换),本体渲染走独占 `ysm` 键不受影响;资源包**不覆盖**任何 `animation.player.first_person.*` 原版 ID,原版第一人称动画原样驱动锚点骨架 → 任何附着物/普通手持物都落在原版位置。例外是 `first_person_empty_hand` 键:`q.get_default_bone_pivot` 实机对部分模型读到 `ysm` 键上的模型主几何(2026-09-18,07 JK 酒狐两手物品骨骼偏 [0,6,1]),新版模型把该键改挂 `animation.ysm.fp.empty_hand`(手臂摆位同原版、物品归一按 default_steve 写成常量 [0,0,-1])。模型手臂的额外摆位(`animation.ysm.fp.*`:空手臂差量 `[-4,-4,-5]` + 设置里的 `empty_hand_x/y/z`、`UpBody` 偏航跟随、走路摆臂、呼吸起伏)全部带主手空手门 `!q.is_item_equipped(0)`——锚点骨架与模型手臂共用 `rightarm` 等骨骼名(引擎匹配不分大小写),手持物品时锚点只看到原版数值。旧版 py 副包不换锚点(其本体仍由原版 `third_person` 控制器渲染 `default` 键),只共享上述空手门动画 |
 | 可见性 | `part_visibility` 只管骨骼自身的 cube,**不影响 attachable / 手持物渲染**(原版第一人称 `{"*": false}` 照样出物品) | 我方 `first_person_ysm_arm` 的空手门(`Right*` 仅空手可见)不会挡住物品 |
 
-参考实现:CSM(另一款基岩模型附加包)走的就是这条路——本体渲染在独占的 `csm_default` 键,
-`default` 键进第一人称时换成 `geometry.csm.default_steve`(`csm_client_system.on_persp_change_client_event`,
-离开第一人称换回模型几何),第一人称手臂控制器带 `!q.is_item_equipped`,模型手臂的额外摆位
-(`animation.csm.player.first_person.hand.base`)用 `* !v.ysm.has_mainhand` 门;它的
-`right_item_fix`/`bow_fix`/`crossbow_fix` 只作用于**第三人称**(`controller.animation.csm.fix`
-挂在 `!v.is_first_person` 域)。本包同构,细节见 `playerRender.py` 锚点注;第三人称修正见 §7.2。
+细节见 `playerRender.py` 锚点注;第三人称修正(只作用于第三人称域)见 §7.2。
 
-### 7.2 第三人称的**手持物品摆位**(对齐 CSM,2026-09-17)
+### 7.2 第三人称的**手持物品摆位**(2026-09-17)
 
 | 环节 | Java | 基岩(本包) |
 |---|---|---|
-| 挂点 | `CustomPlayerItemInHandLayer`:手部定位骨骼(`RightHandLocator`/`LeftHandLocator`)变换之后平移 `(0,-1/16,-0.1)`、绕 X 转 -90°,再按物品模型的 `THIRD_PERSON_*_HAND` 显示变换画物品 | 引擎把物品画在 `rightItem`/`leftItem` 骨骼上,套基岩自己的持物变换(attachable 另有 `c.is_first_person` 分支)。移植工具把**主几何**物品骨骼的 pivot 放在定位骨骼上(`port_java_pack._HELD_ITEM_FORWARDS`),与 CSM、作者自制的基岩版凋灵娘(`.ref/bedrock_wither` 的 `ys_wither.json`)一致 —— 定位骨骼的缩放/旋转直接作用在物品原点上,不会被 pivot 偏移放大成位移 |
-| 按物品类别修正 | 物品模型的显示变换因物品而异 | 两套持物变换没法解析等价,取 CSM 实调的常量(`rp/animations/csm.fix.animation.json`):工具类手持物(三叉戟/弓/弩/望远镜/盾/刷子/钓竿/剪刀/打火石/山羊角/重锤,以及剑/斧/镐/锹/锄 tag)位移 `[0,2,1]`,其余非挂载物 `[0,1,2]`,挂载物(attachable)不叠;主手弓另叠位移 `[0,2.5,-1]`、旋转 `[0,0,4.5]`,主手弩另叠位移 `[-0.5,0.5,1.5]`、旋转 `[0,3,-3.25]`。动画在 `ysm_rp/animations/java_mode/item_fix.animation.json`,主包 `packParser._JavaItemFixAnimates` 在 Java 模式注册(第三人称双门,排在头部跟踪之前) |
-| 物品判定 | — | 有没有物品、工具类名单(`is_item_equipped`/`is_item_name_any`/`equipped_item_any_tag`)放在 animate 条件里 —— 骨骼通道里 `is_item_name_any` 不可用;**挂载物判定照 CSM 留在骨骼通道**(`query.equipped_item_is_attachable('main_hand') ? 0 : 2`):2026-09-17 实机 `EvalMolangExpression` 对主手弓(原版 attachable,`data/definitions/attachables/bow.json`)求值恒 0,这个查询依赖渲染上下文,挪去别处没有证据可用,照抄 CSM 的求值位置它调出的常量才成立 |
+| 挂点 | `CustomPlayerItemInHandLayer`:手部定位骨骼(`RightHandLocator`/`LeftHandLocator`)变换之后平移 `(0,-1/16,-0.1)`、绕 X 转 -90°,再按物品模型的 `THIRD_PERSON_*_HAND` 显示变换画物品 | 引擎把物品画在 `rightItem`/`leftItem` 骨骼上,套基岩自己的持物变换(attachable 另有 `c.is_first_person` 分支)。移植工具把**主几何**物品骨骼的 pivot 放在定位骨骼上(`port_java_pack._HELD_ITEM_FORWARDS`),与作者自制的基岩版凋灵娘(`.ref/bedrock_wither` 的 `ys_wither.json`)一致 —— 定位骨骼的缩放/旋转直接作用在物品原点上,不会被 pivot 偏移放大成位移 |
+| 按物品类别修正 | 物品模型的显示变换因物品而异 | 两套持物变换没法解析等价,取按实际效果调出的常量:工具类手持物(三叉戟/弓/弩/望远镜/盾/刷子/钓竿/剪刀/打火石/山羊角/重锤,以及剑/斧/镐/锹/锄 tag)位移 `[0,2,1]`,其余非挂载物 `[0,1,2]`,挂载物(attachable)不叠;主手弓另叠位移 `[0,2.5,-1]`、旋转 `[0,0,4.5]`,主手弩另叠位移 `[-0.5,0.5,1.5]`、旋转 `[0,3,-3.25]`。动画在 `ysm_rp/animations/java_mode/item_fix.animation.json`,主包 `packParser._JavaItemFixAnimates` 在 Java 模式注册(第三人称双门,排在头部跟踪之前) |
+| 物品判定 | — | 有没有物品、工具类名单(`is_item_equipped`/`is_item_name_any`/`equipped_item_any_tag`)放在 animate 条件里 —— 骨骼通道里 `is_item_name_any` 不可用;**挂载物判定留在骨骼通道**(`query.equipped_item_is_attachable('main_hand') ? 0 : 2`):2026-09-17 实机 `EvalMolangExpression` 对主手弓(原版 attachable,`data/definitions/attachables/bow.json`)求值恒 0,这个查询依赖渲染上下文,挪去别处没有证据可用,上面的常量也是在这个求值位置上调出来的 |
 | 旧产物 | — | 2026-09-17 之前主几何物品骨骼前推 z+1:凋灵娘拉弓把定位骨骼放大到 2 倍时,物品被一并往前甩 2 格。修复工具 `MigrateHeldItemBones` 只迁移**形状完全等于生成物**的骨骼(字段、父骨骼、拴绳点、pivot 都对得上),手写的不动;arm 几何(第一人称,§7.1)仍是 z+1 |
 
 注意 Java 的 `arm.animation.json` 是**第三人称**的手部条件动画文件(`ModelRenderTargetLoader`:只有 `fp_arm`
@@ -504,7 +499,7 @@ wiki 更新日志(新分类/新槽位)。
 - Java 模式(按 `files.player.animation` 声明形态自动判定):按 Java 优先级链合成互斥 molang(阈值 0.05、jump 防抖门);移植产物经 `ysm_state` 状态机播放,状态切换 0.1s 交叉淡化、一次性动画 0.15s 淡出(§9)
 - `second_order/first_order` 物理函数 → molang 状态积分(头发/尾巴/胸部/鞘翅随动的"Q 弹"手感),主链成员 loop 按 Java 强制语义改写(§8)
 - 替换实体(`files.projectiles`/`vehicles`)的通道语义与写入语义:载具按 Java 第一乘客写入、下车不撤、随实体存档
-  (`server/modelSystem._SetVehicleModel`),`has_ride`/`not_ride` 按 `query.has_rider` 分,硬编码 0.7 缩放走
+  (`server/modelSystem._SetVehicleModel`),`has_ride`/`not_ride` 按 `query.has_rider` 分,硬编码 0.7 缩放(同玩家换算成 0.8)走
   `ysm_vehicle_root` 根骨骼;**船/运输船/矿车是引擎硬编码渲染**,单实体渲染接口直接换照样生效,但换上后引擎不再
   转模型,同一根骨骼补 Y 旋转(`client/render/vehicleOrient.py`:船 = 实体偏航 - 90,基岩船偏航比 Java 口径多 90°;
   矿车照 Java `getMinecartYaw` 按车底轨道形状算);载具动画 `sound_effects` 照常登记

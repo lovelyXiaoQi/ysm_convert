@@ -416,8 +416,7 @@ _JAVA_USE_STATE_CONDITION = "1"
 # 就是空转(动画找不到骨骼 = 不生效), 不会更坏。
 # 渐入: Java 的系数 f = clamp(fallFlyingTicks²/100, 0, 1)(10 tick = 0.5s 到满), 基岩同源 —— 动画时钟
 # 只有"进入控制器状态"才回零(直挂条目不回零, 见 _ONESHOT_SWING_KEY 上方注), 故挂共享控制器。
-# ⚠️ 引擎是否在旋转之外还带平移(CSM 的 animation.csm.elytra_fix 给 Root 写了 position [0,-24,0])未实测,
-# 游戏崩在测量前 —— 重启后要看的第一件事: 抬头 90°(此时旋转角为 0)下开/关滑翔, 模型是否整体上移 1.5 格。
+# ⚠️ 引擎是否在旋转之外还带平移未实测: 抬头 90°(此时旋转角为 0)下开/关滑翔, 看模型是否整体上移 1.5 格。
 _JAVA_GLIDE_FIX_KEY = "ysm_java_glide_fix"
 _JAVA_GLIDE_FIX_ANIMATION = "animation.ysm.java_glide_fix"
 _JAVA_GLIDE_STATE_KEY = "ysm_java_glide_state"
@@ -446,8 +445,6 @@ _ONESHOT_STATE_KEYS = OrderedDict([("attacked", "ysm_attacked"), ("death", "ysm_
 # use 通道(拉弓/吃喝/举盾/望远镜…)同样必须走状态机: 基岩直挂 animate 条目对不循环的
 # 定时动画**不重放** —— 条件再次成立只是继续应用, 时钟不回零。实机(2026-09-05 warden):
 # 第一次拉弓正常, 射出后再拉, 动画直接从末帧起步(弓一上来就是放大 2 倍的终态)。
-# CSM 同样把 use 动画塞进控制器状态而非直挂(controller.animation.csm.player.custom_use
-# 的 on_use 态, 见 render/player_bb_model_render.__add_use_animations)。
 # 与挥击通道的关键差别: 成员状态在**触发期间一直停留**(use 动画多为 hold_on_last_frame,
 # 用 all_animations_finished 出态会在拉满弓/举着盾时提前掉回 idle, 姿态当场归位)。
 _ONESHOT_USE_CHANNELS = (
@@ -510,19 +507,16 @@ _VANILLA_ROOT_CONDITION = "variable.is_first_person"
 _JAVA_HEAD_LOOK_KEY = "ysm_java_head_look"
 _JAVA_HEAD_LOOK_ANIMATION = "animation.ysm.java_head_look"
 
-# ---- 手持物挂点修正(对齐 CSM, 2026-09-17) ----
+# ---- 手持物挂点修正(2026-09-17) ----
 # 基岩由引擎把手持物画在 rightItem/leftItem 骨骼上, 套的是基岩自己的持物变换; Java YSM 在手部定位骨骼上
 # 平移 (0,-1px,-1.6px)、绕 X 转 -90° 后再套物品模型的 THIRD_PERSON_*_HAND 显示变换
-# (renderer/layer/CustomPlayerItemInHandLayer)。两套变换没法解析等价, 采用 CSM(同样把 Java YSM 模型搬到
-# 网易基岩的模组, .ref/csm)按实际效果调出的修正: 移植工具把 rightItem/leftItem 的 pivot 放在定位骨骼上
-# (port_java_pack._HELD_ITEM_FORWARDS, 作者自制的基岩版凋灵娘同样如此), 主包再按物品类别叠位移 ——
-# 工具类[0,2,1]、其余非挂载物[0,1,2]、挂载物(attachable)不动; 主手弓另叠 [0,2.5,-1] 绕 z 4.5°,
-# 主手弩另叠 [-0.5,0.5,1.5] 转 [0,3,-3.25]。数值取自 CSM rp/animations/csm.fix.animation.json
-# (right_item_fix/left_item_fix/bow_fix/crossbow_fix), 工具类名单取自其 csm.tick_system 的
-# csm_main_hand_is_hand_equipped。物品名/tag 判定放在 animate 条件里(骨骼通道里 is_item_name_any 不可用);
-# **挂载物判定照 CSM 留在骨骼通道**(`equipped_item_is_attachable(...) ? 0 : n`): 2026-09-17 实机
-# EvalMolangExpression 对主手弓(原版 attachable)求值恒 0, 该查询依赖渲染上下文, 挪进 animate 条件
-# 没有证据可用 —— 照抄 CSM 的求值位置, 它调出的常量才成立。
+# (renderer/layer/CustomPlayerItemInHandLayer)。两套变换没法解析等价, 采用按实际效果调出的修正: 移植工具把
+# rightItem/leftItem 的 pivot 放在定位骨骼上(port_java_pack._HELD_ITEM_FORWARDS, 作者自制的基岩版凋灵娘同样如此),
+# 主包再按物品类别叠位移 —— 工具类[0,2,1]、其余非挂载物[0,1,2]、挂载物(attachable)不动; 主手弓另叠 [0,2.5,-1]
+# 绕 z 4.5°, 主手弩另叠 [-0.5,0.5,1.5] 转 [0,3,-3.25]。物品名/tag 判定放在 animate 条件里(骨骼通道里
+# is_item_name_any 不可用); **挂载物判定留在骨骼通道**(`equipped_item_is_attachable(...) ? 0 : n`): 2026-09-17 实机
+# EvalMolangExpression 对主手弓(原版 attachable)求值恒 0, 该查询依赖渲染上下文, 挪进 animate 条件没有证据可用;
+# 上面的常量也是在骨骼通道这个求值位置上调出来的。
 # 只在第三人称主域生效: 第一人称手持物挂在原版体型锚点几何上, 由原版第一人称动画摆位。
 _HAND_EQUIPPED_ITEM_NAMES = (
     "minecraft:trident", "minecraft:bow", "minecraft:crossbow", "minecraft:spyglass", "minecraft:shield",
@@ -533,7 +527,7 @@ _HAND_EQUIPPED_ITEM_TAGS = (
 
 
 def _HandEquippedItemTest(slot):
-    """CSM 口径的"工具类手持物"判据(animate 条件上下文)。问的是基岩的渲染形态, 不套 Java 分类口径"""
+    """手持工具类判据(animate 条件上下文; 修正常量按这份名单调出)。问的是基岩的渲染形态, 不套 Java 分类口径"""
     return "({}||{})".format(_ItemNameTest(slot, _HAND_EQUIPPED_ITEM_NAMES),
                              _ItemTagTest(slot, _HAND_EQUIPPED_ITEM_TAGS, javaClassify=False))
 
@@ -1183,11 +1177,7 @@ def _AttachOwnershipCompanions(entries, animKeys, weights=None, fractional=False
 # 实体只在空手渲染路径上出现(Forge RenderArmEvent)。
 _FP_ARM_GATE = "variable.is_first_person&&!query.is_spectator&&!query.is_item_equipped(0)"
 # 第一人称手臂**渲染控制器**的条件: 手持物品时整个控制器关掉, 而不是只靠
-# part_visibility 把骨骼藏起来。依据 CSM 源码(bp/CustomSteveModel/render/
-# player_bb_model_render.py:__add_render_controllers):
-#   fp_render_condition = 'v.is_first_person && !query.mod.csm_better_first_person
-#                          && !v.is_paperdoll && !q.is_item_equipped'
-# 语义上与 Java 一致(手持物品走 renderArmWithItem, 模型手臂根本不参与); 且**手持
+# part_visibility 把骨骼藏起来 —— 语义上与 Java 一致(手持物品走 renderArmWithItem, 模型手臂根本不参与); 且**手持
 # 物品时第一人称只剩全隐藏的原版体型 pass**(first_person_ysm_fix + 锚点换几何),
 # 原版第一人称动画原样驱动锚点骨架, 基岩附着物(弓/弩/盾/三叉戟)落在原版位置。
 _FP_ARM_CONTROLLER_CONDITION = (
@@ -2504,6 +2494,14 @@ def _JavaDefaultBaseline(packName, foundVars=None):
     return entries
 
 
+# Java 渲染缩放(poseStack.scale) → 网易渲染缩放的换算比: Java 缺省 0.7 ↔ 网易缺省 0.8(内置模型两侧对应)。
+# 玩家 player_scale、载具根骨骼(Java CustomVehicleEntity 写死 0.7)、投射物朝向根(Java CustomProjectileEntity 写死 0.7)
+# 共用这一个比例, 三者在两边的相对大小才一致(早先载具/投射物照抄 0.7, 骑手放大了它们没放大, 载具看着偏小)
+JAVA_TO_NETEASE_SCALE = 0.8 / 0.7
+# Java 写死 0.7 的载具/投射物换算后的网易缩放(资源包 vehicle_root / projectile_orient 动画里的值, 测试守护一致)
+JAVA_FIXED_ENTITY_SCALE = round(0.7 * JAVA_TO_NETEASE_SCALE, 3)
+
+
 def _IsDefaultJavaScale(value):
     """是否为 Java 缩放缺省值 0.7(properties 层与几何文件层共用同一缺省)"""
     return isinstance(value, (int, float)) and abs(value - 0.7) < 1e-6
@@ -2749,11 +2747,12 @@ def ReplacedTargets(files):
     return result
 
 
-# 投射物朝向(对齐 Java GeoProjectilesRenderer 的 Y(yRot-90)/Z(xRot) 旋转与模型宽高缩放 0.7): 移植工具给投射物几何
+# 投射物朝向(对齐 Java GeoProjectilesRenderer 的 Y(yRot-90)/Z(xRot) 旋转与写死的宽高缩放 0.7, 按 JAVA_TO_NETEASE_SCALE
+# 换算成 0.8): 移植工具给投射物几何
 # 外包 ysm_projectile_root → ysm_projectile_fix(Y -90°)(port_java_pack.WrapProjectileGeometry), 这里在根骨骼上
-# 播朝向。箭矢同 CSM(.ref/csm animation.csm.arrow.rot): 原版箭矢实体的 pre_animation 算 variable.shake_power(中靶抖动),
+# 播朝向。箭矢: 原版箭矢实体的 pre_animation 算 variable.shake_power(中靶抖动), 朝向里一并叠上;
 # 原版 move 动画写 body 骨骼(旧版内置箭矢几何的根就叫 body) —— 条目键 move 置 "0" 关掉, 免得模型里恰好有 body 骨骼
-# 被转两遍。三叉戟(硬编码渲染实体)同 CSM animation.csm.projectiles_rot。几何里没有这根骨骼(直写 geometry.* 的共享
+# 被转两遍。三叉戟(硬编码渲染实体)按实体朝向查询转。几何里没有这根骨骼(直写 geometry.* 的共享
 # 几何 / 旧产物)时动画空转, 不影响渲染。
 _PROJECTILE_ORIENT_KEY = "ysm_projectile_orient"
 _PROJECTILE_ORIENT_ANIMATIONS = {
@@ -2779,7 +2778,8 @@ def _WithProjectileOrientation(entityId, replace):
     return oriented
 
 
-# 载具缩放(对齐 Java CustomVehicleEntity 硬编码 0.7, 不读 ysm.json 缩放): 移植工具给载具几何外包 ysm_vehicle_root
+# 载具缩放(对齐 Java CustomVehicleEntity 硬编码 0.7, 不读 ysm.json 缩放; 与玩家同一换算比 JAVA_TO_NETEASE_SCALE,
+# 基岩 0.8): 移植工具给载具几何外包 ysm_vehicle_root
 # (port_java_pack.WrapVehicleGeometry), 这里在根骨骼上播缩放。朝向: Java 载具与基岩实体同为 YP(180 - 偏航) 约定,
 # 马这类数据驱动实体由引擎按身体朝向转(动画里的旋转项为 0); 船/矿车是引擎硬编码渲染, 换成数据驱动渲染后引擎不转
 # 模型, 同一动画在根骨骼上补 Y 旋转, 读业务包运行层写在载具上的两个变量(client/render/vehicleOrient)。
@@ -2815,7 +2815,7 @@ def _BuildReplaceEntities(jsonDict, packName, readTextFunc, warnings, foundVars=
               animation_controllers/<包>/replace_entities/, 索引按文件名 + 命名空间定位);
     - 变量:   替换实体的动画/控制器文件与玩家侧同样参与 molang 变量扫描
               (foundVars) —— 变量域全局共享, 漏收会导致替换动画表达式求值失败;
-    - 载具:   根骨骼缩放动画打头(_WithVehicleRoot, Java 硬编码 0.7), 有动画时带上包的音效登记
+    - 载具:   根骨骼缩放动画打头(_WithVehicleRoot, Java 硬编码 0.7 换算成 0.8), 有动画时带上包的音效登记
               (files.player.sound_effect, 移植工具把载具动画的音频关键帧也登记在这里)。
     """
     result = OrderedDict()
@@ -3378,7 +3378,7 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
                 mergedAnimEntries = mergedAnimEntries + [(companionKey, companionId)]
                 playerAnimates.append((companionKey, "variable.is_paperdoll"))
         playerAnimates.extend(paperdollPost)
-        # 手持物挂点修正(对齐 CSM, 见 _JavaItemFixAnimates 注): 只写 rightItem/leftItem, 包动画不碰这两根骨骼
+        # 手持物挂点修正(见 _JavaItemFixAnimates 注): 只写 rightItem/leftItem, 包动画不碰这两根骨骼
         for fixKey, fixAnimation, fixCondition in _JavaItemFixAnimates():
             mergedAnimEntries = mergedAnimEntries + [(fixKey, fixAnimation)]
             playerAnimates.append((fixKey, fixCondition))
@@ -3433,7 +3433,7 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
                     and fileWidth is not None and not _IsDefaultJavaScale(fileWidth):
                 widthScale = fileWidth
         if isinstance(heightScale, (int, float)):
-            playerScale = round(heightScale * 0.8 / 0.7, 3)
+            playerScale = round(heightScale * JAVA_TO_NETEASE_SCALE, 3)
             if isinstance(widthScale, (int, float)) and abs(widthScale - heightScale) > 1e-6:
                 warnings.append("width_scale({}) 与 height_scale({}) 不等, 网易仅支持等比缩放, "
                                 "已按 height_scale 换算".format(widthScale, heightScale))

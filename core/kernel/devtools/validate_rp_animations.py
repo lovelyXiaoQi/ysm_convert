@@ -399,11 +399,10 @@ def _CollectFiles(subDir, packs):
 def CheckControllerOneShotLoops(packs, warnings):
     """控制器状态引用的动画若 loop 为空/false, 出态前会漏一帧底层姿态。
 
-    geckolib 的 PLAY_ONCE 保持末帧, 基岩的 loop:false **播完即撤** —— 靠
+    geckolib 的 PLAY_ONCE 播完后还有 3 tick 尾过渡, 基岩的 loop:false **播完即撤** —— 靠
     `q.all_animations_finished` 出态时, 动画停作用的那一刻转移还没生效,
     骨骼掉回底层姿态一帧。实机(2026-09-05 warden 持剑攻击): punch_left /
-    punch_right 在挥击收回瞬间闪一下。旁证: CSM 全库 578 条动画里
-    loop 为 true(473)或 hold_on_last_frame(101), 裸的不循环动画只有 4 条且不挂状态。
+    punch_right 在挥击收回瞬间闪一下。
     修法: `port_java_pack.HoldControllerOneShots`(移植工具与就地修复工具都会跑)。
     """
     base = os.path.join(RP, "animation_controllers")
