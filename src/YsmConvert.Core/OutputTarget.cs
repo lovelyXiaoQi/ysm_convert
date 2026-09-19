@@ -66,6 +66,7 @@ public static class OutputTarget
         var rp = Path.Combine(root, componentName + "_rp");
         Directory.CreateDirectory(Path.Combine(bp, "ysm_models"));
         Directory.CreateDirectory(rp);
+        EnsureBehaviorPackMarker(bp);
         var bpManifest = Path.Combine(bp, "manifest.json");
         var rpManifest = Path.Combine(rp, "manifest.json");
         if (!File.Exists(bpManifest))
@@ -73,6 +74,19 @@ public static class OutputTarget
         if (!File.Exists(rpManifest))
             File.WriteAllText(rpManifest, BuildManifestJson("resources", Guid.NewGuid(), Guid.NewGuid()), new System.Text.UTF8Encoding(false));
         return new OutputLayout(root, bp, rp);
+    }
+
+    /// <summary>
+    /// 网易按有没有 <c>entities</c> 文件夹识别行为包: 没有就不挂载(MC Studio 测试世界与正式游戏都只启用它的资源包),
+    /// ysm_models 里的 ysm.json 永远扫不到。MCDK 按 manifest 建目录联接, 不受这条限制, 在那边测不出来。
+    /// 缺就补一个带 .gitkeep 的空文件夹(git 不跟踪空目录), 已有的不动。
+    /// </summary>
+    public static void EnsureBehaviorPackMarker(string bpDir)
+    {
+        var entities = Path.Combine(bpDir, "entities");
+        if (Directory.Exists(entities)) return;
+        Directory.CreateDirectory(entities);
+        File.WriteAllBytes(Path.Combine(entities, ".gitkeep"), Array.Empty<byte>());
     }
 
     public static bool IsValidComponentName(string name) =>

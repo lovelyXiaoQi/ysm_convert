@@ -169,6 +169,8 @@ public static class WarningCatalog
 
     public static Explanation ExplainValidation(string level, string text)
     {
+        if (text.Contains("缺 entities 文件夹", StringComparison.Ordinal))
+            return new("行为包不会被挂载", "网易按 entities 文件夹识别行为包, 缺它时 MC Studio 测试与正式游戏只挂资源包, 模型不会出现在选择界面(MCDK 调试测不出来); 点「修复产物」或重新转换会补上 entities/.gitkeep。", PackGuideDoc);
         if (text.Contains("sound_definitions", StringComparison.Ordinal) || text.Contains("sound_effect", StringComparison.Ordinal))
             return new("音频未登记", "效果键的定义不在 sounds/sound_definitions.json 或没在 ysm.json 的 files.player.sound_effect 登记, 该音效无声; 检查 ogg 是否随 Java 包一起提供。", PackGuideDoc);
         if (text.Contains("catmullrom", StringComparison.OrdinalIgnoreCase))

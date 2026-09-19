@@ -138,6 +138,8 @@ custom/纸板狐模型包/                    你的组件/
 
 用 MC Studio 新建空组件(行为包+资源包),按 §1 的目录树建好文件夹。
 `ysm.json` 放**行为包** `ysm_models/<包名>/` 下(放资源包读不到);其余资源全进资源包。
+行为包里的 `entities/` 文件夹**不能删**(没有实体就放个空的 `.gitkeep`):网易按它识别行为包,没有它
+MC Studio 测试和正式游戏都不挂载这个行为包,模型不会出现在选择界面(MCDK 调试不受影响,测不出来)。
 
 ### 第 2 步:拷贝 `ysm.json`
 
@@ -594,7 +596,7 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
 
 ### 5.3 移植检查单
 
-- [ ] 包名小写、带作者前缀;`ysm.json` 在**行为包** `ysm_models/<包名>/`
+- [ ] 包名小写、带作者前缀;`ysm.json` 在**行为包** `ysm_models/<包名>/`;行为包带 `entities/`(可只放 `.gitkeep`)
 - [ ] 几何 identifier 已改(`geometry.<包名>` / `<包名>_arm`),`geckolib_format_version` 已删
 - [ ] arm 几何已嫁接主几何手臂**父链空骨骼**(或暂不声明 arm)
 - [ ] 动画 ID 已加前缀并**全小写**;条件动画名已按 `.id./.tag./.cls.` 转义

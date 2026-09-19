@@ -160,6 +160,8 @@ public class OutputTargetTests : IDisposable
         Assert.True(File.Exists(Path.Combine(layout.RpDir, "manifest.json")));
         Assert.True(Directory.Exists(layout.BpModels));
         Assert.False(layout.HasBaseline);
+        // 网易按 entities 文件夹识别行为包, 没有就不挂载; 放 .gitkeep 让它进得了 git
+        Assert.True(File.Exists(Path.Combine(layout.BpDir, "entities", ".gitkeep")));
 
         var bp = JsonNode.Parse(File.ReadAllText(Path.Combine(layout.BpDir, "manifest.json")))!;
         Assert.Equal("data", bp["modules"]![0]!["type"]!.GetValue<string>());
@@ -173,6 +175,24 @@ public class OutputTargetTests : IDisposable
         var again = OutputTarget.EnsureComponent(_root, "my_models");
         var bp2 = JsonNode.Parse(File.ReadAllText(Path.Combine(again.BpDir, "manifest.json")))!;
         Assert.Equal(bp["header"]!["uuid"]!.GetValue<string>(), bp2["header"]!["uuid"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void BehaviorPackMarkerLeavesExistingEntitiesAlone()
+    {
+        var bp = Path.Combine(_root, "ysm_bp");
+        var entities = Path.Combine(bp, "entities");
+        Directory.CreateDirectory(entities);
+        File.WriteAllText(Path.Combine(entities, "__init__.py"), "");
+        OutputTarget.EnsureBehaviorPackMarker(bp);
+        Assert.Equal(new[] { "__init__.py" }, Directory.GetFiles(entities).Select(Path.GetFileName).ToArray());
+
+        // 缺的补上, 再跑一次不变
+        var bare = Path.Combine(_root, "bare_bp");
+        Directory.CreateDirectory(bare);
+        OutputTarget.EnsureBehaviorPackMarker(bare);
+        OutputTarget.EnsureBehaviorPackMarker(bare);
+        Assert.Equal(new[] { ".gitkeep" }, Directory.GetFiles(Path.Combine(bare, "entities")).Select(Path.GetFileName).ToArray());
     }
 
     [Fact]
@@ -446,6 +466,7 @@ public class WarningCatalogTests
     [InlineData("pack: sound_effects 效果键 ysm_snd_x 未在 ysm.json 的 files.player.sound_effect 登记(无声)", "音频未登记")]
     [InlineData("a/b.json animations/x: 未转换的 Java 专有 token: ysm.foo", "Java 写法残留")]
     [InlineData("a/b.json animations/x: 基岩解析不了的 molang(整份文件拒载): x", "molang 语法红线")]
+    [InlineData("行为包 my_models_bp: 缺 entities 文件夹, 网易按它识别行为包 —— 没有它 MC Studio 测试与正式游戏都不挂载这个行为包, 模型不会出现在选择界面(MCDK 按 manifest 建联接, 测不出来); 修复(fix)或重新转换会补上 entities/.gitkeep(D:\\out\\my_models_bp)", "行为包不会被挂载")]
     public void ExplainsValidationByKernelWording(string text, string category) =>
         Assert.Equal(category, WarningCatalog.ExplainValidation("error", text).Category);
 

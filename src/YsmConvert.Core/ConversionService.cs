@@ -54,6 +54,8 @@ public sealed class ConversionService
             if (collection.CoverProblem() is { } coverProblem) problems.Add(coverProblem);
         if (problems.Count > 0)
             throw new ArgumentException(string.Join("\n", problems));
+        // 工程形态的已有行为包同样要能被网易挂载(见 EnsureBehaviorPackMarker 注)
+        OutputTarget.EnsureBehaviorPackMarker(request.Layout.BpDir);
         var refRp = ResolveRefRp(request.Layout, request.RefRp);
         if (request.Packs.Count == 1)
         {
@@ -272,6 +274,8 @@ public sealed class ConversionService
         Action<KernelEvent>? onEvent = null, Action<string>? onStderr = null, CancellationToken ct = default,
         bool compactJson = true)
     {
+        // 旧版转换器产出的组件行为包可能没有 entities, 就地修复一并补上(见 EnsureBehaviorPackMarker 注)
+        OutputTarget.EnsureBehaviorPackMarker(layout.BpDir);
         var job = new JobSpec
         {
             Action = "fix",

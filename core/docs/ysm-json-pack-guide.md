@@ -40,6 +40,8 @@ Java 版字段参考：本仓库 `.ref/ysm-java-wiki/docs/notes/wiki/`（项目�
 ```
 你的副包组件/
 ├── behavior_pack/
+│   ├── manifest.json
+│   ├── entities/.gitkeep              ← 必须有(可以是空文件夹): 网易按它识别行为包
 │   └── ysm_models/
 │       └── <包名>/
 │           └── ysm.json               ← 只有声明文件(Java 版原样 + 可选 netease 段)
@@ -55,6 +57,11 @@ Java 版字段参考：本仓库 `.ref/ysm-java-wiki/docs/notes/wiki/`（项目�
 > 全部动画 ID、控制器 ID、molang 变量引用与几何缩放声明——因此改了资源包不存在
 > "忘了同步另一份"的问题。（历史版本要求在行为包放一份动画副本，现已不需要；
 > 旧包里已有的副本仍可用，作为资源索引不可用时的回落。）
+
+**行为包必须带 `entities/` 文件夹**：网易按有没有它判定一个目录是不是行为包，没有就不挂载 ——
+MC Studio 开发测试和正式游戏都只启用这个组件的资源包，`ysm.json` 根本扫不到，模型不会出现在选择界面。
+纯声明的行为包里没有实体，放一个空的 `entities/.gitkeep` 占位即可（git 与打包脚本都不保留空目录）。
+用 MCDK 调试时它按 `manifest.json` 直接建目录联接，不受这条限制，所以在 MCDK 下测不出来。
 
 一个组件可放任意多个 `<包名>/`，**无需清单文件**——主包直接枚举目录发现。Java
 合集包形态（`ysm_models/<合集>/<子包>/ysm.json`）同样自动命中，包名取直接父目录名。
@@ -388,7 +395,8 @@ print(comp.AddPlayerAnimation("probe", "animation.<包名>.walk"))
   （`模型 X 引用了 N 个不存在的资源`）——按告警列出的键补齐资源即可；引擎/共享
   命名空间的引用不做判定（存在性对引擎侧资源不可知）。
 - 模型没被发现：确认组件已在本存档启用，且声明位于**行为包**根下
-  `ysm_models/<包名>/ysm.json`（放资源包读不到）。
+  `ysm_models/<包名>/ysm.json`（放资源包读不到）；行为包里要有 `entities/` 文件夹，否则网易不挂载它
+  （存档目录下 `netease_world_behavior_packs.json` 里只有资源包、没有这个行为包的 uuid 就是这种情况）。
 - `模型ID xxx 重复`：两个包推导/声明了同一模型 ID，后加载者被跳过——给包名加作者前缀。
 - GUI 里看不到模型：预览实体定义的 `identifier` 与模型 ID 不一致、或资源 ID 拼写不符合命名规范。
 - 端到端参考：主包内置 `ysm_bp/ysm_models/` 即完整实例（`commander_*` = `files` 推导

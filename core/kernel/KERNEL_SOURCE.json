@@ -1,8 +1,8 @@
 ﻿{
     "source":  "D:\\MCStudioDownload\\work\\icegamestudio@163.com\\Cpp\\AddOn\\ysm",
-    "commit":  "dda9740a1742099628b698c409ea49992585ade8",
+    "commit":  "6a3c68ff71e2d205cf130a6b75980cd91716dfff",
     "dirty":  true,
-    "syncedAt":  "2026-09-19T14:46:07",
+    "syncedAt":  "2026-09-19T18:45:55",
     "modules":  [
                     "devtools\\fix_ported_controllers.py",
                     "devtools\\java_runtime_bindings.py",

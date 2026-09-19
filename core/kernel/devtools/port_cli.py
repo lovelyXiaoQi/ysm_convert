@@ -344,6 +344,40 @@ def _ApplyLayout(layout):
             "baselinePresent": os.path.isdir(os.path.join(refRp or rp, "animations", port.JAVA_BASELINE_PACK))}
 
 
+# 网易按有没有 entities 文件夹识别行为包: 没有就不挂载(MC Studio 测试与正式游戏都只启用资源包), ysm_models 里的
+# ysm.json 扫不到; MCDK 按 manifest 建目录联接, 测不出来。与转换器壳 OutputTarget.EnsureBehaviorPackMarker 同一口径:
+# 缺就补一个带 .gitkeep 的空文件夹(git 与打包脚本都不保留空目录), 已有的不动
+_BEHAVIOR_PACK_MARKER_DIR = "entities"
+_BEHAVIOR_PACK_MARKER_FILE = ".gitkeep"
+# "位置: 说明" 与其他体检条目同形(宿主取第一个冒号前的文字作位置列, 所以位置用行为包目录名, 带盘符的完整路径放后面)
+BEHAVIOR_PACK_MARKER_ERROR = (u"行为包 {name}: 缺 entities 文件夹, 网易按它识别行为包 —— 没有它 MC Studio 测试与正式游戏都不挂载"
+                              u"这个行为包, 模型不会出现在选择界面(MCDK 按 manifest 建联接, 测不出来); 修复(fix)或重新转换会补上"
+                              u" entities/.gitkeep({path})")
+
+
+def _BehaviorPackRoot(bpModels):
+    return os.path.dirname(bpModels.rstrip("\\/"))
+
+
+def EnsureBehaviorPackMarker(bpModels):
+    """产物行为包(bpModels 的上一级)缺 entities 文件夹就补上; 返回是否新建"""
+    entities = os.path.join(_BehaviorPackRoot(bpModels), _BEHAVIOR_PACK_MARKER_DIR)
+    if os.path.isdir(entities):
+        return False
+    os.makedirs(entities)
+    io.open(os.path.join(entities, _BEHAVIOR_PACK_MARKER_FILE), "wb").close()
+    return True
+
+
+def BehaviorPackMarkerProblems(bpModels):
+    """体检(只读): 行为包缺 entities 文件夹 → 一条错误文本"""
+    root = _BehaviorPackRoot(bpModels)
+    if os.path.isdir(os.path.join(root, _BEHAVIOR_PACK_MARKER_DIR)):
+        return []
+    shown = _Unprefix(root)
+    return [BEHAVIOR_PACK_MARKER_ERROR.format(name=os.path.basename(shown), path=shown)]
+
+
 def _EmitReport(sink, packName, lines):
     counts = Counter()
     for line in lines:
@@ -356,6 +390,7 @@ def _EmitReport(sink, packName, lines):
 
 def _RunValidation(sink, packNames):
     errors, warnings, animCount, ctlCount = validate.Run(packNames)
+    errors = list(errors) + BehaviorPackMarkerProblems(port.BP_MODELS)
     for line in warnings:
         sink.Emit("validate_item", level="warn", text=_Unprefix(line))
     for line in errors:
@@ -395,6 +430,7 @@ def RunConvert(sink, job):
     okCount = failCount = 0
     doneNames = []
     usedCollections = []
+    EnsureBehaviorPackMarker(port.BP_MODELS)
     for index, spec in enumerate(packs):
         if index:
             # 同一进程连续转多个包时内存只涨不回: 2026-09-18 30 个包串行跑到第 28 个(凋灵娘)时 MemoryError,
@@ -474,6 +510,7 @@ def RunFix(sink, job):
     if not names:
         names = fix._AllPackNames()
     failCount = 0
+    EnsureBehaviorPackMarker(port.BP_MODELS)
     for index, packName in enumerate(names):
         if index:
             gc.collect()        # 同 RunConvert: 连续处理多个包时内存只涨不回
