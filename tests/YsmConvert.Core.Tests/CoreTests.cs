@@ -367,6 +367,86 @@ public class KernelLocatorTests : IDisposable
     }
 }
 
+/// <summary>内核来源: 开发构建跑工程的 devtools(改了规则立刻生效), 发布包跑自带快照。</summary>
+public class KernelSourceTests : IDisposable
+{
+    private readonly string _root = Path.Combine(Path.GetTempPath(), "ysmconv-src-" + Guid.NewGuid().ToString("N"));
+    private readonly string? _saved = Environment.GetEnvironmentVariable(KernelLocator.CoreDirEnv);
+    private readonly string _project;
+    private readonly string _converter;
+
+    public KernelSourceTests()
+    {
+        Environment.SetEnvironmentVariable(KernelLocator.CoreDirEnv, null);
+        _project = Path.Combine(_root, "ysm");
+        _converter = Path.Combine(_project, "ysm_convert");
+        // 工程: devtools 入口 + 带 java_default 基线的资源包(两样都在才算工程根)
+        Directory.CreateDirectory(Path.Combine(_project, "devtools"));
+        Directory.CreateDirectory(Path.Combine(_project, "ysm_rp", "animations", "java_default"));
+        Directory.CreateDirectory(Path.Combine(_project, "docs"));
+        File.WriteAllText(Path.Combine(_project, "devtools", "port_cli.py"), "# live");
+        // 转换器: 仓库里提交的快照 + 便携解释器(避免用例依赖开发机装没装 Python 2.7)
+        Directory.CreateDirectory(Path.Combine(_converter, "core", "kernel", "devtools"));
+        Directory.CreateDirectory(Path.Combine(_converter, "core", "python"));
+        File.WriteAllText(Path.Combine(_converter, "core", "kernel", "devtools", "port_cli.py"), "# snapshot");
+        File.WriteAllText(Path.Combine(_converter, "core", "python", "python.exe"), "stub");
+    }
+
+    public void Dispose()
+    {
+        Environment.SetEnvironmentVariable(KernelLocator.CoreDirEnv, _saved);
+        try { Directory.Delete(_root, true); } catch { }
+    }
+
+    [Fact]
+    public void DevBuildRunsTheProjectDevtools()
+    {
+        var binDir = Path.Combine(_converter, "src", "YsmConvert.Cli", "bin", "Debug", "net10.0");
+        Directory.CreateDirectory(binDir);
+
+        Assert.True(KernelLocator.TryLocateFrom(binDir, out var paths, out var error), error);
+        Assert.True(paths!.FromProject);
+        Assert.Equal(_project, paths.KernelRoot);
+        Assert.Equal(Path.Combine(_project, "devtools", "port_cli.py"), paths.PortCli);
+        Assert.Equal(Path.Combine(_project, "ysm_rp"), paths.BundledRefRp);   // 基线读工程的资源包
+        Assert.Equal(Path.Combine(_project, "docs"), paths.DocsDir);
+        Assert.True(paths.UsesBundledPython);                                 // 解释器仍取转换器的 core/python
+    }
+
+    [Fact]
+    public void ReleasedPackageRunsItsOwnSnapshotEvenInsideTheProject()
+    {
+        // 发布包解压到工程里(dist/YsmConvert)也按发布包算: 测的是它自己带的快照, 不会被工程的实时内核顶掉
+        var distDir = Path.Combine(_converter, "dist", "YsmConvert");
+        Directory.CreateDirectory(Path.Combine(distDir, "core", "kernel", "devtools"));
+        Directory.CreateDirectory(Path.Combine(distDir, "core", "python"));
+        File.WriteAllText(Path.Combine(distDir, "core", "kernel", "devtools", "port_cli.py"), "# shipped");
+        File.WriteAllText(Path.Combine(distDir, "core", "python", "python.exe"), "stub");
+
+        Assert.True(KernelLocator.TryLocateFrom(distDir, out var paths, out var error), error);
+        Assert.False(paths!.FromProject);
+        Assert.Equal(Path.Combine(distDir, "core", "kernel"), paths.KernelRoot);
+        Assert.Equal(Path.Combine(distDir, "core", "docs"), paths.DocsDir);
+    }
+
+    [Fact]
+    public void FallsBackToSnapshotWithoutProject()
+    {
+        // 转换器单独拿出来(没有工程): 用仓库里的快照, 旧行为不变
+        var lonely = Path.Combine(_root, "lonely");
+        Directory.CreateDirectory(Path.Combine(lonely, "core", "kernel", "devtools"));
+        Directory.CreateDirectory(Path.Combine(lonely, "core", "python"));
+        File.WriteAllText(Path.Combine(lonely, "core", "kernel", "devtools", "port_cli.py"), "# snapshot");
+        File.WriteAllText(Path.Combine(lonely, "core", "python", "python.exe"), "stub");
+        var binDir = Path.Combine(lonely, "src", "YsmConvert.Cli", "bin", "Debug", "net10.0");
+        Directory.CreateDirectory(binDir);
+
+        Assert.True(KernelLocator.TryLocateFrom(binDir, out var paths, out var error), error);
+        Assert.False(paths!.FromProject);
+        Assert.Equal(Path.Combine(lonely, "core", "kernel"), paths.KernelRoot);
+    }
+}
+
 public class KernelRunnerTests
 {
     [Theory]

@@ -591,7 +591,7 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
 
 几何/模型 ID/命名空间全走推导。**端到端参考**:主包内置 `ysm_bp/ysm_models/` 就是完整
 实例——`commander_male/female` = `files` 推导 + 共享箭矢直通 + `_man` 键名重定向;
-`wine_fox/<变种>` = 官方 Java"酒狐与小伙伴"合集 22 个变种的移植产物(合集文件夹、高级轮盘
+`wine_fox/<变种>` = 官方 Java"酒狐与小伙伴"合集的移植产物(主包收录其中 6 个变种;合集文件夹、高级轮盘
 三件套、弹射物/载具、多语言烘焙),命令见 §5.4;`ref_*` = 社区 Java 包的移植产物。
 
 ### 5.3 移植检查单
@@ -619,9 +619,12 @@ python devtools/port_java_pack.py .ref/ysm-java-src/src/main/resources/assets/ys
 包名建议带合集前缀防资源 ID 冲突。合集目录里的 `ysm-pack.png`(Java 合集封面)会被拷进资源包
 `textures/ui/ysm_packs/<合集>.png` 并写进清单的 `folder_texture`,文件夹直接显示 Java 同款封面:
 
+主包只收录下面 6 个变种;其余变种属于第三方作者、尚未获得授权,不要移植进主包:
+
 ```bash
-for d in .ref/ysm-java-src/src/main/resources/assets/ysm/builtin/wine_fox/[0-9][0-9]_*; do
-    n=$(basename "$d"); python devtools/port_java_pack.py "$d" --name "wine_fox_$n" --collection wine_fox
+for n in 01_taisho_maid 02_new_year 03_astronaut 04_kongfu 06_hanfu 07_jk; do
+    python devtools/port_java_pack.py ".ref/ysm-java-src/src/main/resources/assets/ysm/builtin/wine_fox/$n" \
+        --name "wine_fox_$n" --collection wine_fox
 done
 ```
 

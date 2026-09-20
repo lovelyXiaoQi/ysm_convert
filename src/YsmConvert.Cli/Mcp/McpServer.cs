@@ -339,6 +339,8 @@ internal sealed class McpServer
             ["pythonSource"] = _service?.Paths.PythonSource,
             ["kernel"] = info is null ? null : JsonSerializer.SerializeToNode(info, JsonOut),
             ["kernelSource"] = source,
+            ["kernelRoot"] = _service?.Paths.KernelRoot,
+            ["kernelFromProject"] = _service?.Paths.FromProject,
             ["bundledRefRp"] = _service?.Paths.BundledRefRp,
             ["defaultOut"] = _defaultOut,
             ["docs"] = new JsonArray(_docs.List().Select(d => (JsonNode)new JsonObject { ["name"] = d.Name, ["title"] = d.Title, ["bytes"] = d.Size }).ToArray()),

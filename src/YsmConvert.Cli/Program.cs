@@ -130,6 +130,7 @@ internal static class Program
                 ["python"] = service.Paths.PythonExe,
                 ["pythonSource"] = service.Paths.PythonSource,
                 ["kernelRoot"] = service.Paths.KernelRoot,
+                ["kernelFromProject"] = service.Paths.FromProject,
                 ["docsDir"] = service.Paths.DocsDir,
                 ["wiki"] = YsmLinks.WikiUrl,
                 ["repo"] = YsmLinks.RepoUrl,
@@ -142,6 +143,7 @@ internal static class Program
         Console.WriteLine($"core 目录:   {service.Paths.CoreDir}");
         Console.WriteLine($"Python:      {service.Paths.PythonExe} ({service.Paths.PythonSource}) 版本 {info?.Python ?? "?"}");
         Console.WriteLine($"内核入口:    {service.Paths.PortCli} (内核 {info?.Kernel ?? "?"}, 拼音库 {(info?.Pinyin == true ? "有" : "无")})");
+        Console.WriteLine($"内核来源:    {service.Paths.KernelSourceText}");
         Console.WriteLine($"基线资源包:  {service.Paths.BundledRefRp}");
         Console.WriteLine($"在线文档:    {YsmLinks.WikiUrl}");
         Console.WriteLine($"开源地址:    {YsmLinks.RepoUrl}");

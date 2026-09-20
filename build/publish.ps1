@@ -15,16 +15,32 @@
   发版流水线 .github/workflows/release.yml 按 tag 递增出版本号后从这里传入。
 .PARAMETER KernelOnly
   只把 core/(kernel / docs / python)重新拷进已有的 dist, 不重新发布 exe —— 改了内核、GUI 又开着的时候用。
+.PARAMETER SkipSync
+  不先同步 core/kernel 快照。缺省行为: 上一级是 YSM 工程时先跑 build/sync-core.ps1, 保证发布包带的是当前 devtools
+  (开发构建直接跑工程的 devtools, 只有发布包吃快照 —— 不自动同步就会发出旧内核)。Actions 发版的 runner 上没有工程,
+  自动跳过, 发的是仓库里提交的那份快照。
 #>
 param(
     [bool]$SelfContained = $true,
     [string]$Runtime = "win-x64",
     [string]$Version,
-    [switch]$KernelOnly
+    [switch]$KernelOnly,
+    [switch]$SkipSync
 )
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $dist = Join-Path $repoRoot "dist\YsmConvert"
+
+if (-not $SkipSync) {
+    $ysmRepo = Split-Path -Parent $repoRoot
+    if (Test-Path (Join-Path $ysmRepo "devtools\port_cli.py")) {
+        Write-Host "同步内核快照(发布包用): $ysmRepo"
+        & (Join-Path $PSScriptRoot "sync-core.ps1") -YsmRepo $ysmRepo
+        if ($LASTEXITCODE) { throw "同步内核快照失败" }
+    } else {
+        Write-Host "上一级不是 YSM 工程, 跳过同步, 发布仓库里现有的 core/kernel 快照"
+    }
+}
 
 foreach ($required in @("core\kernel\devtools\port_cli.py", "core\python\python.exe")) {
     if (-not (Test-Path (Join-Path $repoRoot $required))) {

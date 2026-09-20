@@ -174,7 +174,7 @@ MC Studio 开发测试和正式游戏都只启用这个组件的资源包，`ysm
 > ——与副包走**同一发现机制、同一解析器、同一归一化链路**，各自示范一种场景：
 > `commander_male`/`commander_female`（顶级 `priority: 1000`，零 netease 段）=
 > `files.player.texture` 皮肤推导 + 共享箭矢直通；`wine_fox/`（2026-09-17 起取代旧版
-> 酒狐/JK 酒狐）= Java 官方内置"酒狐与小伙伴"合集 22 个变种的**移植产物**，示范合集
+> 酒狐/JK 酒狐）= Java 官方内置"酒狐与小伙伴"合集的**移植产物**（主包收录其中 6 个变种），示范合集
 > 文件夹、Java 高级轮盘三件套（`#分类` → `$子轮盘`、`#按钮` 配置表单）、`files.projectiles`/
 > `vehicles`/`files.arrow`；`ref_*` = 三个社区 Java 包的移植产物（复杂作者状态机）。
 

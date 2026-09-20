@@ -1,9 +1,12 @@
 <#
 .SYNOPSIS
-  从 YSM 网易版仓库同步转换内核(Python 源 + java_default 基线 + 文档)到本仓库 core/kernel、core/docs。
+  把 YSM 工程的转换内核(Python 源 + java_default 基线 + 文档)快照到 core/kernel、core/docs —— **只为发布包**。
 
 .DESCRIPTION
-  转换规则的唯一真源是 YSM 仓库的 devtools/ 与 ysm_bp/ysmModelScripts/packLoader/(游戏内解析器共用同一份代码)。
+  转换规则的唯一真源是 YSM 工程的 devtools/ 与 ysm_bp/ysmModelScripts/packLoader/(游戏内解析器共用同一份代码)。
+  **开发时不用跑这个脚本**: 转换器住在工程里(<工程>/ysm_convert), 开发构建直接跑工程的 devtools(见
+  src/YsmConvert.Core/KernelLocator.cs), 改了规则立刻生效。快照只有发布包需要 —— 用户机上没有 YSM 工程;
+  build/publish.ps1 会自动先调用本脚本, 手工执行一般只在"要把快照提交进 git 给 Actions 发版"时。
   本脚本只做"快照拷贝", 不改任何内容; 同步后 core/kernel/KERNEL_SOURCE.json 记录来源提交与文件清单。
   内核目录布局必须保持 <kernel>/devtools、<kernel>/ysm_bp/ysmModelScripts、<kernel>/ysm_rp/animations/java_default:
   port_java_pack.py 按自身位置推导 ROOT 并把 ROOT/ysm_bp 加进 sys.path, ROOT/ysm_rp 是缺省资源包(装着基线)。
@@ -13,16 +16,17 @@
   ImportError。拷完再用同步出来的副本真导入一次做自检, 漏文件当场报错。
 
 .PARAMETER YsmRepo
-  YSM 仓库根目录(含 devtools/、ysm_bp/、ysm_rp/、docs/)。
+  YSM 工程根目录(含 devtools/、ysm_bp/、ysm_rp/、docs/); 缺省取本仓库的上一级(转换器就在工程里)。
 .PARAMETER PythonHome
   本机 Python 2.7(算依赖闭包用), 缺省 C:\Python27; 找不到时退到 py -2.7。
 #>
 param(
-    [Parameter(Mandatory = $true)][string]$YsmRepo,
+    [string]$YsmRepo,
     [string]$PythonHome = "C:\Python27"
 )
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+if (-not $YsmRepo) { $YsmRepo = Split-Path -Parent $repoRoot }
 $kernel = Join-Path $repoRoot "core\kernel"
 $docs = Join-Path $repoRoot "core\docs"
 $YsmRepo = (Resolve-Path $YsmRepo).Path
