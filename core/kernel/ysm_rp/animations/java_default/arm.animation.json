@@ -2058,7 +2058,7 @@
         "RightArm": {
           "rotation": [
             "-71.0563-0.8*query.mod.ysm_head_pitch", 
-            "-0.5*(-query.mod.ysm_head_yaw)", 
+            "-0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
             0
           ]
         }, 
@@ -2072,7 +2072,7 @@
         "Head": {
           "rotation": [
             "0.2*query.mod.ysm_head_pitch", 
-            "0.5*(-query.mod.ysm_head_yaw)", 
+            "0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
             0
           ]
         }, 
@@ -2091,7 +2091,7 @@
         "UpBody": {
           "rotation": [
             "-0.2*query.mod.ysm_head_pitch", 
-            "-0.5*(-query.mod.ysm_head_yaw)", 
+            "-0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
             0
           ]
         }
@@ -2105,7 +2105,7 @@
         "LeftArm": {
           "rotation": [
             "-71.0563-0.8*query.mod.ysm_head_pitch", 
-            "-0.5*(-query.mod.ysm_head_yaw)", 
+            "-0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
             0
           ]
         }, 
@@ -2119,7 +2119,7 @@
         "Head": {
           "rotation": [
             "0.2*query.mod.ysm_head_pitch", 
-            "0.5*(-query.mod.ysm_head_yaw)", 
+            "0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
             0
           ]
         }, 
@@ -2138,7 +2138,7 @@
         "UpBody": {
           "rotation": [
             "-0.2*query.mod.ysm_head_pitch", 
-            "-0.5*(-query.mod.ysm_head_yaw)", 
+            "-0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
             0
           ]
         }
@@ -5686,12 +5686,12 @@
             "0.5": {
               "pre": [
                 -3.3031, 
-                "-75+((-query.mod.ysm_head_yaw)<0?-0.5*(-query.mod.ysm_head_yaw) : 0)", 
+                "-75+((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0?-0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 0.8413
               ], 
               "post": [
                 -3.3031, 
-                "-75+((-query.mod.ysm_head_yaw)<0?-0.5*(-query.mod.ysm_head_yaw) : 0)", 
+                "-75+((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0?-0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 0.8413
               ], 
               "lerp_mode": "linear"
@@ -5699,12 +5699,12 @@
             "1.0": {
               "pre": [
                 -3.3031, 
-                "-75+((-query.mod.ysm_head_yaw)<=0?-(-query.mod.ysm_head_yaw) : 0)", 
+                "-75+((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<=0?-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 0.8413
               ], 
               "post": [
                 -3.3031, 
-                "-75+((-query.mod.ysm_head_yaw)<=0?-(-query.mod.ysm_head_yaw) : 0)", 
+                "-75+((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<=0?-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 0.8413
               ], 
               "lerp_mode": "linear"
@@ -5901,12 +5901,12 @@
             "0.5": {
               "pre": [
                 45.8757, 
-                "65.2536+0.5*(-query.mod.ysm_head_yaw)", 
+                "65.2536+0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 38.7767
               ], 
               "post": [
                 45.8757, 
-                "65.2536+0.5*(-query.mod.ysm_head_yaw)", 
+                "65.2536+0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 38.7767
               ], 
               "lerp_mode": "linear"
@@ -5914,12 +5914,12 @@
             "1.0": {
               "pre": [
                 51.2554, 
-                "70.4355+(-query.mod.ysm_head_yaw)", 
+                "70.4355+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 44.3434
               ], 
               "post": [
                 51.2554, 
-                "70.4355+(-query.mod.ysm_head_yaw)", 
+                "70.4355+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 44.3434
               ], 
               "lerp_mode": "linear"
@@ -6015,12 +6015,12 @@
             "0.0": {
               "pre": [
                 0, 
-                "((-query.mod.ysm_head_yaw)>0?-(-query.mod.ysm_head_yaw) : 0)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0?-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 0
               ], 
               "post": [
                 0, 
-                "((-query.mod.ysm_head_yaw)>0?-(-query.mod.ysm_head_yaw) : 0)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0?-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 0
               ], 
               "lerp_mode": "linear"
@@ -6028,12 +6028,12 @@
             "1.0": {
               "pre": [
                 0, 
-                "((-query.mod.ysm_head_yaw)>0?-(-query.mod.ysm_head_yaw) : 0)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0?-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 0
               ], 
               "post": [
                 0, 
-                "((-query.mod.ysm_head_yaw)>0?-(-query.mod.ysm_head_yaw) : 0)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0?-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 0
               ], 
               "lerp_mode": "linear"
@@ -6328,12 +6328,12 @@
             "0.5": {
               "pre": [
                 -3.3031, 
-                "75+((-query.mod.ysm_head_yaw)<0?-0.5*(-query.mod.ysm_head_yaw) : 0)", 
+                "75+((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0?-0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 -0.8413
               ], 
               "post": [
                 -3.3031, 
-                "75+((-query.mod.ysm_head_yaw)<0?-0.5*(-query.mod.ysm_head_yaw) : 0)", 
+                "75+((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0?-0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 -0.8413
               ], 
               "lerp_mode": "linear"
@@ -6341,12 +6341,12 @@
             "1.0": {
               "pre": [
                 -3.3031, 
-                "75+((-query.mod.ysm_head_yaw)<=0?-(-query.mod.ysm_head_yaw) : 0)", 
+                "75+((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<=0?-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 -0.8413
               ], 
               "post": [
                 -3.3031, 
-                "75+((-query.mod.ysm_head_yaw)<=0?-(-query.mod.ysm_head_yaw) : 0)", 
+                "75+((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<=0?-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 -0.8413
               ], 
               "lerp_mode": "linear"
@@ -6543,12 +6543,12 @@
             "0.5": {
               "pre": [
                 45.8757, 
-                "-65.2536+0.5*(-query.mod.ysm_head_yaw)", 
+                "-65.2536+0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -38.7767
               ], 
               "post": [
                 45.8757, 
-                "-65.2536+0.5*(-query.mod.ysm_head_yaw)", 
+                "-65.2536+0.5*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -38.7767
               ], 
               "lerp_mode": "linear"
@@ -6556,12 +6556,12 @@
             "1.0": {
               "pre": [
                 51.2554, 
-                "-70.4355+(-query.mod.ysm_head_yaw)", 
+                "-70.4355+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -44.3434
               ], 
               "post": [
                 51.2554, 
-                "-70.4355+(-query.mod.ysm_head_yaw)", 
+                "-70.4355+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -44.3434
               ], 
               "lerp_mode": "linear"
@@ -6657,12 +6657,12 @@
             "0.0": {
               "pre": [
                 0, 
-                "((-query.mod.ysm_head_yaw)>0?-(-query.mod.ysm_head_yaw) : 0)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0?-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 0
               ], 
               "post": [
                 0, 
-                "((-query.mod.ysm_head_yaw)>0?-(-query.mod.ysm_head_yaw) : 0)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0?-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 0
               ], 
               "lerp_mode": "linear"
@@ -6670,12 +6670,12 @@
             "1.0": {
               "pre": [
                 0, 
-                "((-query.mod.ysm_head_yaw)>0?-(-query.mod.ysm_head_yaw) : 0)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0?-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 0
               ], 
               "post": [
                 0, 
-                "((-query.mod.ysm_head_yaw)>0?-(-query.mod.ysm_head_yaw) : 0)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0?-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))) : 0)", 
                 0
               ], 
               "lerp_mode": "linear"
@@ -7857,12 +7857,12 @@
             "0.125": {
               "pre": [
                 "-0.4402+0.5*query.mod.ysm_head_pitch", 
-                "14.9904+(-query.mod.ysm_head_yaw)", 
+                "14.9904+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -0.01964
               ], 
               "post": [
                 "-0.4402+0.5*query.mod.ysm_head_pitch", 
-                "14.9904+(-query.mod.ysm_head_yaw)", 
+                "14.9904+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -0.01964
               ], 
               "lerp_mode": "linear"
@@ -7870,12 +7870,12 @@
             "0.2083": {
               "pre": [
                 "-0.4402+0.5*query.mod.ysm_head_pitch", 
-                "14.9904+(-query.mod.ysm_head_yaw)", 
+                "14.9904+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -0.01964
               ], 
               "post": [
                 "-0.4402+0.5*query.mod.ysm_head_pitch", 
-                "14.9904+(-query.mod.ysm_head_yaw)", 
+                "14.9904+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -0.01964
               ], 
               "lerp_mode": "linear"
@@ -7883,24 +7883,24 @@
             "0.2917": {
               "pre": [
                 "0.3677+0.5*query.mod.ysm_head_pitch", 
-                "27.4925+(-query.mod.ysm_head_yaw)", 
+                "27.4925+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 2.6484
               ], 
               "post": [
                 "0.3677+0.5*query.mod.ysm_head_pitch", 
-                "27.4925+(-query.mod.ysm_head_yaw)", 
+                "27.4925+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 2.6484
               ], 
               "lerp_mode": "linear"
             }, 
             "0.5": [
               "0.3677+0.5*query.mod.ysm_head_pitch", 
-              "27.4925+(-query.mod.ysm_head_yaw)", 
+              "27.4925+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
               2.6484
             ], 
             "0.75": [
               "0.3677+0.5*query.mod.ysm_head_pitch", 
-              "27.4925+(-query.mod.ysm_head_yaw)", 
+              "27.4925+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
               2.6484
             ]
           }
@@ -7996,12 +7996,12 @@
             "0.125": {
               "pre": [
                 -4.80796, 
-                "-15.028-(-query.mod.ysm_head_yaw)", 
+                "-15.028-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 0.08348
               ], 
               "post": [
                 -4.80796, 
-                "-15.028-(-query.mod.ysm_head_yaw)", 
+                "-15.028-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 0.08348
               ], 
               "lerp_mode": "linear"
@@ -8009,12 +8009,12 @@
             "0.2083": {
               "pre": [
                 -4.80796, 
-                "-15.028-(-query.mod.ysm_head_yaw)", 
+                "-15.028-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 0.08348
               ], 
               "post": [
                 -4.80796, 
-                "-15.028-(-query.mod.ysm_head_yaw)", 
+                "-15.028-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 0.08348
               ], 
               "lerp_mode": "linear"
@@ -8022,24 +8022,24 @@
             "0.2917": {
               "pre": [
                 1.6675, 
-                "-27.448-(-query.mod.ysm_head_yaw)", 
+                "-27.448-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -5.46571
               ], 
               "post": [
                 1.6675, 
-                "-27.448-(-query.mod.ysm_head_yaw)", 
+                "-27.448-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -5.46571
               ], 
               "lerp_mode": "linear"
             }, 
             "0.5": [
               1.6675, 
-              "-27.448-(-query.mod.ysm_head_yaw)", 
+              "-27.448-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
               -5.46571
             ], 
             "0.75": [
               1.6675, 
-              "-27.448-(-query.mod.ysm_head_yaw)", 
+              "-27.448-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
               -5.46571
             ]
           }
@@ -8520,12 +8520,12 @@
             "0.125": {
               "pre": [
                 "-0.4402+0.5*query.mod.ysm_head_pitch", 
-                "-14.9904+(-query.mod.ysm_head_yaw)", 
+                "-14.9904+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 0.01964
               ], 
               "post": [
                 "-0.4402+0.5*query.mod.ysm_head_pitch", 
-                "-14.9904+(-query.mod.ysm_head_yaw)", 
+                "-14.9904+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 0.01964
               ], 
               "lerp_mode": "linear"
@@ -8533,12 +8533,12 @@
             "0.2083": {
               "pre": [
                 "-0.4402+0.5*query.mod.ysm_head_pitch", 
-                "-14.9904+(-query.mod.ysm_head_yaw)", 
+                "-14.9904+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 0.01964
               ], 
               "post": [
                 "-0.4402+0.5*query.mod.ysm_head_pitch", 
-                "-14.9904+(-query.mod.ysm_head_yaw)", 
+                "-14.9904+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 0.01964
               ], 
               "lerp_mode": "linear"
@@ -8546,24 +8546,24 @@
             "0.2917": {
               "pre": [
                 "0.3677+0.5*query.mod.ysm_head_pitch", 
-                "-27.4925+(-query.mod.ysm_head_yaw)", 
+                "-27.4925+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -2.6484
               ], 
               "post": [
                 "0.3677+0.5*query.mod.ysm_head_pitch", 
-                "-27.4925+(-query.mod.ysm_head_yaw)", 
+                "-27.4925+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -2.6484
               ], 
               "lerp_mode": "linear"
             }, 
             "0.5": [
               "0.3677+0.5*query.mod.ysm_head_pitch", 
-              "-27.4925+(-query.mod.ysm_head_yaw)", 
+              "-27.4925+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
               -2.6484
             ], 
             "0.75": [
               "0.3677+0.5*query.mod.ysm_head_pitch", 
-              "-27.4925+(-query.mod.ysm_head_yaw)", 
+              "-27.4925+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
               -2.6484
             ]
           }
@@ -8593,12 +8593,12 @@
             "0.125": {
               "pre": [
                 -4.80796, 
-                "15.028-(-query.mod.ysm_head_yaw)", 
+                "15.028-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -0.08348
               ], 
               "post": [
                 -4.80796, 
-                "15.028-(-query.mod.ysm_head_yaw)", 
+                "15.028-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -0.08348
               ], 
               "lerp_mode": "linear"
@@ -8606,12 +8606,12 @@
             "0.2083": {
               "pre": [
                 -4.80796, 
-                "15.028-(-query.mod.ysm_head_yaw)", 
+                "15.028-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -0.08348
               ], 
               "post": [
                 -4.80796, 
-                "15.028-(-query.mod.ysm_head_yaw)", 
+                "15.028-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -0.08348
               ], 
               "lerp_mode": "linear"
@@ -8619,24 +8619,24 @@
             "0.2917": {
               "pre": [
                 1.6675, 
-                "27.448-(-query.mod.ysm_head_yaw)", 
+                "27.448-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 5.46571
               ], 
               "post": [
                 1.6675, 
-                "27.448-(-query.mod.ysm_head_yaw)", 
+                "27.448-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 5.46571
               ], 
               "lerp_mode": "linear"
             }, 
             "0.5": [
               1.6675, 
-              "27.448-(-query.mod.ysm_head_yaw)", 
+              "27.448-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
               5.46571
             ], 
             "0.75": [
               1.6675, 
-              "27.448-(-query.mod.ysm_head_yaw)", 
+              "27.448-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
               5.46571
             ]
           }
@@ -8798,12 +8798,12 @@
             "0.5": {
               "pre": [
                 "-0.2*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)>0)?(-(-query.mod.ysm_head_yaw)+35.1606):(35.1606)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+35.1606):(35.1606)", 
                 "-0.1*query.mod.ysm_head_pitch"
               ], 
               "post": [
                 "-0.2*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)>0)?(-(-query.mod.ysm_head_yaw)+35.1606):(35.1606)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+35.1606):(35.1606)", 
                 "-0.1*query.mod.ysm_head_pitch"
               ], 
               "lerp_mode": "linear"
@@ -8948,12 +8948,12 @@
             "0.5": {
               "pre": [
                 "0.2*query.mod.ysm_head_pitch", 
-                "(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5-35", 
+                "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5-35", 
                 0
               ], 
               "post": [
                 "0.2*query.mod.ysm_head_pitch", 
-                "(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5-35", 
+                "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5-35", 
                 0
               ], 
               "lerp_mode": "linear"
@@ -9010,7 +9010,7 @@
         "AllBody": {
           "rotation": [
             0, 
-            "((-query.mod.ysm_head_yaw)<0)?(-(-query.mod.ysm_head_yaw)):(0)", 
+            "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))):(0)", 
             0
           ]
         }, 
@@ -9053,12 +9053,12 @@
             "0.5": {
               "pre": [
                 "-0.2*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)<0)?(-(-query.mod.ysm_head_yaw)-35.1606):(-35.1606)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-35.1606):(-35.1606)", 
                 "-0.1*query.mod.ysm_head_pitch"
               ], 
               "post": [
                 "-0.2*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)<0)?(-(-query.mod.ysm_head_yaw)-35.1606):(-35.1606)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-35.1606):(-35.1606)", 
                 "-0.1*query.mod.ysm_head_pitch"
               ], 
               "lerp_mode": "linear"
@@ -9066,12 +9066,12 @@
             "0.5833": {
               "pre": [
                 "-0.2*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)<0)?(-(-query.mod.ysm_head_yaw)-35.1606):(-35.1606)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-35.1606):(-35.1606)", 
                 "-0.1*query.mod.ysm_head_pitch"
               ], 
               "post": [
                 "-0.2*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)<0)?(-(-query.mod.ysm_head_yaw)-35.1606):(-35.1606)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-35.1606):(-35.1606)", 
                 "-0.1*query.mod.ysm_head_pitch"
               ], 
               "lerp_mode": "linear"
@@ -9216,12 +9216,12 @@
             "0.5": {
               "pre": [
                 "0.2*query.mod.ysm_head_pitch", 
-                "(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5+35", 
+                "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5+35", 
                 0
               ], 
               "post": [
                 "0.2*query.mod.ysm_head_pitch", 
-                "(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5+35", 
+                "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5+35", 
                 0
               ], 
               "lerp_mode": "linear"
@@ -9229,12 +9229,12 @@
             "0.5833": {
               "pre": [
                 "0.2*query.mod.ysm_head_pitch", 
-                "(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5+35", 
+                "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5+35", 
                 0
               ], 
               "post": [
                 "0.2*query.mod.ysm_head_pitch", 
-                "(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5+35", 
+                "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5+35", 
                 0
               ], 
               "lerp_mode": "linear"
@@ -9296,7 +9296,7 @@
         "AllBody": {
           "rotation": [
             0, 
-            "((-query.mod.ysm_head_yaw)>0)?(-(-query.mod.ysm_head_yaw)):(0)", 
+            "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))):(0)", 
             0
           ]
         }, 
@@ -12647,12 +12647,12 @@
             "0.0": {
               "pre": [
                 "5.8216-0.25*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)>0)?(-(-query.mod.ysm_head_yaw)+42):(42)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+42):(42)", 
                 5.93491
               ], 
               "post": [
                 "5.8216-0.25*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)>0)?(-(-query.mod.ysm_head_yaw)+42):(42)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+42):(42)", 
                 5.93491
               ], 
               "lerp_mode": "linear"
@@ -12660,12 +12660,12 @@
             "2.0": {
               "pre": [
                 "5.8216-0.25*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)>0)?(-(-query.mod.ysm_head_yaw)+42):(42)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+42):(42)", 
                 5.93491
               ], 
               "post": [
                 "5.8216-0.25*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)>0)?(-(-query.mod.ysm_head_yaw)+42):(42)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+42):(42)", 
                 5.93491
               ], 
               "lerp_mode": "linear"
@@ -12807,12 +12807,12 @@
             "0.0": {
               "pre": [
                 "5.8846+0.3*query.mod.ysm_head_pitch", 
-                "-37.1914+(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5", 
+                "-37.1914+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5", 
                 "-5.6557-query.mod.ysm_head_pitch/9"
               ], 
               "post": [
                 "5.8846+0.3*query.mod.ysm_head_pitch", 
-                "-37.1914+(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5", 
+                "-37.1914+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5", 
                 "-5.6557-query.mod.ysm_head_pitch/9"
               ], 
               "lerp_mode": "linear"
@@ -12820,12 +12820,12 @@
             "2.0": {
               "pre": [
                 "5.8846+0.3*query.mod.ysm_head_pitch", 
-                "-37.1914+(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5", 
+                "-37.1914+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5", 
                 "-5.6557-query.mod.ysm_head_pitch/9"
               ], 
               "post": [
                 "5.8846+0.3*query.mod.ysm_head_pitch", 
-                "-37.1914+(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5", 
+                "-37.1914+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5", 
                 "-5.6557-query.mod.ysm_head_pitch/9"
               ], 
               "lerp_mode": "linear"
@@ -12852,7 +12852,7 @@
         "AllBody": {
           "rotation": [
             0, 
-            "((-query.mod.ysm_head_yaw)<0)?(-(-query.mod.ysm_head_yaw)):(0)", 
+            "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))):(0)", 
             0
           ]
         }, 
@@ -12908,12 +12908,12 @@
             "0.0": {
               "pre": [
                 "5.8216-0.25*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)<0)?(-(-query.mod.ysm_head_yaw)-42):(-42)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-42):(-42)", 
                 -5.93491
               ], 
               "post": [
                 "5.8216-0.25*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)<0)?(-(-query.mod.ysm_head_yaw)-42):(-42)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-42):(-42)", 
                 -5.93491
               ], 
               "lerp_mode": "linear"
@@ -12921,12 +12921,12 @@
             "1.9583": {
               "pre": [
                 "5.8216-0.25*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)<0)?(-(-query.mod.ysm_head_yaw)-42):(-42)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-42):(-42)", 
                 -5.93491
               ], 
               "post": [
                 "5.8216-0.25*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)<0)?(-(-query.mod.ysm_head_yaw)-42):(-42)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-42):(-42)", 
                 -5.93491
               ], 
               "lerp_mode": "linear"
@@ -12934,12 +12934,12 @@
             "2.0": {
               "pre": [
                 "5.8216-0.25*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)<0)?(-(-query.mod.ysm_head_yaw)-42):(-42)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-42):(-42)", 
                 -5.93491
               ], 
               "post": [
                 "5.8216-0.25*query.mod.ysm_head_pitch", 
-                "((-query.mod.ysm_head_yaw)<0)?(-(-query.mod.ysm_head_yaw)-42):(-42)", 
+                "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))<0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-42):(-42)", 
                 -5.93491
               ], 
               "lerp_mode": "linear"
@@ -13081,12 +13081,12 @@
             "0.0": {
               "pre": [
                 "5.8846+0.3*query.mod.ysm_head_pitch", 
-                "37.1914+(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5", 
+                "37.1914+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5", 
                 "5.6557-query.mod.ysm_head_pitch/9"
               ], 
               "post": [
                 "5.8846+0.3*query.mod.ysm_head_pitch", 
-                "37.1914+(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5", 
+                "37.1914+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5", 
                 "5.6557-query.mod.ysm_head_pitch/9"
               ], 
               "lerp_mode": "linear"
@@ -13094,12 +13094,12 @@
             "2.0": {
               "pre": [
                 "5.8846+0.3*query.mod.ysm_head_pitch", 
-                "37.1914+(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5", 
+                "37.1914+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5", 
                 "5.6557-query.mod.ysm_head_pitch/9"
               ], 
               "post": [
                 "5.8846+0.3*query.mod.ysm_head_pitch", 
-                "37.1914+(-query.mod.ysm_head_yaw)-query.mod.ysm_head_pitch/5", 
+                "37.1914+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))-query.mod.ysm_head_pitch/5", 
                 "5.6557-query.mod.ysm_head_pitch/9"
               ], 
               "lerp_mode": "linear"
@@ -13126,7 +13126,7 @@
         "AllBody": {
           "rotation": [
             0, 
-            "((-query.mod.ysm_head_yaw)>0)?(-(-query.mod.ysm_head_yaw)):(0)", 
+            "((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))>0)?(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))):(0)", 
             0
           ]
         }, 
@@ -21573,122 +21573,122 @@
             "0.3333": {
               "pre": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)", 
-                "40-(-query.mod.ysm_head_yaw)", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)", 
-                "40-(-query.mod.ysm_head_yaw)", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "0.5": {
               "pre": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*45)*2", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*45)*2", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*45)*2", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*45)*2", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "4.0": {
               "pre": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*45)*2", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*45)*2", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*45)*2", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*45)*2", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "4.4583": {
               "pre": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*360)*2", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*360)*2", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*360)*2", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*360)*2", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "5.0": [
               "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-              "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-              "-20-0.1*(-query.mod.ysm_head_yaw)"
+              "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+              "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
             ], 
             "8.0": {
               "pre": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "8.2917": {
               "pre": [
                 "-95-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-95-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "8.4583": {
               "pre": [
                 "-65-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-65-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "9.0": {
               "pre": [
                 "-65-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-65-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "12.0": {
               "pre": [
                 "-65-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-65-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "-20-0.1*(-query.mod.ysm_head_yaw)"
+                "40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "-20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
@@ -21889,23 +21889,23 @@
             }, 
             "0.3333": [
               "((variable.ysm_ctrl_main??0)==11)?query.mod.ysm_head_pitch:-9.77", 
-              "((variable.ysm_ctrl_main??0)==11)?(-query.mod.ysm_head_yaw):39.66", 
+              "((variable.ysm_ctrl_main??0)==11)?(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))):39.66", 
               "((variable.ysm_ctrl_main??0)==11)?0:-4.56"
             ], 
             "0.5": [
               "((variable.ysm_ctrl_main??0)==11)?query.mod.ysm_head_pitch:-9.77", 
-              "((variable.ysm_ctrl_main??0)==11)?(-query.mod.ysm_head_yaw):39.66", 
+              "((variable.ysm_ctrl_main??0)==11)?(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))):39.66", 
               "((variable.ysm_ctrl_main??0)==11)?0:-4.56"
             ], 
             "12.0": {
               "pre": [
                 "((variable.ysm_ctrl_main??0)==11)?query.mod.ysm_head_pitch:-9.77", 
-                "((variable.ysm_ctrl_main??0)==11)?(-query.mod.ysm_head_yaw):39.66", 
+                "((variable.ysm_ctrl_main??0)==11)?(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))):39.66", 
                 "((variable.ysm_ctrl_main??0)==11)?0:-4.56"
               ], 
               "post": [
                 "((variable.ysm_ctrl_main??0)==11)?query.mod.ysm_head_pitch:-9.77", 
-                "((variable.ysm_ctrl_main??0)==11)?(-query.mod.ysm_head_yaw):39.66", 
+                "((variable.ysm_ctrl_main??0)==11)?(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))):39.66", 
                 "((variable.ysm_ctrl_main??0)==11)?0:-4.56"
               ], 
               "lerp_mode": "linear"
@@ -22637,122 +22637,122 @@
             "0.3333": {
               "pre": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)", 
-                "-40-(-query.mod.ysm_head_yaw)", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)", 
-                "-40-(-query.mod.ysm_head_yaw)", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "0.5": {
               "pre": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*45)*2", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*45)*2", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*45)*2", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*45)*2", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "4.0": {
               "pre": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*45)*2", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*45)*2", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*45)*2", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*45)*2", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "4.5": {
               "pre": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*360)*2", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*360)*2", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*360)*2", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*360)*2", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "5.0": [
               "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-              "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-              "20-0.1*(-query.mod.ysm_head_yaw)"
+              "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+              "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
             ], 
             "8.0": {
               "pre": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-85-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "8.3333": {
               "pre": [
                 "-95-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-95-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "8.5": {
               "pre": [
                 "-65-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-65-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "9.0": {
               "pre": [
                 "-65-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-65-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
             "12.0": {
               "pre": [
                 "-65-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 "-65-(((variable.ysm_ctrl_main??0)==11)?60:query.mod.ysm_head_pitch)+math.sin(q.anim_time*90)*2", 
-                "-40-(-query.mod.ysm_head_yaw)+math.sin(-90+q.anim_time*480)*3", 
-                "20-0.1*(-query.mod.ysm_head_yaw)"
+                "-40-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))+math.sin(-90+q.anim_time*480)*3", 
+                "20-0.1*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
@@ -23221,23 +23221,23 @@
             }, 
             "0.3333": [
               "((variable.ysm_ctrl_main??0)==11)?query.mod.ysm_head_pitch:-9.77", 
-              "-(((variable.ysm_ctrl_main??0)==11)?(-query.mod.ysm_head_yaw):39.66)", 
+              "-(((variable.ysm_ctrl_main??0)==11)?(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))):39.66)", 
               "-(((variable.ysm_ctrl_main??0)==11)?0:-4.56)"
             ], 
             "0.5": [
               "((variable.ysm_ctrl_main??0)==11)?query.mod.ysm_head_pitch:-9.77", 
-              "-(((variable.ysm_ctrl_main??0)==11)?(-query.mod.ysm_head_yaw):39.66)", 
+              "-(((variable.ysm_ctrl_main??0)==11)?(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))):39.66)", 
               "-(((variable.ysm_ctrl_main??0)==11)?0:-4.56)"
             ], 
             "12.0": {
               "pre": [
                 "((variable.ysm_ctrl_main??0)==11)?query.mod.ysm_head_pitch:-9.77", 
-                "-(((variable.ysm_ctrl_main??0)==11)?(-query.mod.ysm_head_yaw):39.66)", 
+                "-(((variable.ysm_ctrl_main??0)==11)?(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))):39.66)", 
                 "-(((variable.ysm_ctrl_main??0)==11)?0:-4.56)"
               ], 
               "post": [
                 "((variable.ysm_ctrl_main??0)==11)?query.mod.ysm_head_pitch:-9.77", 
-                "-(((variable.ysm_ctrl_main??0)==11)?(-query.mod.ysm_head_yaw):39.66)", 
+                "-(((variable.ysm_ctrl_main??0)==11)?(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))):39.66)", 
                 "-(((variable.ysm_ctrl_main??0)==11)?0:-4.56)"
               ], 
               "lerp_mode": "linear"

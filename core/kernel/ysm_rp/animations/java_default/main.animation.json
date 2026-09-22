@@ -2246,7 +2246,7 @@
           "rotation": [
             0, 
             0, 
-            "0.4*(-query.mod.ysm_head_yaw)"
+            "0.4*(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
           ], 
           "position": {
             "0.0": [
@@ -8631,8 +8631,8 @@
         "AllBody": {
           "rotation": [
             0, 
-            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_qiaochiyaw_t,0,0.1);v.ysm_so_qiaochiyaw_t=q.life_time;v.ysm_so_in=(-(-query.mod.ysm_head_yaw));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_qiaochiyaw_x)/v.ysm_so_dt:0;v.ysm_so_qiaochiyaw_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_qiaochiyaw_y=v.ysm_so_qiaochiyaw_y+v.ysm_so_dt*v.ysm_so_qiaochiyaw_yd;v.ysm_so_qiaochiyaw_yd=v.ysm_so_qiaochiyaw_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_qiaochiyaw_y-0.254648*v.ysm_so_qiaochiyaw_yd)/v.ysm_so_k2s;return -1.5*v.ysm_so_qiaochiyaw_y;", 
-            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_qiaochiyaw_t,0,0.1);v.ysm_so_qiaochiyaw_t=q.life_time;v.ysm_so_in=(-(-query.mod.ysm_head_yaw));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_qiaochiyaw_x)/v.ysm_so_dt:0;v.ysm_so_qiaochiyaw_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_qiaochiyaw_y=v.ysm_so_qiaochiyaw_y+v.ysm_so_dt*v.ysm_so_qiaochiyaw_yd;v.ysm_so_qiaochiyaw_yd=v.ysm_so_qiaochiyaw_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_qiaochiyaw_y-0.254648*v.ysm_so_qiaochiyaw_yd)/v.ysm_so_k2s;return 0.6*v.ysm_so_qiaochiyaw_y;"
+            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_qiaochiyaw_t,0,0.1);v.ysm_so_qiaochiyaw_t=q.life_time;v.ysm_so_in=(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_qiaochiyaw_x)/v.ysm_so_dt:0;v.ysm_so_qiaochiyaw_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_qiaochiyaw_y=v.ysm_so_qiaochiyaw_y+v.ysm_so_dt*v.ysm_so_qiaochiyaw_yd;v.ysm_so_qiaochiyaw_yd=v.ysm_so_qiaochiyaw_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_qiaochiyaw_y-0.254648*v.ysm_so_qiaochiyaw_yd)/v.ysm_so_k2s;return -1.5*v.ysm_so_qiaochiyaw_y;", 
+            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_qiaochiyaw_t,0,0.1);v.ysm_so_qiaochiyaw_t=q.life_time;v.ysm_so_in=(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_qiaochiyaw_x)/v.ysm_so_dt:0;v.ysm_so_qiaochiyaw_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_qiaochiyaw_y=v.ysm_so_qiaochiyaw_y+v.ysm_so_dt*v.ysm_so_qiaochiyaw_yd;v.ysm_so_qiaochiyaw_yd=v.ysm_so_qiaochiyaw_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_qiaochiyaw_y-0.254648*v.ysm_so_qiaochiyaw_yd)/v.ysm_so_k2s;return 0.6*v.ysm_so_qiaochiyaw_y;"
           ]
         }, 
         "AllHead": {
@@ -8767,7 +8767,7 @@
         "Head": {
           "rotation": [
             "query.mod.ysm_head_pitch", 
-            "(-query.mod.ysm_head_yaw)", 
+            "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
             0
           ]
         }, 
@@ -8917,7 +8917,7 @@
         "MHead": {
           "rotation": [
             "query.mod.ysm_head_pitch", 
-            "math.clamp((-query.mod.ysm_head_yaw),-60,60)", 
+            "math.clamp((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))),-60,60)", 
             0
           ]
         }, 
@@ -12438,8 +12438,8 @@
         "AllBody": {
           "rotation": [
             0, 
-            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_qiaochiyaw_t,0,0.1);v.ysm_so_qiaochiyaw_t=q.life_time;v.ysm_so_in=(-(-query.mod.ysm_head_yaw));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_qiaochiyaw_x)/v.ysm_so_dt:0;v.ysm_so_qiaochiyaw_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_qiaochiyaw_y=v.ysm_so_qiaochiyaw_y+v.ysm_so_dt*v.ysm_so_qiaochiyaw_yd;v.ysm_so_qiaochiyaw_yd=v.ysm_so_qiaochiyaw_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_qiaochiyaw_y-0.254648*v.ysm_so_qiaochiyaw_yd)/v.ysm_so_k2s;return -1.5*v.ysm_so_qiaochiyaw_y;", 
-            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_qiaochiyaw_t,0,0.1);v.ysm_so_qiaochiyaw_t=q.life_time;v.ysm_so_in=(-(-query.mod.ysm_head_yaw));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_qiaochiyaw_x)/v.ysm_so_dt:0;v.ysm_so_qiaochiyaw_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_qiaochiyaw_y=v.ysm_so_qiaochiyaw_y+v.ysm_so_dt*v.ysm_so_qiaochiyaw_yd;v.ysm_so_qiaochiyaw_yd=v.ysm_so_qiaochiyaw_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_qiaochiyaw_y-0.254648*v.ysm_so_qiaochiyaw_yd)/v.ysm_so_k2s;return 0.6*v.ysm_so_qiaochiyaw_y;"
+            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_qiaochiyaw_t,0,0.1);v.ysm_so_qiaochiyaw_t=q.life_time;v.ysm_so_in=(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_qiaochiyaw_x)/v.ysm_so_dt:0;v.ysm_so_qiaochiyaw_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_qiaochiyaw_y=v.ysm_so_qiaochiyaw_y+v.ysm_so_dt*v.ysm_so_qiaochiyaw_yd;v.ysm_so_qiaochiyaw_yd=v.ysm_so_qiaochiyaw_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_qiaochiyaw_y-0.254648*v.ysm_so_qiaochiyaw_yd)/v.ysm_so_k2s;return -1.5*v.ysm_so_qiaochiyaw_y;", 
+            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_qiaochiyaw_t,0,0.1);v.ysm_so_qiaochiyaw_t=q.life_time;v.ysm_so_in=(-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))));v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_qiaochiyaw_x)/v.ysm_so_dt:0;v.ysm_so_qiaochiyaw_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_qiaochiyaw_y=v.ysm_so_qiaochiyaw_y+v.ysm_so_dt*v.ysm_so_qiaochiyaw_yd;v.ysm_so_qiaochiyaw_yd=v.ysm_so_qiaochiyaw_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_qiaochiyaw_y-0.254648*v.ysm_so_qiaochiyaw_yd)/v.ysm_so_k2s;return 0.6*v.ysm_so_qiaochiyaw_y;"
           ]
         }, 
         "AllHead": {
@@ -12452,7 +12452,7 @@
         "Head": {
           "rotation": [
             "query.mod.ysm_head_pitch", 
-            "(-query.mod.ysm_head_yaw)", 
+            "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
             0
           ]
         }, 
@@ -13393,12 +13393,12 @@
               "pre": [
                 4, 
                 0, 
-                "5+(-query.mod.ysm_head_yaw)"
+                "5+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 4, 
                 0, 
-                "5+(-query.mod.ysm_head_yaw)"
+                "5+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
@@ -13406,12 +13406,12 @@
               "pre": [
                 6, 
                 0, 
-                "-0.625+(-query.mod.ysm_head_yaw)"
+                "-0.625+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 6, 
                 0, 
-                "-0.625+(-query.mod.ysm_head_yaw)"
+                "-0.625+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
@@ -13419,12 +13419,12 @@
               "pre": [
                 4, 
                 0, 
-                "-5+(-query.mod.ysm_head_yaw)"
+                "-5+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 4, 
                 0, 
-                "-5+(-query.mod.ysm_head_yaw)"
+                "-5+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
@@ -13432,12 +13432,12 @@
               "pre": [
                 6, 
                 0, 
-                "0.625+(-query.mod.ysm_head_yaw)"
+                "0.625+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 6, 
                 0, 
-                "0.625+(-query.mod.ysm_head_yaw)"
+                "0.625+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }, 
@@ -13445,12 +13445,12 @@
               "pre": [
                 4, 
                 0, 
-                "5+(-query.mod.ysm_head_yaw)"
+                "5+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "post": [
                 4, 
                 0, 
-                "5+(-query.mod.ysm_head_yaw)"
+                "5+(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
               ], 
               "lerp_mode": "linear"
             }
@@ -14317,12 +14317,12 @@
             "0.0": {
               "pre": [
                 -90, 
-                "(-query.mod.ysm_head_yaw)", 
+                "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -5
               ], 
               "post": [
                 -90, 
-                "(-query.mod.ysm_head_yaw)", 
+                "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -5
               ], 
               "lerp_mode": "linear"
@@ -14330,12 +14330,12 @@
             "0.5": {
               "pre": [
                 -90, 
-                "(-query.mod.ysm_head_yaw)", 
+                "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 5
               ], 
               "post": [
                 -90, 
-                "(-query.mod.ysm_head_yaw)", 
+                "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 5
               ], 
               "lerp_mode": "linear"
@@ -14343,12 +14343,12 @@
             "1.0": {
               "pre": [
                 -90, 
-                "(-query.mod.ysm_head_yaw)", 
+                "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -5
               ], 
               "post": [
                 -90, 
-                "(-query.mod.ysm_head_yaw)", 
+                "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
                 -5
               ], 
               "lerp_mode": "linear"
@@ -14490,7 +14490,7 @@
           "rotation": [
             5, 
             0, 
-            "(-query.mod.ysm_head_yaw)"
+            "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))"
           ], 
           "position": [
             0, 
@@ -14670,7 +14670,7 @@
         "Head": {
           "rotation": [
             -90, 
-            "(-query.mod.ysm_head_yaw)", 
+            "(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
             0
           ], 
           "position": [
@@ -19114,14 +19114,14 @@
         "MAllBody": {
           "rotation": [
             "-query.mod.ysm_head_pitch", 
-            "-(-query.mod.ysm_head_yaw)", 
+            "-(-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))", 
             0
           ]
         }, 
         "MHead": {
           "rotation": [
             "query.mod.ysm_head_pitch", 
-            "math.clamp((-query.mod.ysm_head_yaw),-60,60)", 
+            "math.clamp((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85))),-60,60)", 
             0
           ]
         }, 
@@ -25730,14 +25730,14 @@
       "bones": {
         "RightEyesBase": {
           "position": [
-            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_yanjingyaw_t,0,0.1);v.ysm_so_yanjingyaw_t=q.life_time;v.ysm_so_in=((-query.mod.ysm_head_yaw)/180);v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_yanjingyaw_x)/v.ysm_so_dt:0;v.ysm_so_yanjingyaw_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_yanjingyaw_y=v.ysm_so_yanjingyaw_y+v.ysm_so_dt*v.ysm_so_yanjingyaw_yd;v.ysm_so_yanjingyaw_yd=v.ysm_so_yanjingyaw_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_yanjingyaw_y-0.254648*v.ysm_so_yanjingyaw_yd)/v.ysm_so_k2s;return v.ysm_so_yanjingyaw_y;", 
+            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_yanjingyaw_t,0,0.1);v.ysm_so_yanjingyaw_t=q.life_time;v.ysm_so_in=((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))/180);v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_yanjingyaw_x)/v.ysm_so_dt:0;v.ysm_so_yanjingyaw_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_yanjingyaw_y=v.ysm_so_yanjingyaw_y+v.ysm_so_dt*v.ysm_so_yanjingyaw_yd;v.ysm_so_yanjingyaw_yd=v.ysm_so_yanjingyaw_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_yanjingyaw_y-0.254648*v.ysm_so_yanjingyaw_yd)/v.ysm_so_k2s;return v.ysm_so_yanjingyaw_y;", 
             "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_yanjingpitch_t,0,0.1);v.ysm_so_yanjingpitch_t=q.life_time;v.ysm_so_in=(query.mod.ysm_head_pitch/360);v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_yanjingpitch_x)/v.ysm_so_dt:0;v.ysm_so_yanjingpitch_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_yanjingpitch_y=v.ysm_so_yanjingpitch_y+v.ysm_so_dt*v.ysm_so_yanjingpitch_yd;v.ysm_so_yanjingpitch_yd=v.ysm_so_yanjingpitch_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_yanjingpitch_y-0.254648*v.ysm_so_yanjingpitch_yd)/v.ysm_so_k2s;return v.ysm_so_yanjingpitch_y;", 
             0
           ]
         }, 
         "LeftEyesBase": {
           "position": [
-            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_yanjingyaw_t,0,0.1);v.ysm_so_yanjingyaw_t=q.life_time;v.ysm_so_in=((-query.mod.ysm_head_yaw)/180);v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_yanjingyaw_x)/v.ysm_so_dt:0;v.ysm_so_yanjingyaw_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_yanjingyaw_y=v.ysm_so_yanjingyaw_y+v.ysm_so_dt*v.ysm_so_yanjingyaw_yd;v.ysm_so_yanjingyaw_yd=v.ysm_so_yanjingyaw_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_yanjingyaw_y-0.254648*v.ysm_so_yanjingyaw_yd)/v.ysm_so_k2s;return v.ysm_so_yanjingyaw_y;", 
+            "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_yanjingyaw_t,0,0.1);v.ysm_so_yanjingyaw_t=q.life_time;v.ysm_so_in=((-(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0:math.clamp(query.target_y_rotation,-85,85)))/180);v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_yanjingyaw_x)/v.ysm_so_dt:0;v.ysm_so_yanjingyaw_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_yanjingyaw_y=v.ysm_so_yanjingyaw_y+v.ysm_so_dt*v.ysm_so_yanjingyaw_yd;v.ysm_so_yanjingyaw_yd=v.ysm_so_yanjingyaw_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_yanjingyaw_y-0.254648*v.ysm_so_yanjingyaw_yd)/v.ysm_so_k2s;return v.ysm_so_yanjingyaw_y;", 
             "v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_yanjingpitch_t,0,0.1);v.ysm_so_yanjingpitch_t=q.life_time;v.ysm_so_in=(query.mod.ysm_head_pitch/360);v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-v.ysm_so_yanjingpitch_x)/v.ysm_so_dt:0;v.ysm_so_yanjingpitch_x=v.ysm_so_in;v.ysm_so_k2s=math.max(0.0253303,math.max(v.ysm_so_dt*v.ysm_so_dt*0.5+v.ysm_so_dt*0.254648*0.5,v.ysm_so_dt*0.254648));v.ysm_so_yanjingpitch_y=v.ysm_so_yanjingpitch_y+v.ysm_so_dt*v.ysm_so_yanjingpitch_yd;v.ysm_so_yanjingpitch_yd=v.ysm_so_yanjingpitch_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_yanjingpitch_y-0.254648*v.ysm_so_yanjingpitch_yd)/v.ysm_so_k2s;return v.ysm_so_yanjingpitch_y;", 
             0
           ]

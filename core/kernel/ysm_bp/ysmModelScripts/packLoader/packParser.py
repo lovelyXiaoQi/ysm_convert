@@ -421,6 +421,17 @@ _JAVA_GLIDE_FIX_KEY = "ysm_java_glide_fix"
 _JAVA_GLIDE_FIX_ANIMATION = "animation.ysm.java_glide_fix"
 _JAVA_GLIDE_STATE_KEY = "ysm_java_glide_state"
 _JAVA_GLIDE_STATE_CONTROLLER = "controller.animation.ysm.java_glide_state"
+# 蹲下的渲染偏移(2026-09-23 作者反馈"蹲下浮空"): Java 原版 PlayerRenderer.getRenderOffset 在 isCrouching() 时把整个玩家
+# 下移 0.125 格, EntityRenderDispatcher 在抛 RenderPlayerEvent.Pre 之前就平移好了, YSM 的 CustomPlayerRenderer 在事件里
+# 接管渲染照样吃到 —— 模型自己的 sneak/sneaking 动画之外还叠这 0.125 格, 作者按这个总量调的脚底。基岩没有这一步(原版靠
+# animation.player.sneaking 把 body 骨骼降 2 单位; 引擎只给附件渲染 HumanoidAdditionalRendering 平移了 -0.125, 模型本体不动),
+# 移植模型蹲下时脚离地 0.125 格。主包在 ysm_glide_root 上补位移: 0.125 格 × 8/7(与其它 Java 写死量同一换算比, 脚底才落回
+# 地面) ÷ 实体缩放 → 模型单位(实体缩放 0.8 时 2.857 单位)。条件照 Java Pose.CROUCHING: 潜行且不在游泳/爬行/滑翔/睡觉/
+# 骑乘/创造飞行(Java 的姿态判定里这些都压过 CROUCHING); 腾空潜行照样偏移(Java 同样)。没有 ysm_glide_root 的旧产物空转。
+_JAVA_SNEAK_OFFSET_KEY = "ysm_java_sneak_offset"
+_JAVA_SNEAK_OFFSET_ANIMATION = "animation.ysm.java_sneak_offset"
+_JAVA_CROUCH_POSE = ("query.is_sneaking&&!query.is_swimming&&!query.is_crawling&&!query.is_gliding"
+                     "&&!query.is_sleeping&&!query.is_riding&&!(query.mod.ysm_is_flying>0.5)")
 # 输入状态动画逐帧维护的变量, 加上挥击状态机 on_entry 记下的已见序号: 不参与"文件扫描变量补 0"
 # 初始化(与占用变量同理)。读取处都带 ?? 回落; 补 0 会让回落失效, 且移植工具只扫作者文件、
 # 修复工具连生成的挥击状态机一起扫, 两条路径的初始化表对不上
@@ -3387,6 +3398,9 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
         mergedAnimEntries = mergedAnimEntries + [(_JAVA_GLIDE_FIX_KEY, _JAVA_GLIDE_FIX_ANIMATION)]
         autoCtlEntries = autoCtlEntries + [(_JAVA_GLIDE_STATE_KEY, _JAVA_GLIDE_STATE_CONTROLLER)]
         playerAnimates.append((_JAVA_GLIDE_STATE_KEY, _CONTROLLER_ANIMATE_GATE))
+        # 蹲下的渲染偏移(见 _JAVA_SNEAK_OFFSET_KEY 上方注): 直挂, 条件 = 双门 && Java 的 CROUCHING 姿态
+        mergedAnimEntries = mergedAnimEntries + [(_JAVA_SNEAK_OFFSET_KEY, _JAVA_SNEAK_OFFSET_ANIMATION)]
+        playerAnimates.append((_JAVA_SNEAK_OFFSET_KEY, _CONTROLLER_ANIMATE_GATE + "&&" + _JAVA_CROUCH_POSE))
         # 原版动画栈整体让位 + Java 代码级头部跟踪的等价物(见常量注)
         mergedAnimEntries = mergedAnimEntries + [(_JAVA_HEAD_LOOK_KEY, _JAVA_HEAD_LOOK_ANIMATION)]
         playerAnimates.append((_VANILLA_ROOT_KEY, _VANILLA_ROOT_CONDITION))

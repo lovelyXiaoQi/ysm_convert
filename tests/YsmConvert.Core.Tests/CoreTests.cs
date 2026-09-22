@@ -314,6 +314,19 @@ public class CollectionCoverTests : IDisposable
     }
 }
 
+/// <summary>
+/// 内核定位的两个测试类都要摆弄同一个**进程级**环境变量 YSMCONV_CORE(一个设成自己的临时 core, 一个置空), 而 xUnit
+/// 默认让不同测试类并行: 谁的构造函数落在对方的测试执行期间, 就把对方的前提踩掉 —— 2026-09-23 实测默认并行下约三次
+/// 跑挂一次, 失败在两个类之间漂移(变量被置空时 RefusesToFallBackWhenBundledRuntimeIsGutted 拿不到"不完整"的文案,
+/// 变量被设上时 DevBuildRunsTheProjectDevtools 的 FromProject 为假); 关掉集合并行连跑六次全过。
+/// 两个类挂同一个集合名即可串行, 其余测试类照旧并行。
+/// </summary>
+public static class KernelEnvCollection
+{
+    public const string Name = "KernelEnv";
+}
+
+[Collection(KernelEnvCollection.Name)]
 public class KernelLocatorTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "ysmconv-loc-" + Guid.NewGuid().ToString("N"));
@@ -367,7 +380,9 @@ public class KernelLocatorTests : IDisposable
     }
 }
 
-/// <summary>内核来源: 开发构建跑工程的 devtools(改了规则立刻生效), 发布包跑自带快照。</summary>
+/// <summary>内核来源: 开发构建跑工程的 devtools(改了规则立刻生效), 发布包跑自带快照。
+/// 与 KernelLocatorTests 同一集合(共用进程级 YSMCONV_CORE, 见那边的注)。</summary>
+[Collection(KernelEnvCollection.Name)]
 public class KernelSourceTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "ysmconv-src-" + Guid.NewGuid().ToString("N"));

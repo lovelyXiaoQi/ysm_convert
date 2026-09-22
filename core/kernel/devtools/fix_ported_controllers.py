@@ -173,6 +173,10 @@ _OLD_TO_NEW_EXPANSIONS = [
     # (后者只有 36 处, 重新移植可得精确映射); 动画文本同样迁移
     ("(query.modified_move_speed*1.9)", port._GROUND_SPEED_EXPR),
     (port._LEGACY_GROUND_SPEED_EXPR, port._GROUND_SPEED_EXPR),
+    # Java ysm.head_yaw / query.head_x_rotation: 2026-09-23 前映射成主包的 query.mod.ysm_head_yaw(身体项是逐 tick 原值,
+    # 与整模的插值身体混用, 身体在转时按 tick 锯齿), 现读渲染上下文的 query.target_y_rotation(见 port.HEAD_YAW_RELATIVE 注)。
+    # 括号取负形态只由移植映射产出, 作者手写不会恰好是这串; 新式不含旧串, 迁移幂等
+    (port._LEGACY_HEAD_YAW_EXPR, port._HEAD_YAW_EXPR),
     # Java query.is_jumping = 腾空且不飞行不骑乘(QueryBinding); 2026-09-18 前原样透传成基岩同名 query, 而那是
     # "跳跃键按住"(实机: 点按只有 2 帧为 1, 松键后仍在空中归 0, 纯下落全程 0) —— 各包挥击时间线拿它选跳劈。
     # 本工具只处理移植包, 产物里的 is_jumping 都来自 Java 原文; 新式不含旧串, 迁移幂等

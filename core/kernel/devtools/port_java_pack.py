@@ -706,21 +706,34 @@ _LEGACY_GROUND_SPEED_EXPR = "((query.modified_move_speed>0.05)?query.modified_mo
 # 世界里取值不变(query.is_in_ui 世界中为 0, is_paperdoll 世界中为 0, 两个界面变量只由 YSM 界面纸娃娃置 1)
 _UI_FULL_FOOD_LEVEL = ("((query.is_in_ui||variable.is_paperdoll"
                        "||((variable.ysm_show??0)+(variable.ysm_preview??0))>0)?20.0:query.mod.ysm_food_level)")
+# 头相对身体的偏航(正 = 视线在身体右侧), 读引擎在**渲染上下文**里算的 query.target_y_rotation: 它 = 视角 - 渲染用的插值
+# 身体偏航, 已卷绕到 ±180(实机跨 ±180 时稳定), 与整模同一套插值 —— 原版玩家头部动画 look_at_target 读的就是它。
+# 2026-09-23 前读主包逐帧写的 query.mod.ysm_head_yaw = GetRot - GetBodyRot: 身体项是**逐 tick 原值**(引擎的
+# get_entity_body_rotation 读 mYBodyRot, 渲染器用相邻的插值版), 身体在转时"插值身体 + (视角 - 原值身体)"按 tick 锯齿,
+# 头与所有跟随 head_yaw 的骨骼(手持姿势/眼睛/饰品)一起抖(作者反馈"跑步转向抖动"; 实机逐帧采样: 原地连续转身单帧
+# 最大跳 10.8°、260 帧里方向反转 79 次, 跑步转向单帧 13.7°; 本口径与视角逐帧一致)。±85 同 Java 的 clamp;
+# 界面纸娃娃没有实体(见 PREVIEW_UI_GATE 注)取 0 = Java 界面口径(预览实体头身同向)。修复工具整串迁移旧形态。
+HEAD_YAW_RELATIVE = ("(((variable.ysm_show??0)+(variable.ysm_preview??0)>0)?0"
+                     ":math.clamp(query.target_y_rotation,-85,85))")
+_HEAD_YAW_EXPR = "(-" + HEAD_YAW_RELATIVE + ")"
+# 旧映射形态(修复工具迁移的识别文本)
+_LEGACY_HEAD_YAW_EXPR = "(-query.mod.ysm_head_yaw)"
 _JAVA_NAME_MAP = [
-    # —— 主包已同步的 mod 值 ——
-    # !! 符号: Java 交给动画的两个量**都是取负后的**(AnimatableEntity.java:322-324:
-    #    headPitch = -rawHeadPitch; netHeadYaw = -clamp(wrapDegrees(netHeadYaw),±85))。
+    # —— 主包已同步的 mod 值 / 引擎渲染上下文量 ——
+    # !! 符号: Java 交给动画的两个量**都是取负后的**(AnimatableEntity.java:322-325:
+    #    headPitch = -rawHeadPitch; netHeadYaw = -clamp(wrapDegrees(插值头 - 插值身体),±85))。
     #    主包 query.mod.ysm_head_pitch 恰好也是 -pitch(molangSystem: headPitch=-headRot[0])
-    #    → 同号直通; 而 query.mod.ysm_head_yaw 是 **+**(headRot[1]-bodyRot, 未取负)
+    #    → 同号直通(本机逐渲染帧写视角原值; 引擎的 target_x_rotation 按 tick 插值, 会滞后视角);
+    #    偏航的基岩量(target_y_rotation / 旧的 ysm_head_yaw)都是 **+**(视角 - 身体, 未取负)
     #    → 必须补一个负号, 否则 Java 包里所有吃 head_yaw 的表达式(眼球/头发/饰品跟随)
     #    左右相反。站立时 head-body 差≈0 看不出来, 一走一跑就明显(用户 2026-09-03 实测
-    #    "奔跑/行走起来看的方向不对")。主包变量本身不动 —— 旧版副包与内置模型按现符号写的。
-    ("head_yaw", "(-query.mod.ysm_head_yaw)"),
+    #    "奔跑/行走起来看的方向不对")。
+    ("head_yaw", _HEAD_YAW_EXPR),
     ("head_pitch", "query.mod.ysm_head_pitch"),
     # !! Java 的 query.head_x_rotation = netHeadYaw(偏航), head_y_rotation = 俯仰
     # (QueryBinding.java:58-59, 与 ysm.head_yaw/head_pitch 完全同值) —— 与基岩
     # 同名 query 的轴向**正好相反**(基岩 x=俯仰)。同名放行会"摇头变点头", 必须交换。
-    ("head_x_rotation", "(-query.mod.ysm_head_yaw)"),
+    ("head_x_rotation", _HEAD_YAW_EXPR),
     ("head_y_rotation", "query.mod.ysm_head_pitch"),
     ("food_level", _UI_FULL_FOOD_LEVEL),
     ("armor_value", "query.mod.ysm_armor_value"),
@@ -1714,7 +1727,7 @@ def RewriteValueScopes(text):
 # 改成先一次扫描收集文本里出现的 <前缀>.<标识符>, 不在集合里的名字直接跳过。严格等价的三个前提(测试守护):
 # ① 映射表的名字全是纯标识符 —— 原正则是 \b前缀\.名字\b, 能命中就必定以完整标识符出现在集合里;
 # ② 替换体里没有反斜杠 —— 模板即字面量, subn 的计数等于原先 findall 的匹配数, 插入的正是替换体本身;
-# ③ 替换体可能带出新的前缀名(35 条, 如 head_yaw → (-query.mod.ysm_head_yaw)), 命中后把替换体里的前缀名并进
+# ③ 替换体可能带出新的前缀名(35 条, 如 head_yaw → 含 query.target_y_rotation 的头偏航式), 命中后把替换体里的前缀名并进
 #    集合; 原正则两端的 \b 保证替换体不会与两侧原文拼出新名字, 所以只看替换体就够, 逐条替换的原语义不变。
 _JAVA_PREFIXED_NAME = re.compile(r"\b(?:query|q|ysm)\.([A-Za-z_][A-Za-z0-9_]*)")
 _CTRL_PREFIXED_NAME = re.compile(r"\bctrl\.([A-Za-z_][A-Za-z0-9_]*)")
@@ -3430,7 +3443,7 @@ def RewriteAnimations(srcPath, dstPath, namespace, molangDefaults=None, molangRe
     finalText = PortMolangText(
         json.dumps(data, ensure_ascii=False, indent=2), molangDefaults, molangReport)
     # molang 兼容层会把**纯数值**帧里的 Java token 换成表达式
-    # (`head_yaw` → `(-query.mod.ysm_head_yaw)` 等), 于是上面那轮
+    # (`head_yaw` → 头偏航式 `_HEAD_YAW_EXPR` 等), 于是上面那轮
     # NormalizeExpressionKeyframes 看到的“纯数值帧”到这里又变成了表达式帧 ——
     # 邻域判定必须在替换**之后**再跑一遍, 否则产物里会残留一批
     # “catmullrom 挨着表达式”(实测 ref_warden 重移植: 残 18 处, 靠修复工具才补上)

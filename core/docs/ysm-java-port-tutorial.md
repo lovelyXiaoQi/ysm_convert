@@ -475,6 +475,7 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
 | 原版动画栈 | 整体替换原版模型渲染,原版 HumanoidModel 动画一条都不作用;头部跟踪由代码叠加 headPitch/netHeadYaw | 玩家实体自带原版 `root` 控制器(move.arms/legs、look_at_target、bob、attack…),Java 模式主包把 `root` 收敛为 `variable.is_first_person`(只在第三人称/纸娃娃域关停),再以主包自带的 `animation.ysm.java_head_look`(键 `ysm_java_head_look`)补回 Java 的代码级头部跟踪 | 无感;不关停就是原版腿臂摆动叠在 Java 动画上的鬼畜。⚠️ **第一人称必须放行**:原版 root 的 `first_person` 状态是基岩侧手臂摆位的唯一来源(Java 的 FP 是引擎独立渲染域),整体置 `0` 会让手臂停在建模原位、贯穿屏幕。⚠️ 头部跟踪**不能直接借原版 `animation.humanoid.look_at_target.default`**:它带 `relative_to: {rotation: entity}`,按实体世界朝向摆 `Head` 骨骼——原版 humanoid 的 head 是根骨骼直接子级故等价,YSM 模型的 `Head` 埋在十层父级下,实体空间会顶掉沿途父骨骼旋转,实机表现为"看正前方头却是歪的" |
 | 动画缺失回退 | 自动回落官方 default 模型动画 | **缺失就是缺失**(刻意设计,不回退旧资源);要 Java 式兜底, 安装 `java_default` 基线包即可(Java 模式按声明形态自动判定, 无需开关) | 缺的动画表现为无动作而非"别人的动作" |
 | **鞘翅滑翔的实体层旋转** | 渲染器继承 `LivingEntityRenderer`(不是 `PlayerRenderer`),实体层**一点不转**(死亡翻转与激流旋转也被显式清掉)——滑翔姿态全靠模型自己的 `elytra_fly` 动画摆(官方包普遍把根骨骼转 90° 让身体躺平) | 引擎在 `query.is_gliding` 时给**整个模型**额外加 `90 + pitch` 度俯仰(`ActorRenderData::getDamageOrGlidingXYRotation`;2026-09-18 实机定量:绕脚底的**纯旋转、不带平移**,骨骼矩阵里查不到) | ⚠️ 两者叠加 = 水平飞行时模型头朝下。移植/修复工具给主几何外包 `ysm_glide_root`(枢轴 0、无变换),主包 `animation.ysm.java_glide_fix` 在它上面反向转 `-(90+pitch)*clamp(4t²)`(Java 的渐入系数),由共享控制器 `controller.animation.ysm.java_glide_state` 进滑翔态时播。**手写包不用管**,但别给骨骼起 `ysm_glide_root` 这个名字 |
+| **蹲下的渲染偏移** | 原版 `PlayerRenderer.getRenderOffset` 在 `isCrouching()`(姿态 CROUCHING:潜行且不在游泳/爬行/滑翔/睡觉/创造飞行)时把整个玩家**下移 0.125 格**,`EntityRenderDispatcher` 在抛 `RenderPlayerEvent.Pre` 之前就平移好了,YSM 在事件里接管渲染照样吃到 —— 模型自己的 `sneak`/`sneaking` 动画之外还叠这 0.125 格,作者是按这个总量把脚底调到地面的 | 引擎不给模型本体加这一步(原版靠 `animation.player.sneaking` 把 `body` 骨骼降 2 单位,只有附件渲染 `HumanoidAdditionalRendering` 补了 -0.125),移植模型蹲下时脚离地 0.125 格 | 主包 `animation.ysm.java_sneak_offset`(键 `ysm_java_sneak_offset`)在 `ysm_glide_root` 上补位移 `-(0.125 格 × 8/7) ÷ 实体缩放`(与其余 Java 写死量同一换算比,实体缩放 0.8 时 2.857 单位),条件照 Java 的 CROUCHING 姿态合成。**手写包不用管**;没有 `ysm_glide_root` 的旧产物跑一次修复工具补包装骨骼即可 |
 | `riptide`(激流) | ✅ | ❌ 引擎无对应查询 | 激流姿态缺失 |
 | GUI `hover`/`hover_fadeout`/`focus` | ✅ | ❌ 网易 UI 不驱动模型 hover;预览走 `preview_animation` + 预览动作表 + `preview_parallel` | 选择界面交互动画不同 |
 | 挥动/使用互斥 | `PAUSE`(暂停不清骨骼) | molang 条件门 | 极端时序下过渡细节略不同 |
@@ -552,7 +553,7 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
 
 | Java 写法 | 网易替换 | 备注 |
 |---|---|---|
-| `query.head_x_rotation` | `query.mod.ysm_head_yaw` | ⚠️ Java 此名是**偏航**(同名反轴陷阱) |
+| `query.head_x_rotation` / `ysm.head_yaw` | 取负的 `math.clamp(query.target_y_rotation,-85,85)`(界面纸娃娃取 0) | ⚠️ Java 此名是**偏航**(同名反轴陷阱)。别用 `query.mod.ysm_head_yaw`:它减的是逐 tick 身体原值,跑步转向时头和跟着头转的部件会抖 |
 | `query.head_y_rotation` | `query.mod.ysm_head_pitch` | ⚠️ Java 此名是**俯仰** |
 | `query.ground_speed` | `query.mod.ysm_ground_speed` | Java 是 `getDeltaMovement` **摩擦后**速度(步行≈2.36、创造飞行≈9.9);主包按实际位移逐帧计算 × 摩擦系数(地面 0.546/空中 0.91/水 0.8/鞘翅 0.99),静止精确为 0,作者状态机的 `==0` 静止判据成立 |
 | `ysm.ground_speed2` | `query.mod.ysm_ground_speed2` | 每 tick 水平位移 × 20(格/秒);飞行/下落时照样有值(早先的 `modified_move_speed×1.9` 只是走路步频量,末影龙娘疾跑飞行前倾因此只有几度) |

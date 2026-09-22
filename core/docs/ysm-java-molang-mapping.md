@@ -90,7 +90,7 @@ use 动画多为 `hold_on_last_frame`,按 `all_animations_finished` 出态会在
 
 | Java 写法 | Java 实际语义 | 基岩同名 query 语义 | 正确替换 |
 |------|------|------|------|
-| `query.head_x_rotation` | **头部偏航**(=ysm.head_yaw,度,±85) | 头部**俯仰** | 🔶 `query.mod.ysm_head_yaw` |
+| `query.head_x_rotation` | **头部偏航**(=ysm.head_yaw,度,±85) | 头部**俯仰** | ✅ 与 `ysm.head_yaw` 同式:取负的 `math.clamp(query.target_y_rotation,-85,85)`(见"一") |
 | `query.head_y_rotation` | **头部俯仰**(=ysm.head_pitch) | 头部**偏航** | 🔶 `query.mod.ysm_head_pitch` |
 | `query.is_item_name_any('mainhand',...)` | 槽位用短名 | 槽位要全称 | 参数改写 `'slot.weapon.mainhand'`(armor 同理;`equipped_item_any/all_tags`、`max/remaining_durability` 同族) |
 | `query.life_time` | 模型累计动画秒(换模型清零) | 实体存活秒 | 保留同名(sin 摆动等价,仅相位差;绝对时长判断不等价) |
@@ -156,8 +156,8 @@ Java 的 `#minecraft:swords` 这类原版 tag **在基岩不存在**(基岩是�
 
 | Java | 主包提供 | 说明 |
 |------|----------|------|
-| `head_yaw` / `query.head_x_rotation` | 🔶 `query.mod.ysm_head_yaw` | 头相对身体偏航,度,已 clamp ±85(对齐 Java) |
-| `head_pitch` / `query.head_y_rotation` | 🔶 `query.mod.ysm_head_pitch` | 俯仰,度,正=抬头 |
+| `head_yaw` / `query.head_x_rotation` | ✅ `(-(界面门?0:math.clamp(query.target_y_rotation,-85,85)))`(`port_java_pack.HEAD_YAW_RELATIVE`) | 头相对身体偏航,度,clamp ±85,取负对齐 Java(`netHeadYaw=-clamp(插值头-插值身体)`)。`target_y_rotation` 是引擎在**渲染上下文**里算的"视角 - 渲染用的插值身体偏航",已卷绕 ±180,与整模同一时钟(原版玩家头部 look_at_target 读的就是它);界面纸娃娃没有实体,取 0(= Java 界面口径)。**不读 `query.mod.ysm_head_yaw`**:它是主包的 `GetRot-GetBodyRot`,身体项是逐 tick 原值,整模却按插值身体渲染 —— 身体在转(跑步转向、原地连续转身)时头与所有跟随 head_yaw 的骨骼(手持姿势/眼睛/饰品)按 tick 锯齿(2026-09-23 实机:视角静止、身体追移动方向时,渲染出的头单帧最大跳 8~9°、300 帧方向反转 60 余次;本口径 0.45°)。旧产物由修复工具整串迁移 |
+| `head_pitch` / `query.head_y_rotation` | 🔶 `query.mod.ysm_head_pitch` | 俯仰,度,正=抬头。本机玩家逐渲染帧写视角原值;引擎的 `target_x_rotation` 按 tick 插值,会滞后视角,所以俯仰仍读主包值 |
 | `armor_value` | 🔶 `query.mod.ysm_armor_value` | 护甲值(0–30) |
 | `food_level` | 🔶 `query.mod.ysm_food_level` | 饥饿值(0–20) |
 | `input_vertical` / `input_horizontal` | 🔶 `query.mod.ysm_move_vertical` / `_horizontal` | **实际位移方向**相对视线偏航的 cos/sin(`MoveInputVariable`, 与按键无关; 向前 vertical=1、**向右** horizontal=+1; 帧间位移 <1e-4 格为 0), 主包逐帧计算。旧产物映射成按键向量 `query.mod.ysm_input_*`(松键滑行/撞墙时与 Java 不同), 修复工具迁移 |
@@ -303,8 +303,11 @@ direct-variable reference`):按 Java 优先级、剥掉括号后,左侧是变量
 
 **已实机定标(2026-08, 2026-09-18 更正)**:网易 `query.yaw_speed` 0~290 间歇归零(平均跳变 21.7),替换为 `query.mod.ysm_yaw_speed`(主包差分+EMA 0.35 平滑,度/秒)。当时同样判"不可用"的 `query.ground_speed`(走路中帧间 0↔60
 乱跳)是 SetMotion(3.0) 驱动采样的假象(服务端纠偏把客户端拉回),原生值实测正是 20×每 tick 水平位移;Java 运动量现由主包按 Java
-源码口径逐帧计算(见"同名陷阱"的 `query.ground_speed` 与"一"的 `input_*`)。**仍待实机**:`query.mod.ysm_head_yaw` 的符号方向
-(Java 取负+geckolib 轴向镜像,理论上与主包现符号一致,眼追踪若反向则主包统一翻转)。
+源码口径逐帧计算(见"同名陷阱"的 `query.ground_speed` 与"一"的 `input_*`)。**头偏航(2026-09-23 实机定案)**:
+`query.target_y_rotation` 与主包 `query.mod.ysm_head_yaw` 同号(都是"视角 - 身体",正 = 视线在身体右侧),Java 口径取负;
+两者之差恰是"插值身体 - 逐 tick 原值身体"。取证要看渲染真值(左右臂枢轴世界坐标连线反推的整模偏航 + 头骨骼矩阵),
+不要单看 Python 侧求值的 `query.body_y_rotation`(逻辑 tick 那一帧给错值)或单看 `target_y_rotation`(它随身体插值
+起伏正是抵消所需);自检 `mcdkSelfTest.mcdk_test_head_track_start()` / `_result()`。
 
 ## 七、主包运行层状态(2026-09-18:Java 专有的环境/状态量不再置常量)
 
