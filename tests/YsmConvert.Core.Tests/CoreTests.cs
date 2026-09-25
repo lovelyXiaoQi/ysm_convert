@@ -500,7 +500,8 @@ public class WarningCatalogTests
 
     [Theory]
     [InlineData("const", "is_maid -> 0.0", "molang 中性常量")]
-    [InlineData("const", "ctrl.tac_hold_gun -> 0.0", "TACZ 联动未接入")]
+    [InlineData("const", "ctrl.tac_gun_id -> ''", "TACZ 枪 ID 未接入")]
+    [InlineData("map", "ctrl.tac_hold_gun -> (query.mod.ysm_tac_hold_gun>0.5)", "主组件运行层提供")]
     [InlineData("const", "ctrl.parcool_state -> ''", "模组联动按未安装处理")]
     [InlineData("const", "ysm.perlin_noise(置常量)", "molang 中性常量")]
     [InlineData("func", "ysm.stop_sound(置常量)", "molang 中性常量")]           // 旧内核的原始类别
@@ -590,7 +591,7 @@ public class MolangPresentationTests
         var report = Replay(
             """{"event": "pack_start", "pack": "a", "javaDir": "J", "index": 0, "total": 1}""",
             """{"event": "molang", "pack": "a", "kind": "lower", "label": "Mouth_1 -> mouth_1", "count": 1, "attention": true}""",
-            """{"event": "molang", "pack": "a", "kind": "const", "label": "ctrl.tac_hold_gun -> 0.0", "count": 6, "attention": true}""",
+            """{"event": "molang", "pack": "a", "kind": "const", "label": "ctrl.tac_gun_id -> ''", "count": 6, "attention": true}""",
             """{"event": "molang", "pack": "a", "kind": "lower", "label": "Mouth_2 -> mouth_2", "count": 1, "attention": true}""",
             """{"event": "molang", "pack": "a", "kind": "zero", "label": "fn.move(自定义函数脚本, 基岩无对应)", "count": 4, "attention": true}""",
             """{"event": "molang", "pack": "a", "kind": "lower", "label": "Sit_1 -> sit_1", "count": 1, "attention": true}""",
@@ -601,7 +602,7 @@ public class MolangPresentationTests
         Assert.Equal(3, attention.Count);                          // 置零 + 中性常量 + 小写汇总一行
         Assert.Equal("notice", attention[0].Severity);              // 要看的排在前面
         Assert.Equal("自定义函数置零", attention[0].Category);
-        Assert.Contains(attention, a => a is { Severity: "info", Category: "TACZ 联动未接入", Count: 6 });
+        Assert.Contains(attention, a => a is { Severity: "info", Category: "TACZ 枪 ID 未接入", Count: 6 });
         var lower = Assert.Single(attention, a => a.Category == "动画名转小写");
         Assert.Equal("info", lower.Severity);
         Assert.StartsWith("3 个动画名改成小写: Mouth_1→mouth_1", lower.Text);
@@ -609,7 +610,7 @@ public class MolangPresentationTests
 
         var text = report.ToText(details: false);
         Assert.Contains("[i] molang/lower: 3 个动画名改成小写", text);
-        Assert.Contains("[i] molang/const: ctrl.tac_hold_gun -> 0.0 x6", text);
+        Assert.Contains("[i] molang/const: ctrl.tac_gun_id -> '' x6", text);
         Assert.Contains("[!] molang/zero: fn.move", text);
         var raw = report.ToJson()["packs"]![0]!["molangAttention"]!.AsArray();
         Assert.Equal(5, raw.Count);                                  // 机读形态保留逐条

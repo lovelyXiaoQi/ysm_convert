@@ -66,7 +66,7 @@ public sealed class CollectionSpec
 
 public sealed class ConvertOptions
 {
-    /// <summary>携带第三方模组联动动画(tacz/slashblade/...), 缺省不带。</summary>
+    /// <summary>携带第三方模组联动动画(slashblade/parcool/...), 缺省不带; 枪械 tacz 动画缺省就带。</summary>
     public bool WithMods { get; set; }
     /// <summary>转换后跑资源包红线体检。</summary>
     public bool Validate { get; set; } = true;

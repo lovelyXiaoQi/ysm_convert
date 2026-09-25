@@ -27,7 +27,7 @@ internal static class Program
           --collection-cover <PNG>  文件夹封面图(不超过 1MB, 最好是 Java 卡片 52x90 的比例; 缺省用合集自带的 ysm-pack.png)
           --prefix <前缀>           包名统一加前缀(缺省用内核建议名: 拼音化 + 合集前缀)
           --rename <文件夹>=<包名>  逐包指定包名(可多次)
-          --with-mods               携带第三方模组联动动画(tacz/slashblade/...)
+          --with-mods               携带第三方模组联动动画(slashblade/parcool/...; 枪械 tacz 动画缺省就带)
           --no-validate             转换后不跑资源包体检
           --pretty                  产物 JSON 按 2 空格缩进(缺省压成一行: 体积约省 70%, 转换也更快)
           --jobs <N>                同时转换的包数(缺省自动: 逻辑核数的一半、最多 8, 再按可用内存封顶);

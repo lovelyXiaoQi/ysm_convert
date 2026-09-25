@@ -78,7 +78,7 @@ public static class WarningCatalog
     private static Explanation ExplainConstant(string label)
     {
         if (Has(label, "ctrl.tac_"))
-            return new("TACZ 联动未接入", "ctrl.tac_* 按\"没拿枪\"处理(类型 ''、其余 0): 网易侧 TACZ 联动的数据在结构体变量 variable.tac.* 里, 实机确认可读之前不映射。拿枪相关的姿态在基岩不会出现。", MolangMappingDoc);
+            return new("TACZ 枪 ID 未接入", "ctrl.tac_gun_id / ctrl.tac_fire_mode 按空串处理: 基岩枪械模组(Eplus军械库等)的联动协议里没有枪 ID 与射击模式, 依赖它们的判定在基岩不会成立。其余 ctrl.tac_*(持枪/枪种/开火/瞄准/换弹/近战/拔枪)由主组件运行层提供。", MolangMappingDoc);
         if (Has(label, "riptide"))
             return new("molang 中性常量", "基岩没有激流(三叉戟冲刺)查询, ctrl.riptide / ysm.is_riptide 按 0 处理, 激流姿态在基岩不会出现。", MolangMappingDoc);
         if (Has(label, "ctrl."))
@@ -154,7 +154,7 @@ public static class WarningCatalog
         if (t.Contains("?? 默认值", StringComparison.Ordinal))
             return new("变量默认值", "基线动画读到的 ?? 默认值不在本包初始化表, 运行时按 0 读; 一般无害。", AnimationMechanismDoc);
         if (t.Contains("模组联动", StringComparison.Ordinal))
-            return new("模组联动动画已跳过", "tacz/slashblade 等第三方模组的条件动画基岩无对应物品, 缺省不转换; 确需携带勾选“携带模组联动动画”。", PortTutorialDoc);
+            return new("模组联动动画已跳过", "slashblade/parcool 等第三方模组的条件动画基岩无对应物品, 缺省不转换; 确需携带勾选“携带模组联动动画”。枪械(tacz)动画不在此列, 缺省就转换, 由主组件对接基岩枪械模组。", PortTutorialDoc);
         if (t.Contains("合集封面", StringComparison.Ordinal) && t.Contains("1MB", StringComparison.Ordinal))
             return new("合集封面未带上", "合集目录的 ysm-pack.png 超过 1MB(Java 同样拒收), 文件夹改用默认封面; 把图压到 1MB 以内(Java 口径 52x90)后重新转换。", PackGuideDoc);
         if (t.StartsWith("java_state(", StringComparison.Ordinal))

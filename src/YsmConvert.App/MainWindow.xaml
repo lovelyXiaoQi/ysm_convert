@@ -194,7 +194,7 @@
                             <TextBlock Style="{StaticResource OptionText}" Text="转换后运行资源包红线体检 (推荐)" />
                         </CheckBox>
                         <CheckBox IsChecked="{Binding WithMods}">
-                            <TextBlock Style="{StaticResource OptionText}" Text="携带第三方模组联动动画 (tacz / slashblade …, 基岩无对应物品, 一般不勾)" />
+                            <TextBlock Style="{StaticResource OptionText}" Text="携带第三方模组联动动画 (slashblade / parcool …, 基岩无对应物品, 一般不勾; 枪械动画总会带上)" />
                         </CheckBox>
                     </StackPanel>
                 </ScrollViewer>
