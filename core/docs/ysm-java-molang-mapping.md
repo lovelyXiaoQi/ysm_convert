@@ -193,8 +193,8 @@ Java 的 `#minecraft:swords` 这类原版 tag **在基岩不存在**(基岩是�
 | `in_ground`(箭类投射物) | ≈ `query.is_on_ground` | Java = 箭插在方块里(`IArrowExtraInfo.isInGround`);基岩近似为在地判据,与主包弹射物 `ground` 谓词同口径。用在替换实体的控制器里(末影龙娘末影剑:落地后火焰播完一轮再熄灭);`on_ground_time` 无对应,落残余置零 |
 | `ctrl.<主状态>` | ✅ `((variable.ysm_ctrl_main??0)==序号)` | **Java 互斥语义**(`CtrlBinding.testCondition`): 每帧按优先级找出**第一个**成立的主状态缓存, `ctrl.X` 只在它是 X 时为真; 骑乘时全假、YSM 预览实体全假。优先级(序号): death 1 / riptide 2(基岩无判据, 恒假) / sleep 3 / swim 4 / climb 5 / climbing 6 / ladder_up 7 / ladder_stillness 8 / ladder_down 9 / fly 10 / elytra_fly 11 / swim_stand 12 / attacked 13 / jump 14 / sneak 15 / sneaking 16 / run 17 / walk 18 / idle 19。主包共享动画 `animation.ysm.java_ctrl_state`(animate 表紧跟 `java_input_state`)逐帧写 `variable.ysm_ctrl_main`, 判据表 `port_java_pack._CTRL_MAIN_PRIORITY`。早先逐个独立映射, 滑翔/创造飞行时 `ctrl.jump` 也为真(末影龙娘 post_main 在滑翔时跑进"跳跃下坠") |
 | (ctrl.jump 判据) | ≈ `((variable.ysm_airborne??0)>0.5)` | Java 含下落。`variable.ysm_airborne` 是主包共享的 `animation.ysm.java_input_state`(animate 表首位)逐帧更新的**帧间闩锁**:进入要求 `!is_on_ground&&!is_in_water&&(vertical_speed>0\|\|<-4)`(挡住走路时 `is_on_ground` 逐帧翻转),留在腾空只看 `!is_on_ground&&!is_in_water`;裸的 `!is_on_ground` 或带最高点死区的判据都会让作者状态机在最高点/落地各抽一次(凋灵娘实测) |
-| (ctrl.sneak / sneaking 判据) | ≈ `query.is_sneaking&&query.modified_move_speed>0.05` / `query.is_sneaking` | 注意 sneak=移动、sneaking=兜底(Java L45-46,别记反);"在地"由优先级更高的 jump 已先判保证 |
-| (ctrl.climb / climbing 判据) | ✅ `query.is_crawling` ± 移动量 | **是爬行(匍匐)不是爬梯**(Pose==SWIMMING 落地) |
+| (ctrl.sneak / sneaking 判据) | ≈ `(query.is_sneaking\|\|query.mod.ysm_tac_is_sneaking>0.5)&&query.modified_move_speed>0.05` / 去掉移动量 | 注意 sneak=移动、sneaking=兜底(Java L45-46,别记反);"在地"由优先级更高的 jump 已先判保证。原生潜行并上枪械模组的下蹲(协议 `v.tac.is_sneaking`,见 `ysm-tac-protocol.md`) |
+| (ctrl.climb / climbing 判据) | ✅ `(query.is_crawling\|\|query.mod.ysm_tac_is_crawling>0.5)` ± 移动量 | **是爬行(匍匐)不是爬梯**(Pose==SWIMMING 落地);原生爬行并上枪械模组的趴下(协议 `v.tac.is_crawling`) |
 | (ctrl.swim 判据) | ✅ `query.swim_amount>0` | |
 | (ctrl.swim_stand 判据) | ≈ `query.is_in_water&&!query.is_on_ground` | 踩水 |
 | (ctrl.attacked / death 判据) | ✅ `query.hurt_time>0` / `query.death_ticks>0` | |
@@ -210,15 +210,18 @@ Java 的 `#minecraft:swords` 这类原版 tag **在基岩不存在**(基岩是�
 | `first_order('k',input,resp)` | ✅ 同上一阶滤波 `y += clamp(dt/resp,0,1)·(x-y)`,状态 `v.ysm_fo_<键>_y` |
 | `perlin_noise()` | ❌ 置零;`math.sin` 组合近似 |
 | `particle('id',x,y,z,dx,dy,dz,speed,count,life)` / `abs_particle()` | ✅ **timeline 里的调用**转成基岩动画原生 `particle_effects` 关键帧(port_java_pack.ConvertTimelineParticles):粒子 ID 按对照表换成原版基岩粒子(`flame`→`basic_flame_particle`、`soul_fire_flame`→`blue_flame_particle`、`smoke`→`basic_smoke_particle`…,无对照的原名直通并告警),位置 (x,y,z) 打成主几何**根骨骼的 locator**(模型空间 ×16,z 取反:Java 本地 +z 为前、基岩 -z 为前),效果键 `ysm_pt_<粒子>` 登记进 `netease.particle_effect` 由主包 `AddPlayerParticleEffect` 注册。"每 tick 脚本"动画(0 长度循环)里的调用于是每 tick 触发一次(Java 是每渲染帧,密度略低);dx/dy/dz/speed/count/life 由基岩粒子定义自带,无法逐参照搬;`abs_particle` 的世界绝对偏移近似为随身 locator;位置是表达式时落到原点 locator。**通道表达式里的调用**(无时间戳)仍置零。关键帧带 `bind_to_actor:false`:Java `ParticleSpawner` 把粒子生成在**世界坐标**(实体坐标 + 按身体朝向旋转的偏移)后交给粒子引擎,不随实体移动;基岩缺省 `true` 会让发射器跟着玩家跑(2026-09-17;该键在网易引擎的可用性由 `ysm_rp/animations/shared/particle_probe.animation.json` 探针文件确认,确认前已落盘的包不补,修复工具 `_BindTimelineParticles` 就绪) |
-| `play_sound()` 族 | 置零(30 个 Java 包普查零调用)。动画 **`sound_effects` 关键帧**由移植工具自动三件套(`ConvertSoundKeyframes`/`WriteSoundResources`):ogg 从 `sounds/`(或 `files.sound_path`)拷到 `ysm_rp/sounds/ysm/<包>/`、`sound_definitions.json` 登记 `ysm.<包>.<安全名>`、`files.player.sound_effect` 注册 `[效果键, 定义名]`,关键帧 `effect` 改写为 `ysm_snd_<安全名>`;原版 ID(含 `:`)两边命名不同,定义名直通并告警 |
+| `play_sound()` / `stop_sound()` / `stop_all_sounds()` | 🧪 **实验性,缺省置零**;开启转换自定义函数(转换器勾选 / `--java-functions`)后改写成实体变量上的请求计数器(`java_functions._LowerPlaySound` 等,每个调用点一个槽位,动态音量音高写参数变量),主包音效宿主 `client/javaFunctionHost` 逐帧轮询后用 `PlayCustomMusic` / `StopCustomMusicById` 播放停止,实例 id / 强制位 / 循环按 Java 规则(见 `docs/ysm-java-functions.md`)。音效名须是字面量。另外动画 **`sound_effects` 关键帧**由移植工具自动三件套(`ConvertSoundKeyframes`/`WriteSoundResources`):ogg 从 `sounds/`(或 `files.sound_path`)拷到 `ysm_rp/sounds/ysm/<包>/`、`sound_definitions.json` 登记 `ysm.<包>.<安全名>`、`files.player.sound_effect` 注册 `[效果键, 定义名]`,关键帧 `effect` 改写为 `ysm_snd_<安全名>`;原版 ID(含 `:`)两边命名不同,定义名直通并告警 |
 | `ctrl.ride('vehicle'\|'passenger', '$ID'\|'#tag')` | `vehicle`+`$ID` → `query.is_riding_any_entity_of_type('<换算ID>')`;`passenger`/`#tag` 置零告警(基岩无"谁骑在我身上"与实体 tag 判定) |
 | `bone_rot('骨骼').x/.y/.z` | ✅ **骨骼旋转回读**(2026-09-18,`java_runtime_bindings`):Java 返回该骨骼**上一帧**的旋转(`BoneSnapshot`: 绑定旋转 + 动画旋转,度),官方酒狐 03/06/10/15 与默认控制器的头发逐节跟随链全靠它(`second_order('B1x',ysm.bone_rot('HairB1').x,…)`,5 个包 264 处)。读侧改成 `(math.abs(query.life_time-variable.ysm_brt_<骨骼>)<0.2?variable.ysm_br_<骨骼>_<轴>:0)`(主几何里该骨骼有绑定旋转时再加常量);写侧把写这根骨骼 rotation 的**表达式分量**包成 `variable.ysm_br_<骨骼>_<轴>=(原式);variable.ysm_brt_<骨骼>=query.life_time;return …;`(`InlineBoneRotationWriters`,幂等)。0.2 秒没人写 = 这根骨骼现在没有动画驱动,读侧回落绑定旋转。**数值常量分量与关键帧通道不包**(常量通道另有恒等判定/逐通道覆盖等后处理认数值形态,关键帧的插值结果表达式里也拿不到)—— 被主链关键帧动画驱动的骨骼(03 号的 `AllBody`)读到的仍是绑定旋转。这两个变量照常参与文件扫描补 0 |
 | `bone_pos/scale('骨骼')` | 置零,**连同结构体成员访问 `.x/.y/.z` 一起**(Java 返回 Vec3 结构体;只置换调用会残留成 `0.0.x`,基岩整份文件拒载——2026-09-17 官方酒狐 03/06/10/15 头发摆动链)。可选等价:主包 `molang_bind_bones_list` 机制(粒子绑定采样 → `v.ysm_<骨骼>_rotX/rotY/rotZ/posX/posY/posZ`,每帧每骨骼有开销);`bone_pivot_abs` Java 侧本身是恒 null 残桩,无需对齐 |
 | `bone_color/transparency/glow()` | 置零;整模型级可走渲染控制器 overlay/发光贴图 |
-| `keyboard()` / `mouse()` | ❌ 置零(仅本机键盘,Java 侧远程玩家也看不到) |
-| `sync()` / `defer()` / `dump_*()` / `mod_version()` | 剥除置零 |
-| `fn.<名>(...)`(functions/*.molang 自定义函数) | ❌ 置零+告警:过程式脚本(args/return/循环)无表达式等价;`@player_init`/`@player_update`/`@sync`/`@defer` 挂接函数不移植 |
+| `keyboard(键码…)` / `mouse(键)` | 🧪 实验性,缺省置零;开启后常量 GLFW 键码 → `query.mod.ysm_kb_<码>` / `query.mod.ysm_ms_<键>`(多个键取或),主包 `client/javaFunctionHost` 注册这些 query.mod 并把本机按键(网易键码换 GLFW 码,只在游戏画面里)写在本机玩家实体上;远程玩家读注册默认值 0(Java 读本机键盘,只用来决定要不要 sync)。键码不是常量 / 网易没有对应键置零 |
+| `sync(数值…)` | 🧪 实验性,缺省置零;开启后本机玩家上 → 服务端 → 全体客户端,各端执行体跑 `@sync`(`docs/ysm-java-functions.md` 第四节);只在语句 / 事件 / 脚本里发出,骨骼通道与转移条件里丢弃(Java allowEmitting 口径,音效族同) |
+| `defer()` / `dump_*()` / `mod_version()` | 剥除置零(`defer` 尚未支持) |
+| `fn.<名>(...)`(functions/*.molang 自定义函数) | 🧪 **实验性,缺省置零**(脚本控制器只做决策树展开);开启后调用处内联(`devtools/java_functions.py`,设计见 `docs/ysm-java-functions.md`):纯函数折成等价表达式,其余按语句内联(实参 / 临时变量改名、提前 return 改写成 `loop(1)` + break、短路分支里的调用随条件一起提);`@player_update` 编进逐帧执行体动画,`@player_init` 进初始化控制器。递归 / 不存在的函数落 0。脚本控制器 `@player_ctrl_*`:纯决策树展开成状态机(`script_controller.py`),其余空白 / 并行通道的脚本连同 Java 动画播放器状态机编进逐帧执行体、配按播放码切换的控制器(`java_functions.ScriptChannel`);`@sync` 编进执行体(主包转发同步事件);main / use / swing 通道、`@defer` 尚未接 |
+| `ctrl.set_animation` / `set_beginning_transition_length` / `reset` / `indicate_reload`、`ctrl.state_*` / `ctrl.loop` 等常量、脚本里的 `q.all/any_animation(s)_finished` | ✅ 只在脚本控制器里生效:改写成播放器状态变量 `v.ysm_sc<序号>_*` 上的语句(同名同循环覆盖再设是空操作、设新动画硬撤当前、下一次"继续"才载入);常量按 CtrlBinding 取值(2/3/4/5、10/11/12);播完查询换成本帧开头记下的播完标记。脚本之外调用 Java 同样什么都不做,删除 |
 | `v.roaming.<名>`(持久化+网络同步域,上限 64) | ✅ 扁平化 `v.roaming_<名>`(自动初始化;`??默认值` 收进顶级 initialize)+ **主包运行层做存档与多人同步**(2026-09-18,见第七节):本机轮询到变化就报给服务端,并进 `extraVariable` 的模型分桶(与轮盘表单变量同一份存档),其他客户端按桶回灌;弹射物/载具生成时抄一份主人的值(Java `initRoamingVars`,01/16/19/21/22 号的箭按换装变量换外观) |
+| `v.<结构体>.<成员>`(roaming 以外的作者自建结构体) | ✅ 扁平化 `v.<结构体>_<成员>`(`port_java_pack.FlattenStructMembers`,动画/控制器/ysm.json 表单与 initialize 同步;修复工具就地迁移旧产物)。Java 给成员赋值时结构体不存在就新建、读不存在的成员得 null(按 0 算,`??` 照常兜底),不存档;基岩读不存在的成员报 `unable to find member variable`,成员访问也不能作 `??` 左侧(`isn't a direct-variable reference`)—— 2026-09-23 萨赫梅特 v1.1 把 roaming 拼成 `v.roming.mask`,初始化控制器两条引擎报错。两级以上不动(Java 不许嵌套);网易 TACZ 的 `v.tac.*` 不动 |
 
 ## 四、math 别名、缺失函数与同名不同义(2026-09-17 按 geckolib3 MathBinding 逐函数核对源码)
 
@@ -254,13 +257,26 @@ Java 的 `#minecraft:swords` 这类原版 tag **在基岩不存在**(基岩是�
 以上覆盖 YSMBinding 的**全部**值绑定(2026-09-16 按源码补齐),新名字才会落到"残余置零"告警。
 模组联动 ctrl 变量按 `client/compat/*Compat.java` 里模组缺席时的默认绑定:字符串型
 `parcool_state`/`slashblade_animation`/`swem_state`/`bcombat_attack_animation`/`iss_animation`/
-`tac_gun_type`/`tac_gun_id` 给 `''`(`ctrl.parcool_state==''` 这类"没在跑酷"判据才保持为真),
-`tac_hold_gun`/`tac_is_*`/`im_*`/`swem_is_ride`/`has_sophisticated_backpack` 给 0;
+`tac_gun_id`/`tac_fire_mode` 给 `''`(`ctrl.parcool_state==''` 这类"没在跑酷"判据才保持为真),
+`im_*`/`swem_is_ride`/`has_sophisticated_backpack` 给 0;
 `ctrl.carryon_type` 的字符串比较改写成主包数值量的比较(`=='entity'`→`query.mod.ysm_carryon==1`,block 2,player 3,空串 0;2026-09-18)。
-**`ctrl.tac_*` 暂不接网易 TACZ 联动**:数据在结构体变量 `variable.tac.*`(compat/ysm.tacz 控制器读 `v.tac.gun_type=='rifle'`,
-与 Java 同名的字符串),但产物直接读它有两处没有实机依据 —— 变量扫描会截成 `tac` 并写出 `variable.tac = 0.0;`(结构体被写成数值),
-`??` 左侧"以变量为根"的要求对结构体成员是否成立也没测过(不成立则整份文件拒载)。先实机探这两条再接。
-`--with-mods` 关闭时联动动画整键跳过。
+**`ctrl.tac_*` 接基岩枪械模组(2026-09-24)**:Eplus军械库等枪械模组按旧版协议写结构体变量 `v.tac.*`
+(`gun_type` 枪种字符串、`is_fire` 开火脉冲、`is_aim`/`is_reload` 电平、趴下 / 滑铲 / 下蹲姿态 ...,全部字段与对接要求见
+`ysm-tac-protocol.md`),主包运行层(业务包 `client/tacStateSync` 与
+`config/tacState`)逐 tick 归一成 Java 口径写回玩家实体,产物只读归一后的量、不读结构体成员(`??` 左侧不能是成员访问、
+纸娃娃上没有这个结构体):
+
+| Java | 基岩 |
+|------|------|
+| `ctrl.tac_hold_gun` | `(query.mod.ysm_tac_hold_gun>0.5)` |
+| `ctrl.tac_gun_type` | `(variable.ysm_env_tac_gun_type??'')`(模组写的枪种字符串原样) |
+| `ctrl.tac_is_fire` | `(query.mod.ysm_tac_is_fire>0.5)`(Java 射击冷却 > 0;基岩按每发一枪之后 0.15 秒) |
+| `ctrl.tac_is_aim` / `tac_is_reload` | `(query.mod.ysm_tac_is_aim>0.5)` / `(query.mod.ysm_tac_is_reload>0.5)` |
+| `ctrl.tac_is_melee` / `tac_is_draw` | `(query.mod.ysm_tac_is_melee>0.5)` / `(query.mod.ysm_tac_is_draw>0.5)`(近战之后 0.5 秒 / 切到枪之后 0.5 秒) |
+| `ctrl.tac_gun_id` / `tac_fire_mode` | `''`(协议里没有枪 ID 与射击模式) |
+
+`tac:` 系动画本身按 Java 三通道由主包播放(见 `ysm-java-animation-mechanism.md` 与 CLAUDE.md"枪械模组联动"),
+移植工具默认就带 `tac` 槽位(只带基岩驱动得了的,逐枪条件动画跳过);其他联动槽位 `--with-mods` 关闭时整键跳过。
 
 ## 六、词法与前缀(Java 解析器 com.elfmcys.ysm.molang 与基岩的差异,2026-09-16)
 
@@ -303,7 +319,10 @@ direct-variable reference`):按 Java 优先级、剥掉括号后,左侧是变量
 
 **已实机定标(2026-08, 2026-09-18 更正)**:网易 `query.yaw_speed` 0~290 间歇归零(平均跳变 21.7),替换为 `query.mod.ysm_yaw_speed`(主包差分+EMA 0.35 平滑,度/秒)。当时同样判"不可用"的 `query.ground_speed`(走路中帧间 0↔60
 乱跳)是 SetMotion(3.0) 驱动采样的假象(服务端纠偏把客户端拉回),原生值实测正是 20×每 tick 水平位移;Java 运动量现由主包按 Java
-源码口径逐帧计算(见"同名陷阱"的 `query.ground_speed` 与"一"的 `input_*`)。**头偏航(2026-09-23 实机定案)**:
+源码口径逐帧计算(见"同名陷阱"的 `query.ground_speed` 与"一"的 `input_*`)。这些 `query.mod.*` 只写在玩家身上:
+**载具 / 投射物(替换实体)的动画**读的是实体自己的运动量(Java 值绑定对载具上下文求值),移植与修复工具把其中的
+`ysm_ground_speed(2)` / `ysm_yaw_speed` / `ysm_head_pitch` 换回原生 `query.ground_speed` / `query.yaw_speed` /
+`(-query.target_x_rotation)`(`port_java_pack.LocalizeReplacedEntityQueries`;否则恒为 0,狐狸车车轮不转)。**头偏航(2026-09-23 实机定案)**:
 `query.target_y_rotation` 与主包 `query.mod.ysm_head_yaw` 同号(都是"视角 - 身体",正 = 视线在身体右侧),Java 口径取负;
 两者之差恰是"插值身体 - 逐 tick 原值身体"。取证要看渲染真值(左右臂枢轴世界坐标连线反推的整模偏航 + 头骨骼矩阵),
 不要单看 Python 侧求值的 `query.body_y_rotation`(逻辑 tick 那一帧给错值)或单看 `target_y_rotation`(它随身体插值
@@ -360,8 +379,9 @@ roaming 本机改值 → 服务端分桶 → 回执不乒乓(隔 0.15 秒连写 
 f≈0.977 吻合;注入需求后维度 `=='minecraft:overworld'` 为 1、准星对着金合欢木时类型 `'block'`、ID 比较为 1。仍未实机:潜行下的
 鞘翅角(键鼠模式下 `ChangeSneakState` 不生效,服务端置潜行位会被客户端输入逐帧覆盖)、真甩鱼竿、梯子/细雪(目前没有包用到)。
 
-探针只认**常量参数**;参数是表达式的调用照旧置常量并告警。仍未接的:`keyboard`/`mouse`(本机按键)、`sync`/`@sync`、
-`play_sound`/`stop_sound`、`fn.*` 与事件脚本 —— 属于脚本层,需要"molang 通知 Python"的通道;方块/群系 **tag** 类查询
+探针只认**常量参数**;参数是表达式的调用照旧置常量并告警。脚本层(`play_sound`/`stop_sound`、`fn.*`、`keyboard`/`mouse`、
+`sync`/`@sync`、`@player_update`/`@player_init` 与空白 / 并行通道的脚本控制器)已由 `docs/ysm-java-functions.md` 的编译方案
+接上,仍未接的:`defer`、main / use / swing 通道的脚本控制器;方块/群系 **tag** 类查询
 (Java 的 tag 名在基岩不存在,`entity_biome_has_*` 等群系 query 实测"expression is not valid")。
 
 **roaming 同步的三条规矩**(`config/javaState.RoamingTracker`,对照 Java `ClientRoamingSession`):① 只报"两次轮询之间变了"

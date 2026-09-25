@@ -94,11 +94,12 @@ MC Studio 开发测试和正式游戏都只启用这个组件的资源包，`ysm
 | 标准动画注册 | 23 个标准键 × 动画命名空间 + 全套共享基线（战斗/物理/CarryOn/TACZ），键名差异自动映射：`use_righthand`→`use_mainhand`、`use_lefthand`→`use_offhand`；轮盘 extra 键**按 `properties.extra_animation` 声明动态注册**（不再盲注册 extra0-7） | `animations_extra` 覆盖/追加 |
 | 全量动画注册（**路径解析模式**） | `files.player.animation` 两种形态。**列表混排（推荐）**：`["路径", {"短名": "动画ID", ...}, ...]`——字符串按路径解析导入**整个文件的所有动画**（对齐 Java 按文件加载，短键 = `animation.xxx.abc.def` 去掉前两段，注册顺序 = 书写顺序），dict 逐条注册单个动画（跨命名空间共享动画/键名映射场景；值留空/`null` 按约定展开为 `animation.<包名>.<键>`），同键后写覆盖。**Java 原生 dict**：`{"main": 路径, "arm": 路径, ...}` 语义槽位（`arm`/`fp_arm` 走第一人称手臂通道）。路径匹配规则：① 写资源包真实相对路径 → 精确命中；② Java 原包路径（如 `animations/main.animation.json`）→ 按文件名匹配 + **命名空间校验**（候选文件必须含 `animation.<包名>.*` 的 ID，防止捡走别家的同名文件），多候选经命名空间裁决唯一才采信；③ 未命中的声明明确告警（不静默）。资源只需放资源包一份，未命中时回落行为包副本（历史兼容）。未声明该字段的包只注册标准键（行为不变）。**轮盘动画键不覆盖已显式声明的键** | `animations_extra`（兼容形态，等价于列表里的 dict 条目） |
 | 自定义控制器注册 | `files.player.animation_controllers` 列表混排：`["路径", {"注册键": "控制器ID", ...}, ...]`——路径按解析模式导入文件内全部控制器（注册键取 ID 末段），dict 逐条注册（**显式键名**，共享控制器/键名兼容场景）。播放条件统一为**纸娃娃+第一人称双门**（`!v.is_paperdoll && !v.is_first_person`，替代 Java"加载即常开"的裸 `1`；保留键 `ysm_variable_init` 的每实例变量初始化控制器恒开，不经此门）：控制器转移普遍含物品/骑乘 query，纸娃娃是无装备上下文的 Custom 实体会逐帧刷错；基岩 FP 手臂与主模型同实体同骨骼名，主域控制器在第一人称会驱动手臂几何乱摆（Java 的 FP/GUI 是独立渲染域，无此二患——**与 Java 版的行为差异点**）。条件用 `netease.animate_extra` 同键覆盖 | `animation_controllers_extra`（兼容形态） |
-| **渲染通道** | JSON 包模型贴图写入原版 `default` 键，几何写入独占的 `ysm` 键（第三人称主体 `ysm_main`）与 `arm` 键（第一人称 `first_person_ysm_arm`），两者都读 `Texture.default`。**`default` 几何键只作附着物/护甲的绑定锚点**：第三人称装模型几何，第一人称换成原版体型 `geometry.default_steve`（装载时按当前视角初始化，切视角时切换，见 `playerRender.ApplyItemAnchorGeometry`），原版第一人称动画原样驱动它——弓/弩/盾/三叉戟等附着物与普通手持物都落在原版位置。卸下模型时引擎 **`ResetEntityExtraSkin`** 一次性清除全部 ActorRender 附加资源与操作历史，自动恢复原版/网易资源中心皮肤（**含官方 4D 皮肤**）——`default` 键可放心顶替，无需键隔离与手工回填；引用 `Texture.default` 的原版系控制器（护甲纹饰等）也能正确取到模型贴图，自定义 `arm` 模型无需关心专有键名 | `render_controllers_extra` |
+| **渲染通道** | JSON 包模型的几何写入独占的 `ysm` 键（第三人称主体 `ysm_main`）与 `arm` 键（第一人称 `first_person_ysm_arm`），**贴图写入独占的 `ysm` 贴图键**，两者都读 `Texture.ysm`；自己追加的渲染控制器要画模型贴图同样写 `Texture.ysm`。**`default` 贴图键不动，始终是玩家自己的皮肤**：第一人称里原版和其它模组画的"皮肤手臂"（Eplus 军械库端枪时的手臂、原版拿地图的手臂）都读 `Texture.default`，而引擎没有撤销单个贴图键的接口，顶替了就取不回皮肤。原版观战头像 / 地图头像两个控制器由主包换成读 `ysm` 键的同款。**`default` 几何键只作附着物/护甲的绑定锚点**：第三人称装模型几何，第一人称换成原版体型 `geometry.default_steve`（装载时按当前视角初始化，切视角时切换，见 `playerRender.ApplyItemAnchorGeometry`），原版第一人称动画原样驱动它——弓/弩/盾/三叉戟等附着物与普通手持物都落在原版位置。卸下模型时引擎 **`ResetEntityExtraSkin`** 一次性清除全部 ActorRender 附加资源与操作历史，自动恢复原版/网易资源中心皮肤（**含官方 4D 皮肤**），无需手工回填；自定义 `arm` 模型无需关心键名（主包的手臂控制器已读 `Texture.ysm`） | `render_controllers_extra` |
 | **第一人称手臂** | 所有 JSON 包模型第一人称统一渲染 `arm` 几何键：`files.player.model.arm` 声明时指向独立手臂几何 `geometry.<包名>_arm`，未声明时回落主几何（等效旧剔除法）。⚠️ 独立手臂几何由移植工具**重建成"原版手臂骨架包装骨骼 + 移位后的 Java 子树"**（`body[0,24,0]` → `rightArm[-5,22,0]` → Java 右臂子树整体移位 `(-4,-4.8,0)`；左臂子树挂唯一名包装 `ysm_fp_leftarm` 并由主包动画 `scale 0` 隐藏）：基岩没有引擎级第一人称手臂变换，摆位全靠原版 `base_pose`（写 `body`）+ `empty_hand`（写 `rightarm`），而 Java 是把 arm 几何刚性放进原版手臂的姿态栈（换算 = 上述 `∓4/-4.8` 移位）。**早先的"嫁接主几何父链"已撤**——父链在第一人称是静态的，补不出视角俯仰（旧产物 25/25 个包都没有 `body` 骨骼，抬头 30° 手臂就掉出画面）。声明了 `model.arm` 的包渲染控制器 `part_visibility` **全放行**（Java 渲染整个 `RightArm` 子树，按名字前缀过滤会掉件）；未声明的包回落主几何、仍走白名单版 `first_person_ysm_arm_main`。动画声明键 `fp_arm`（并行 parallel0-7）与 `arm`（手持条件动画）走 `animation.<包名>_arm.*` 命名空间，注册短键加 `fp_` 前缀并自动叠加 FP 门控。**空手门**：`first_person_ysm_arm` 控制器与全部 FP 域自动条目（`fp_parallel*`/甲槽/`ysm_fp_swing`）都带 `!query.is_item_equipped(0)`——手持物品时模型手臂不渲染，且 `rightarm`/`leftarm` 等骨骼名与附着物锚点共用（引擎匹配不分大小写），再播只会把物品带偏；手写 `animate_extra` 里作用于这些骨骼的第一人称动画请自带同一个门，动 `LeftArm` 会挪副手物品，尽量只动 `Right*` | `animate_extra` |
 | 合集文件夹分组 | 合集形态 `ysm_models/<合集>/<子包>/ysm.json` + 合集目录下 `ysm-pack.json`（Java 原格式：`name`/`description`/`lang.zh_cn.name`）→ **自动生成模型选择界面文件夹**（显示名取 `lang.zh_cn.name` > `name` > 目录名）。成员默认**只在文件夹内显示**（等同文件夹界面"是否隐藏YSM模型"开启，对齐 Java 合集包：模型不在主列表重复平铺）；**封面**：`ysm-pack.json` 顶级扩展键 `folder_texture` 写资源包纹理路径（不带扩展名，如 `"textures/ui/ysm_packs/wine_fox"`），图片按 Java 合集封面口径画成 **52x90**（整张铺满卡片，底部约 20 px 是名字区，名字由界面叠上去），不写则用默认文件夹图（Java 原版 `default_pack_icon`）；Java 合集目录里的 `ysm-pack.png` 由移植工具自动拷进资源包 `textures/ui/ysm_packs/<合集>.png` 并写好该键。封面每次按清单刷新（游戏内不能改封面，老存档跟着换）。`description` 暂不使用；合集只认一层（`ysm_models/<合集>/<子包>`）。合集文件夹**玩家不能删除**（"删除文件夹"按钮只对玩家自建的文件夹显示）；并入存档文件夹列表是幂等增量：用户对该文件夹的改名/隐藏/成员编辑全保留，合集新增子包自动并入、卸载的剔除；根目录误放 `ysm-pack.json` 不参与分组 | —（文件夹后续可在游戏内自由编辑） |
 | **条件动画** | Java 把条件编码在动画名里，本主包**自动识别并合成基岩原生 molang 播放条件**（零手写、零运行时开销）。支持前缀：`hold_mainhand`/`hold_offhand`（持有）、`swing`/`swing_offhand`（挥手）、`use_mainhand`/`use_offhand`（使用中）、`head`/`chest`/`legs`/`feet`（盔甲槽）、`vehicle`（骑乘类型）、`carryon`（搬运：`carryon:block`/`entity`/`player` 按主包 `ysm_carryon` 取值表 2/1/3 合成，`princess` 走 `ysm_riding==5`；Java 模式下 princess 由骑乘链带互斥驱动；教程 5.6 的下划线改名形态仅 Java 模式合成，旧通道由基线 `carryon_ctl` 驱动）。三种形态：物品 ID → `is_item_name_any`；tag → `equipped_item_any_tag`；分类 → 内置分类表（sword/axe/pickaxe/shovel/hoe/eat 走原版 tag，shield/bow/crossbow/fishing_rod/fishing/spear/spyglass/toot_horn/brush/drink/throwable_potion 走物品名，charged_crossbow 走 `item_is_charged`）；`empty` → 空手。**优先级与 Java 一致**（id > tag > 分类），自动合成互斥条件。模组专属分类（slashblade/gohei/lance 等）基岩无对应，汇总告警一次。**一次性动画（挥击 `swing*`、受击 `attacked`、死亡 `death`）由生成式状态机驱动**：基岩直挂 animate 条目对不循环的定时动画不重放（条件再次成立只是再应用，动画时钟不回零——实机第三人称挥手只播第一次），移植/修复工具按包生成 `animation_controllers/<包名>/ysm_oneshot.json`（`ysm_swing`/`ysm_fp_swing`/`ysm_attacked`/`ysm_death`：idle → 每成员独占状态、播完 `all_animations_finished` 才走 → cooldown 等触发消失 → idle，进入状态即重置时钟；转移按 Java 优先级 id > tag > 分类 > 兜底排列），主包在资源索引发现即替换对应直挂条目（位置、双门不变），旧产物无此文件时维持直挂。副手挥击族（`swing_offhand*`）不进状态机——基岩无副手挥击信号。⚠️ **动画名必须按下方规则转义** | `animate_extra` 同键覆盖 |
 | 死亡/爬梯状态 | 模型自己提供了 `death` / `ladder_up` / `ladder_stillness` / `ladder_down` 动画时自动补播放条件（判据与 Java `AnimationRegister` 一致：死亡用 `death_ticks`，爬梯用主包下发的 `ysm_is_on_ladder` + `ysm_climbing_vector` 正负零）。未提供这些动画的模型零影响。`riptide`（激流冲刺）基岩无对应 query，暂缺 | `animate_extra` 同键覆盖 |
+| **枪械动作（Java 模式）** | `files.player.animation` 的 `tac` 槽位（Java TACZ 联动动画）原样可用，移植工具默认就带（转义成 `tac.cls.*`）。数据来自基岩枪械模组（Eplus军械库等）写在玩家身上的 `v.tac.*`，主包运行层归一成 `query.mod.ysm_tac_*` 后按 Java TACZCompat 三通道播放：① **主链**持枪时状态动画换成持枪版 `tac:<状态名>`（`tac:idle`/`walk`/`run` 等，包里或基线有才换，进 `ysm_state` 状态机、照常交叉淡化）；② **hold 通道**持枪姿态 `tac:<climb\|climbing\|aim\|run\|hold>:<pistol\|rifle\|rpg>`，按爬行移动 > 爬行静止 > 瞄准 > 在地疾跑 > 持枪互斥直挂；③ **fire 通道**生成式状态机 `ysm_tac_fire`（`ysm_oneshot.json` 里），每发一枪 / 近战 / 换弹开始都从头重播 `tac:reload:` > `tac:melee:` > `tac:<climbing\|aim\|hold>:fire:`，挥动或使用物品时停。类型只分 pistol / rpg / 其余 rifle（与 Java 一致）。枪械模组的姿态同样走协议：趴下（`v.tac.is_crawling`）按 Java TACZ 的趴下（爬行姿态）处理，主链进 `climb`/`climbing`、手持进 `tac:climb`/`tac:climbing`、开火进 `tac:climbing:fire:`；下蹲（`v.tac.is_sneaking`）= 潜行姿态；滑铲（`v.tac.slide`）是基岩扩展，主链 `slide`/`tac:slide`、手持 `tac:slide:<类型>`（没有就用持枪 / 瞄准）；滑铲的整身姿态写在 `Root` 或转换器补的滑铲姿态骨骼 `ysm_body_root`/`ysm_torso_root`（分别套在 `AllBody`/`UpperBody` 外面）上，持枪、开火、近战动画覆盖不到。包里没写的枪械动画按名字逐个回落 `java_default` 基线（Java 默认模型那一套，外加滑铲默认动画）。字段与对接要求见 `ysm-tac-protocol.md`。逐枪条件动画（`tac:hold$tacz:ak47`）协议里没有枪 ID，转换时跳过。旧版模型仍走旧版 tacz 控制器，互不影响 | `animate_extra` 同键覆盖 |
 
 副包动画文件里没有的标准动画只产生一条无害引擎日志（`can't find animation`），与官方
 转换教程 FAQ 说明一致。
@@ -152,7 +153,7 @@ MC Studio 开发测试和正式游戏都只启用这个组件的资源包，`ysm
 |---|---|
 | `priority` | 注册优先级（int，缺省 0，越大越靠前）。主包内置模型为 1000 恒排最前；副包同优先级按包名字典序稳定排序，保证模型列表顺序与存档索引不随组件加载顺序漂移 |
 | `player_scale` / `gui_scale` | 玩家/GUI 缩放，默认 0.8 / 1.0（显式声明时优先于 `height_scale` 换算链） |
-| `material` | 材质：`"bloom"` 或 `[["default","bloom"],["hair","nocull"]]`（nocull 自动切换、light→tohru 与内置一致） |
+| `material` | 材质：预设名 `"cutout"` / `"translucent"` / `"emissive"` / `"pbr"` …，或按材质键分别指定 `[["default","cutout"],["ysm_glow","translucent"]]`；**通常无需配置**（Java 模式包缺省 `cutout`，带 PBR 贴图的皮肤缺省 `pbr`）。预设表、发光组与 PBR 见下方"材质、发光组与 PBR"；旧式材质名（`bloom`、`nocull` 自动切换、light→tohru）照旧可用 |
 | `gui_render_controller` | **通常无需配置**：缺省统一为 `controller.render.ysm_pack_gui`，所有模型共用。`AddActorRenderControllerArray` 改的是**控制器定义本身**（全局），所以共享控制器的数组只由运行层追加一次固定槽位名 `Texture/Geometry.ysm_skin_slot_1..31`，每个预览实体把**自己的**第 i 个可选皮肤注册到槽位 i（没有的槽位回落默认皮肤）；JSON 里的数组必须只留 `default`。声明自定义控制器时沿用旧行为（按皮肤名往该控制器追加数组，多个模型别共用同一个自定义控制器） |
 | `replace_entities` | `{实体ID: {geometry, texture, animations, animate, ...}}` 弹射物/载具替换表，与 `files.projectiles`/`vehicles` 推导结果**逐 ID 字段级浅合并**。内层 `animations`/`animate` 用 `{}` 键值对。**通常无需配置**：几何/贴图推导+共享资源直通+动画路径解析已覆盖常见场景（内置模型都已零补丁），只在推导确实表达不了时用（如替换实体的自定义状态条件覆盖）。载具另自动带根骨骼缩放动画（Java 硬编码 0.7，与玩家同一换算比取 0.8，骑手与载具的相对大小同 Java）与本包音效登记；**载具的写入与存档语义对齐 Java**：第一乘客上车写入该玩家模型、下车不撤、随载具实体存档，直到下一个第一乘客覆盖（船、运输船与矿车是引擎硬编码渲染，直接换上后引擎不再转模型，运行层在根骨骼上补朝向、矿车照 Java 按车底轨道形状定，创作者无感） |
 | `arrow` | ~~箭矢替换直通~~ **已由 `files.projectiles` + `replace_entities` 取代**（Java 原生位置声明抛射物，netease 只补差量）。旧字段仍兼容；`files.projectiles`（或 Java 废弃字段 `files.arrow`）声明 `minecraft:arrow` 时 `arrow` 键自动派生，无需手写。注意区分：这里说的是顶级网易扩展 `arrow`，Java 的 `files.arrow` 已按弹射物正常解析 |
@@ -163,10 +164,11 @@ MC Studio 开发测试和正式游戏都只启用这个组件的资源包，`ysm
 | `preview_parallel` | 选择界面预览用的**并行叠加动画**。字符串形态：单动画 ID，仅大预览窗生效（条件 `variable.ysm_preview == 1.0`，内置酒狐系的纸娃娃站姿即此）；列表形态：多动画 ID，列表缩略图+大预览窗都生效（`ysm_show \|\| ysm_preview`）。**javaMode 包自动推导**为模型自有的 `parallel0-7`/`pre_parallel0-7` 全表（Java 的并行动画恒 LOOP 含 GUI——隐藏/摆位装饰部件靠它，不叠上去预览就是零件摊开的杂乱状态），显式声明仍优先。**GUI 展示动画**（Java `properties.preview_animation` → `gui_animation`）指向资源包里不存在的动画时（野外包常见：声明了 `stage` 却没这条动画），索引确认缺失即回落注册表 `idle` 并告警（Java 对此静默不播）；GUI 预览注册链路与玩家侧同样经资源索引剔除坏引用，不再逐帧刷 `can't find`。自动推导的全表同时包含并行族的**伴生动画**（`pre_parallel0__own1` 之类，见"动画流畅度"⑬）；其余动画的伴生由主包自动生成的配置字段 `preview_companions`（`{原动画 ID: [伴生 ID…]}`，无需手写）在注册 GUI 展示动画/预览动作表时同条件带上 |
 | `channel_ownership` | **移植工具维护，不要手写**：`{伴生键: 权重}` —— 逐通道覆盖拆出的伴生动画 `<键>__own<N>` 里由主包直挂的那部分的让位权重（读 `variable.ysm_ownset_<n>`）。① 带 override 的直挂条件动画（hold/passenger/carry_on）：值是核心权重，主包挂 原条件 `&&` 核心；② 裸 `pre_parallelN`/`parallelN` 直挂早层：值是带 1e-4 下限的完整权重，主包挂 `门?权重:0`；③ 给 **GUI 展示动画**让位的 pre_parallel 伴生（Java cap 通道晚于 pre_parallel —— 官方酒狐的 pre_parallel 把舞台骨骼缩成 0，展示动画再放出来）：权重读卡片纸娃娃的 `variable.ysm_show`，预览实体按同一份权重注册（自动生成的配置字段 `preview_parallel_weights`）。缺项时只用原条件（等价未拆分）。见"动画流畅度"⑬ |
 | `java_state` | **移植工具维护，一般不用手写**：本包要主包运行层维护哪些 Java 专有量。`needs`（`weather`/`open_air`/`dimension`/`light`/`air`/`health`/`hit_target`/`fishing`/`ladder_facing`/`frozen`/`texture`）—— 产物里读了对应落点（`query.mod.ysm_weather`、`variable.ysm_env_dimension` 等）就要声明，没声明的量读到的是缺省值；`roaming` —— Java `v.roaming.*` 扁平化后的变量名清单（`roaming_a` …），运行层给它们做存档与多人同步（上限 64 个；解析器会自动并上表单变量与文件扫描到的 `roaming_*`，漏写也能同步）；`probes` —— `{探针变量名: 声明}`，带常量参数的 Java 函数（`effect_level`/`enchant_level`/`block_name`/`block_name_any`）由运行层每 2 tick 求值写进 `variable.ysm_pb_*`。手写基岩包想用这些量也可以照此声明。落点全表见 `docs/ysm-java-molang-mapping.md` 第七节 |
+| `passenger_locators` | **移植 / 修复工具维护，不要手写**：`{载具条目的 model 声明: [[x, y, z] 或 null, ...]}` —— 载具几何里定位组 `PassengerLocator`、`PassengerLocator2` … `PassengerLocator8` 的静止位置（模型像素，下标 = 乘客序号，累计祖先骨骼的绑定旋转）。对齐 Java 发行版的定位组：YSM 骑手的**渲染原点**摆到定位点在画出来的车模型上的位置（乘载具的渲染缩放：Java 0.7，基岩 0.8），YSM 骑手再下移 0.5 格（×8⁄7）；只挪模型，摄像机与实体位置照旧；没有对应序号的乘客保持原版位置。几何里改了定位组后跑一遍修复工具 |
 | `extra_stop_expression` | 轮盘播放动画的停止条件 molang（缺省为系统默认"移动/跳跃/潜行时停止"，置空 `""` 关闭）；条目键自带播放参数的旧指令形态不受影响 |
 | `java_state_driver` | **Java 模式的覆盖开关，正常无需书写** —— 模式按 `files.player.animation` 的声明形态自动判定（dict = Java 语义槽位 → Java 模式；list = 旧版/基岩扩展 → 旧版基线）。只在自动判定不合意时显式写 `true`/`false` 强制（两个方向都支持）。Java 模式的行为:①状态动画按 Java `AnimationRegister` 优先级链合成互斥 molang 条件直驱（死亡>骑乘链(vehicle$ 条件/猪/鞍乘/船/被抱/sit 兜底)>睡觉>泳姿>爬行>爬梯>飞行>鞘翅>踩水>受击>跳跃>潜行>疾跑/走/待机）;②**动画基线换血**——底表从旧版共享资源（fight 战斗状态机/TACZ/CarryOn/actor 姿态族）换成 `java_default` 官方基线包,缺失的键回落官方 default 动画（Java `AnimationStore` fallback 语义）,基线的手持条件动画对模型生效,`swing_hand`/`use_mainhand` 为条件无命中时的兜底;③旧版控制器/`injectRes` 注入/CarryOn 共享预览一概不带——**模型动画失败就表现为失败,不再被旧版动画顶替**;④`parallel0-7`/`pre_parallel0-7` 恒播（仅 `!v.is_first_person` 门——纸娃娃保留播放,隐藏装饰件靠它;主域并行动画在 FP 会驱动同名骨骼的手臂几何,Java FP 是独立域只播 fp_arm 空壳）,纸娃娃另经独立键 `idle_gui` 播 idle;⑤**标准键不再盲注册**（缺键回落基线,与 Java `AnimationStore` 一致——`sneak_arm` 等网易专属键 Java 包必缺,盲注册只会用坏 ID 顶掉基线兜底）;⑥轮盘键在资源索引确认缺失时**静默跳过**（Java 对无动画的轮盘键即无操作——表单宿主键/纯文本签名键属此类）,基线已提供的键（`extra0-7` 等）不盲注册以保基线兜底。**注**: `java_default` 官方基线包**不入版本库**（官方 default 模型版权归 YSM 作者,`.gitignore` 已排除）——本地执行 `python devtools/port_java_pack.py .ref/ysm-java-src/src/main/resources/assets/ysm/builtin/default --name java_default` 即从子模块自带的官方包生成;基线缺席时装载告警一次,缺键就是缺键（等价于 Java 删掉内置 default 的降级形态） |
 | `animations_remove` 等 `*_remove` 族 | `[键, ...]` 从合成结果中剔除指定注册项（精确对齐用）。其中 **`animate_remove` 只对旧版声明形态（`files.player.animation` 写 list）有意义** —— 它是相对旧版共享基线 `animate` 表的差量；Java 格式包没有基线表、通道接管也自动推导，写它无效（一律忽略） |
-| `skins` | `{皮肤名: {字段...}}` 皮肤级覆盖/补充（如发光皮肤的 `material`、完整自定义皮肤声明） |
+| `skins` | `{皮肤名: {字段...}}` 皮肤级覆盖/补充（如发光皮肤的 `material`、基岩真实路径的 `pbr` 贴图 `{"normal": 路径, "specular": 路径}`、完整自定义皮肤声明） |
 | `preview_animation` | `{"键": ["动画ID", "显示名"]}` 整体覆盖选择界面预览动画表。**通常无需配置**：预览切换列表是网易 UI 独有特性（Java 卡片只播 `properties.preview_animation` 单动画），标准表（17 标准动作 + 4 CarryOn）由系统按命名空间自动推导 |
 | `preview_animation_extra` / `preview_animation_remove` | 预览动画表增量：`{"键": ["动画ID", "显示名"]}` 按键覆盖/追加、`[键, ...]` 按键剔除。**通常无需配置**：标准预览条目的动画 ID 会**优先取注册表同键实际值**（模型声明覆盖过的键——网易键名文件、`_man` 变体等——预览自动播真实注册的动画），只在需要额外预览条目/改显示名时用 |
 
@@ -177,6 +179,39 @@ MC Studio 开发测试和正式游戏都只启用这个组件的资源包，`ysm
 > 酒狐/JK 酒狐）= Java 官方内置"酒狐与小伙伴"合集的**移植产物**（主包收录其中 6 个变种），示范合集
 > 文件夹、Java 高级轮盘三件套（`#分类` → `$子轮盘`、`#按钮` 配置表单）、`files.projectiles`/
 > `vehicles`/`files.arrow`；`ref_*` = 三个社区 Java 包的移植产物（复杂作者状态机）。
+
+## 材质、发光组与 PBR
+
+材质不只决定着色：YSM 的泛光/描边后处理靠帧缓冲 alpha 认像素（0.2 = 泛光、0.3 = 描边）。所以写**预设名**，
+运行层按玩家的描边开关自动换对应变体；直接写原版材质名（`entity_alphatest` 之类）也能渲染，但开了描边的玩家看不到这个
+模型的描边。
+
+| 预设 | 效果 | 对应 Java |
+|---|---|---|
+| `cutout` | 裁切（丢 alpha < 0.1），不剔除背面 —— **Java 模式包缺省** | `entityCutoutNoCull` |
+| `cutout_cull` | 裁切，剔除背面 | — |
+| `translucent` | 按贴图 alpha 半透明混合，不剔除背面 | `entityTranslucent`（模型含半透明像素时） |
+| `emissive` | 不受光照（夜里照样亮）+ 泛光 | 发光组（见下） |
+| `pbr` | `cutout` + 法线/高光贴图（见下）—— **皮肤带 PBR 贴图时的缺省** | Oculus/Iris 光影包渲染的 PBR |
+| `bloom` / `bloom_nocull` | 贴图 alpha < 0.3 的像素当发光（基岩 YSM 旧约定）—— **旧版模型缺省** | — |
+
+- **写法**：顶级 `material` 作用于全部皮肤（inherit 皮肤继承），`skins.<皮肤名>.material` 单独覆盖某个皮肤。
+  字符串 = 整个模型一种材质；二维数组按**材质键**分别指定，`default` 是模型本体，`ysm_glow` 是发光组。
+- **发光组**：骨骼名以 `ysmGlow` 开头（区分大小写）的骨骼走材质键 `ysm_glow`，缺省 `emissive`；与 Java 一样
+  **只作用于这根骨骼本身**，子骨骼要各自以 `ysmGlow` 开头。想让发光组换别的效果，在 material 数组里写
+  `["ysm_glow", 预设]`（写 `cutout` 等于关掉发光）。泛光效果要玩家在设置里开着泛光。
+- **PBR 贴图**：Java 的 `files.player.texture` 条目写成 `{"uv": …, "normal": …, "specular": …}` 就是按皮肤带 PBR
+  （两张可只写一张；载具 `files.vehicles` 的 `texture` 同理）。按 **LabPBR** 解释，与 Java 交给 Oculus/Iris 光影包的
+  是同一份图，原样可用：
+  - `normal`（`_n`）：RG = 切线空间法线（DirectX 朝向，绿通道朝贴图下方），B = AO（255 = 无遮蔽）；
+  - `specular`（`_s`）：R = 光滑度，G = F0 反射率（≥ 230 为金属，按反照率着色），A = 自发光强度
+    （0~254，255 = 无；过半写泛光遮罩）。
+
+  Java 没装光影时 PBR 图不起作用；基岩这边**恒按前向光照近似**：法线图调制原版明暗、日月方向高光（强度随所在
+  位置亮度）、高光图 alpha 自发光。平法线 + 无高光的像素与 `cutout` 完全一致。贴图文件与皮肤贴图同一规则
+  拍平到 `textures/entity/<包名>/<文件名>`（移植工具一并拷贝），无扩展名的写法视为基岩真实路径原样引用。
+  解析结果是皮肤数据的 `pbr` 字段，**不参与皮肤继承**（与 Java 一样按贴图各一套）。
+  暂不支持：投射物（沿用原版渲染控制器，告警忽略）、选择界面的预览卡片（按 `cutout` 显示）。
 
 ## 预览实体定义模板
 
@@ -298,13 +333,15 @@ print(comp.AddPlayerAnimation("probe", "animation.<包名>.walk"))
 > `LeftHandLocator` —— 工具自动在定位骨骼下补这两根空骨骼（主几何 pivot 就取父骨骼 pivot，
 > 与作者自制的基岩版一致，第三人称摆位由主包按物品类别叠修正动画
 > `animation.ysm.java_item_fix_*`/`java_bow_fix`/`java_crossbow_fix`；arm 几何沿用原版的 z+1；
-> 都带 `lead_hold`/`lead_hold2` 拴绳点。早先主几何也是 z+1，修复工具会把形状完全等于生成物的
-> 旧骨骼挪到新挂点），**主几何与 arm 几何两份都补**
+> **不带**拴绳 locator —— 玩家身上的锚点几何 `default_steve` 已有原版 `lead_hold`，几何之间同名不同位置
+> 引擎报错丢弃，Java 的拴绳挂点本就是原版固定偏移、与模型无关。早先主几何也是 z+1、还带 `lead_hold`/`lead_hold2`，
+> 修复工具会把形状完全等于生成物的旧骨骼改成现行形态），**主几何与 arm 几何两份都补**
 > （主几何缺了就是第三人称弓/弩/盾不显示、普通物品掉回实体原点；第一人称的手持物
 > 绑在原版体型锚点上，不依赖 arm 几何的这两根骨骼，补上只是两份几何同构）；
 > 自己写了这两根的包原样保留；⑪ **背面不剔除**：
-> Java 模式包未显式声明 `material` 时回退 `bloom_nocull`/`bloom_plus_nocull`（Java 侧是
-> `entityCutoutNoCull`，作者按两面可见建模；基岩默认剔除会让火焰/飘带只有正面显示）；
+> Java 模式包未显式声明 `material` 时回退 `cutout` 预设（Java 侧是 `entityCutoutNoCull`：裁切阈值 0.1、
+> 作者按两面可见建模；基岩默认剔除会让火焰/飘带只有正面显示。早先回退的 `bloom_nocull` 会把 alpha < 0.3 的
+> 半透明像素当发光），见"材质、发光组与 PBR"；
 > ⑬ **逐通道覆盖**（`ApplyChannelOwnership`，移植期最后一步）：Java 每个（骨骼, 通道）由最后
 > 处理的通道决定——作者控制器接管的通道（含 `player.parallel_N`）连旋转也是覆盖，只有内置
 > 并行通道（裸 `parallelN`）旋转相加；基岩逐通道相加、缩放相乘。早层动画里会被晚层**条件状态**
@@ -404,7 +441,8 @@ print(comp.AddPlayerAnimation("probe", "animation.<包名>.walk"))
 
 ## 暂不支持
 
-- **PBR 贴图**（`normal`/`specular`）：玩家与替换实体均只取 `uv`（替换实体侧会告警）。
+- **投射物的 PBR 贴图**（`normal`/`specular`）：投射物沿用原版渲染控制器，只取 `uv` 并告警（玩家与载具已支持，
+  见"材质、发光组与 PBR"）。
 - **条件动画里的模组专属分类**（`:slashblade`、`:gohei`）：基岩无对应判定，跳过并告警。
 - **`riptide`（激流冲刺）状态**：基岩无对应 query（`is_riptide` / `is_auto_spin_attack`
   实测均不存在）。

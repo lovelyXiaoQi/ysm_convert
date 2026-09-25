@@ -76,7 +76,7 @@ Java 注册顺序 = 处理顺序 = 覆盖顺序(java:client/controller/collectio
 | 8 | `player.hold_offhand` | 0.1 | `hold_offhand$/#/:` | 合成 animate 条件(§3) | |
 | 9 | `player.hold_mainhand` | 0.1 | `hold_mainhand$/#/:` | 合成 animate 条件;基线另有 `controller_hold` 播共享持物姿态 | |
 | 10 | `player.post_hold[_*]` | 0 | 空 | 同 #4 | |
-| 11 | `player.fire` | 0 | 枪械开火(仅 TACZ/SWarfare 安装时创建) | tacz upbody `hold_fire`/`aim_fire` 状态(`v.tac.is_fire`,on_entry 自清) | |
+| 11 | `player.fire` | 0 | 枪械开火(仅 TACZ/SWarfare 安装时创建) | 旧版:tacz upbody `hold_fire`/`aim_fire` 状态(`v.tac.is_fire`,on_entry 自清);Java 模式:生成式状态机 `ysm_tac_fire`(idle + 每成员一对 `<键>`/`<键>__re`,主包运行层维护动作序号 `query.mod.ysm_tac_action_serial`,开火 / 近战 / 换弹开始各 +1,序号变了按 reload > melee > climbing/aim/hold fire 进成员 = 从头重播;挥动 / 使用物品 / 收枪即回 idle) | Java 每次射击 / 近战 / 换弹事件都让本通道重播(TacEvent → 先播 "empty");hold 通道持枪姿态由直挂条件动画 `tac.cls.<族>.<类型>` 驱动 |
 | 12 | `player.pre_swing[_*]` | 0 | 空 | 同 #4 | |
 | 13 | `player.swing` | **0** | `swing$/#/:` + 兜底 | `controller_swing`(fight 状态机,`v.attack_time` 驱动);Java 模式:生成式状态机 `ysm_swing`/`ysm_fp_swing`(idle + 每成员一对 `<键>`/`<键>__re`;主包共享动画维护挥动序号 `v.ysm_swing_serial`,序号变了就进入/切到孪生态 = 时钟回零;播完回 idle) | Java SwingPredicate **每次起挥都 indicateReload**:挥动中再挥会打断重播(引擎前半程再挥不重启挥动)。"播完才走"只针对没有新挥动的情形。⚠️ 直挂 animate 条目对不循环动画**不重放**(实机只播第一次),一次性通道必须走状态机 |
 | 14 | `player.post_swing[_*]` | 0 | 空 | 同 #4 | |
@@ -86,8 +86,8 @@ Java 注册顺序 = 处理顺序 = 覆盖顺序(java:client/controller/collectio
 | 18 | `player.passenger` | 0.1 | `passenger$/#`(实体骑在玩家头上) | **未实现**(可用 `query.has_rider` 近似) | ⚠️ 缺口 |
 | 19 | `player.carry_on` | — | CarryOn 模组 | `carryon_ctl`(`query.mod.ysm_carryon` 1/2/3)+ 公主抱(`ysm_riding==5`) | ✅ |
 | 20 | `player.cap` | 0 | 轮盘 extra 动画(§5) | `/playanimation` + 停止表达式 | Java 此通道无 Hybrid(纯硬编码) |
-| 21 | `player.gui_hover` | 0 | 鼠标悬停(仅预览实体创建,guiOnly) | 无对应(§6) | |
-| 22 | `player.gui_focus` | 0 | 选中(仅预览实体) | 无对应(§6) | |
+| 21 | `player.gui_hover` | 0 | 鼠标悬停 `hover` / 移出 `hover_fadeout`(仅预览实体创建,guiOnly) | 共享控制器 `controller.animation.ysm.gui_hover` / `gui_hover_fadeout`,卡片纸娃娃按 `variable.ysm_gui_hover` 切态(§6) | ✅ |
+| 22 | `player.gui_focus` | 0 | 获得焦点 `focus`(仅预览实体) | 共享控制器 `controller.animation.ysm.gui_focus`(`variable.ysm_gui_focus`,§6) | ✅ |
 | 23 | `player.parallel_0..7`(multi 模式可任意名) | 0 | 恒播 `parallel<n>`,**旋转加法混合**(仅内置通道;作者控制器接管后位移/旋转/缩放全覆盖,§4) | `default_ctl` 播 parallel1-4(**覆盖语义**);Java 模式 animate 补 `"1"` | ✅ 基岩默认即逐通道相加,parallel 通道动画不加 override 标志即得加法(§4) |
 | 24 | `player.armor_<slot>`(head/chest/legs/feet/mainhand/offhand) | 0 | `<slot>$/#` + `<slot>:default` 兜底 | 合成条件(仅 head/chest/legs/feet 四槽) | mainhand/offhand 甲槽与 `:default` 兜底为缺口(wiki 也只文档化四槽) |
 
@@ -259,7 +259,8 @@ wiki《玩家主动画》把 `main.animation.json` 里 28 个名字都叫"主动
 | `vehicle` | vehicle | `query.is_riding_any_entity_of_type` | ✅($)/ ⚠️(#) |
 | `passenger` | passenger | — | ⚠️ 未实现 |
 | `chair`(女仆坐垫) | vehicle | — | ⚠️ 未实现 |
-| `tac:<姿态>$<枪ID>` | 枪械 | TACZ 走 `v.tac.*` 变量 + tacz 控制器体系(另一套等价实现) | △ 机制不同但覆盖 |
+| `tac:<姿态>:<类型>` | 枪械 | Java 模式:主包运行层把枪械模组的 `v.tac.*` 归一成 `query.mod.ysm_tac_*`,主链持枪版 / hold 通道条件动画 / fire 通道状态机按 Java TACZCompat 三通道合成;旧版模型仍走 tacz 控制器体系 | ✅ |
+| `tac:<姿态>$<枪ID>` | 枪械 | 协议里没有枪 ID,移植时跳过 | ❌ |
 
 ### 3.3 `:` 分类清单对照
 
@@ -353,7 +354,7 @@ Java 同一状态内的多条动画是加权相加(`BedrockAnimationController` 
 | Java | 触发 | 基岩 |
 |---|---|---|
 | `properties.preview_animation`(任意名,2.2.1 前硬编码 idle) | 选择界面待机 | 预览注册表查找:同键取真实注册值,无则标准推导(packParser.py:1811-1822) |
-| `hover` / `hover_fadeout` / `focus`(2.2.2;focus 限 1.20+) | 鼠标悬停/移出/选中 | ❌ 无对应 —— 网易 UI 不驱动模型 hover;预览动画用 `variable.ysm_preview / ysm_gui / ysm_show` 条件(client/render/previewRender.py:25/35/50) |
+| `hover` / `hover_fadeout` / `focus`(2.2.2;focus 限 1.20+;名字写死,模型动画表里有就播) | 鼠标悬停 → hover(强制循环);移出 → hover_fadeout,从最后一帧悬停起播满它自己的 animation_length;再悬停 hover 从头播;卡片获得焦点(点击)→ focus,与 hover 同播、在后覆盖(`CatalogModelPreviewAnimationState`) | ✅ 解析器按动画表产出 `gui_card_animations`(fadeout 时长取资源索引,Java 口径);预览实体在展示动画之后、parallel 之前挂共享控制器(`ysm_rp/animation_controllers/java_mode/gui_card.animation_controllers.json`,进态即从头播);三个选择界面在每帧的卡片绑定里读按钮 `hover`/`pressed` 子控件,经 `client/ui/cardPreviewAnimation`(逐条对照 Java 状态机)把 `variable.ysm_gui_hover`(0/1/2)、`variable.ysm_gui_focus` 写进卡片的 `molang_dict`。焦点 = 最后点击的模型卡,搜索/进出文件夹时清空(Java `init()` 重建按钮);触屏模式不悬停。移植工具按 Java 定循环(hover/focus 循环、fadeout 播一遍),被裸 parallel 恒播覆盖的位移/缩放照展示动画删掉 |
 | `disable_preview_rotation`(2.3.0) | 取消预览旋转: 卡片缺省 yBodyRot 200(比正对多转 20°)、姿态栈绕 X -10°(略俯视), 置 true 才正对(`RenderUtil.renderModelInGui`) | 卡片纸娃娃 `init_rot_y` 200 / `init_rot_x` 10, 置 true 时 180 / 0(`client/ui/modelCard.ApplyCardRotation`; 展示动画是按各自取景摆的, 一律正对会歪) |
 | `player.gui_hover/gui_focus` 通道仅在预览实体创建(guiOnly,PlayerControllerCollection.java:65-66/88-90) | | 预览实体走 AddActor* 系 API,与玩家渲染隔离 —— 同思路 |
 
@@ -492,7 +493,12 @@ wiki 更新日志(新分类/新槽位)。
 
 **已对齐 ✅**
 - 条件动画 hold/swing/use + 甲槽四件 `$`/`#`/`:` 合成(含 $># >: 优先级否定链、转义、纸娃娃门)
-- `vehicle$`、CarryOn 三态 + 公主抱、TACZ 全套(变量体系等价实现)
+- `vehicle$`、CarryOn 三态 + 公主抱
+- 枪械(TACZCompat 三通道):主链持枪版 `tac:<状态>`、hold 通道(爬行移动 > 爬行静止 > 瞄准 > 在地疾跑 > 持枪)、
+  fire 通道(换弹 > 近战 > 开火,逐发重播),数据来自基岩枪械模组写的 `v.tac.*`(主包 `client/tacStateSync` 归一,
+  协议与对接要求见 `ysm-tac-protocol.md`);缺的枪械动画按名字逐个回落 Java 默认模型。枪械模组的姿态也走协议:
+  趴下 `v.tac.is_crawling` = TACZ 趴下 = 爬行姿态(主链 climb/climbing)、下蹲 `v.tac.is_sneaking` = 潜行姿态;
+  滑铲 `v.tac.slide` 是基岩扩展(主链 `slide`/`tac:slide`、hold `tac:slide:<类型>`,默认动画取自旧版枪械兼容)
 - 轮盘全家桶(保序/子菜单/按钮/停止表达式≈移动打断)、preview 注册表
 - 标准 19 槽位中 15 个有基线挂载,death/ladder×3 按需合成
 - fp_arm 声明合成、blend_weight molang、HOLD_ON_LAST_FRAME、loop 缺省单次
@@ -509,12 +515,19 @@ wiki 更新日志(新分类/新槽位)。
 - `:lance`(2.6.5)、`swing_offhand` 副手挥击信号、`sit` 未知载具兜底
 - `elytra_fly` / `idle` / `use_lefthand` 三键基线不消费(仅预览/Java 模式)——
   模型自定义鞘翅/待机想在基线第三人称生效需补 animate 或控制器状态
-- GUI hover/hover_fadeout/focus;轮盘运行时"锁定"开关
-- 替换实体:乘客座位定位骨骼(`PassengerLocator*`,Java 3.0-dev 里本身还是 TODO)、
+- 轮盘运行时"锁定"开关
+- 选择界面交互动画的余量:界面里的动画音效/粒子不发(纸娃娃没有世界位置);hover/focus 与前面层逐通道覆盖按骨骼整体近似
+  (override 通病,warden 悬停时 AllBody 缩放、wither 悬停时 sickle 缩放会被清掉;官方酒狐 06/07 无此情形);
+  点击卡片以外的按钮不会把焦点移走(Java 会)
+- 替换实体:乘客座位定位骨骼(`PassengerLocator*`)只取静止位置 —— Java 把定位骨骼链上的动画位移/旋转/缩放一并带给骑手,
+  基岩只平移骑手模型、不转不缩(定位组 2026-09-24 起支持:移植工具写顶级 `passenger_locators`,主包平移骑手根骨骼)、
   (载具/弹射物的 `roaming` 变量 2026-09-18 起随主人复制:生成/上车时服务端抄一份快照,第一乘客骑乘中改了再刷)
   矿车朝向按轨道方块逐 tick 取(Java 在弯道上按插值位置前后 0.3 格连续变化,这里过弯是两次 45° 跳变)、
   矿车不复刻轨道坡度与受击摇晃(Java 同样没有)
 - `riptide`(`query.is_auto_spin_attack` 网易不可用,硬缺口)
+- 枪械:逐枪条件动画 `tac:<姿态>$<枪ID>`、`ctrl.tac_gun_id`/`tac_fire_mode`(协议里没有枪 ID 与射击模式);
+  射击冷却按每发之后固定 0.15 秒(Java 按射速);Eplus 专有状态(空仓换弹 2、检视 `state`、拉栓 `is_fire==2`、战术冲刺)
+  按 Java 口径不单独区分;Eplus 近战武器的格挡也写 `is_reload`(与旧版 YSM 同样当换弹)
 
 **机制性不可复刻 ❌(设计绕行)**
 - 逐通道覆盖的**过渡期**:基岩伴生动画按占用变量硬切让出,Java 从当前姿态快照插值(§9)

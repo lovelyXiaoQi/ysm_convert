@@ -19,14 +19,12 @@ idle/walk/run 主链动画是空的, 姿态全靠这份脚本 —— 不转换�
 路径上的常量赋值(`v.anim_ctrl=1;`)落到该状态 on_entry(每帧重复赋同一个值, 进入时赋一次等价);
 起始过渡写成该状态的 blend_transition(Java 口径 = 被进入的状态, 移植工具随后按目标重映射)。
 
-不转换(整份跳过并留痕, 宁缺勿错): 内置谓词不是空的通道(main/use/swing/parallel_N 等 —— 放行要交回
-内置谓词, 基岩侧对应物是主链状态机/一次性通道, 拆不开)、同名基岩控制器已存在(Java 优先用基岩控制器)、
-非常量赋值(计数器/随机数/逐帧积分)、循环、set_animation 带循环类型参数、走到 continue 时本路径没选过
-动画(Java 沿用上一帧的动画, 状态相关)、分支块在不 return 的路径上改了状态。
-声音 / indicate_reload / reset 之类副作用调用忽略(基岩表达式层无对应)。
+展开不了的(抛 ScriptNotConvertible)交给执行体路径(java_functions.ScriptChannel: 脚本连同 Java 动画播放器
+状态机逐帧编进执行体): 内置谓词不是空的通道(parallel_N 等)、非常量赋值(计数器/随机数/逐帧积分)、循环、
+set_animation 带循环类型参数、走到 continue 时本路径没选过动画(Java 沿用上一帧的动画, 状态相关)、分支块在
+不 return 的路径上改了状态。带音效 / indicate_reload / reset / 函数调用的脚本调用方直接走执行体(这里只能忽略它们)。
+同名基岩控制器已存在(Java 优先用基岩控制器)由调用方跳过。
 """
-import io
-import os
 import re
 from collections import OrderedDict
 
@@ -258,31 +256,3 @@ def ConvertScript(text, channel, defaultBlend=0.0):
     ])
     notes = sorted(set(converter.notes))
     return data, notes
-
-
-def ConvertPackScripts(javaDir, declaredControllerNames):
-    """Java 包 functions/ 里的通道脚本 → ([(通道, 控制器数据, 备注)], [(文件名, 跳过原因)])。
-
-    declaredControllerNames: 包里已声明的基岩控制器名集合(同名时 Java 优先用基岩控制器, 脚本不转换)。
-    """
-    converted, skipped = [], []
-    functionsDir = os.path.join(javaDir, "functions")
-    if not os.path.isdir(functionsDir):
-        return converted, skipped
-    for fileName in sorted(os.listdir(functionsDir)):
-        displayName = fileName.decode("utf-8") if isinstance(fileName, bytes) else fileName
-        channel = ScriptChannel(displayName)
-        if channel is None:
-            continue
-        if u"player.{}".format(channel) in declaredControllerNames:
-            skipped.append((displayName, u"已有同名基岩控制器 player.{}(Java 优先用它)".format(channel)))
-            continue
-        with io.open(os.path.join(functionsDir, fileName), encoding="utf-8-sig") as handle:
-            text = handle.read()
-        try:
-            data, notes = ConvertScript(text, channel)
-        except ScriptNotConvertible as error:
-            skipped.append((displayName, u"{}".format(error)))
-            continue
-        converted.append((channel, data, notes))
-    return converted, skipped

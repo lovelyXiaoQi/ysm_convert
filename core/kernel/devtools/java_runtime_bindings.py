@@ -127,16 +127,31 @@ RUNTIME_NAME_ROWS = [
     ("elytra_rot_z", ELYTRA_ROT_Z),
 ]
 
-# ctrl.* 行(取代 _CTRL_NAME_MAP 里的同名旧行)。
-# **ctrl.tac_* 暂不接**(仍是 _CTRL_NAME_MAP 里的中性常量): 网易 TACZ 联动的数据在结构体变量 variable.tac.* 里
-# (compat/ysm.tacz 控制器读 v.tac.gun_type == 'rifle' 等, 与 Java 同名的字符串), 但产物直接读它有两处没有实机依据 ——
-# ① 变量扫描按 `variable.<名>` 截到 `tac`, 会往预览实体与每实例初始化控制器里写 `variable.tac = 0.0;`, 把结构体变量
-# 写成数值之后再读成员是什么行为不知道; ② `??` 的左侧要求"以变量为根", 结构体成员算不算没测过, 不算的话整份文件拒载
-# (官方酒狐 03 号的主控制器、凋灵娘的 main 动画)。要接先实机探这两条, 再让扫描认结构体根名。
+# ---- 枪械模组联动(与业务包 config/tacState.py 同名同值, devtools/test_tac_state.py 守护) ----
+# 枪械模组写在结构体变量 v.tac.* 上的协议由主包运行层(client/tacStateSync)归一成 Java 口径的 query.mod.ysm_tac_*;
+# 产物不直接读结构体成员(`??` 左侧不能是成员访问、读不存在的成员报错, 纸娃娃上没有这个结构体)
+TAC_QUERY_HOLD_GUN = "query.mod.ysm_tac_hold_gun"
+TAC_QUERY_IS_FIRE = "query.mod.ysm_tac_is_fire"
+TAC_QUERY_IS_AIM = "query.mod.ysm_tac_is_aim"
+TAC_QUERY_IS_RELOAD = "query.mod.ysm_tac_is_reload"
+TAC_QUERY_IS_MELEE = "query.mod.ysm_tac_is_melee"
+TAC_QUERY_IS_DRAW = "query.mod.ysm_tac_is_draw"
+TAC_VARIABLE_GUN_TYPE = "variable.ysm_env_tac_gun_type"
+
+# ctrl.* 行(取代 _CTRL_NAME_MAP 里的同名旧行)
 RUNTIME_CTRL_ROWS = [
     # 主包 query.mod.ysm_carryon: 1 实体 / 2 方块 / 3 玩家(compat/ysm_carryon 控制器同口径), 0 = 没抱东西。
     # Java 是字符串('block'/'entity'/'player'), molang 没有数值→字符串的换算, 比较式由 RewriteCarryonType 改写
     ("carryon_type", "query.mod.ysm_carryon"),
+    # Java TacCtrlBinding: 布尔量(射击 / 近战 / 拔枪冷却 > 0 等)与枪种字符串。枪 ID(tac_gun_id)与射击模式(tac_fire_mode)
+    # 协议里没有, 仍按"没拿枪"的空串(_CTRL_NAME_MAP)
+    ("tac_hold_gun", "({}>0.5)".format(TAC_QUERY_HOLD_GUN)),
+    ("tac_gun_type", _StringRead(TAC_VARIABLE_GUN_TYPE)),
+    ("tac_is_fire", "({}>0.5)".format(TAC_QUERY_IS_FIRE)),
+    ("tac_is_aim", "({}>0.5)".format(TAC_QUERY_IS_AIM)),
+    ("tac_is_reload", "({}>0.5)".format(TAC_QUERY_IS_RELOAD)),
+    ("tac_is_melee", "({}>0.5)".format(TAC_QUERY_IS_MELEE)),
+    ("tac_is_draw", "({}>0.5)".format(TAC_QUERY_IS_DRAW)),
 ]
 
 _CARRYON_TYPE_VALUES = {"entity": 1, "block": 2, "player": 3}

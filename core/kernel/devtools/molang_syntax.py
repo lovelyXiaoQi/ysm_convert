@@ -44,6 +44,11 @@ validate_rp_animations.py 用同一判定把残留当错误拦。
   比较或逻辑运算(`v.a > 1 ?? 4`、`v.a && 1 ?? 7`)非法。EvalMolangExpression 在**带分号的语句里**放行
   `return (1 ? a : b) ?? 5;`, 但资源包文件(旧版语义)连语句里的三元左侧也拒载(语义探针文件
   `variable.ysm_mp_nullish_tern = (1 ? a : b ?? 5);` 让整份探针作废) —— 这里按资源包的严格口径一律判非法。
+  **结构体成员访问也不是变量引用**(2026-09-23 引擎日志, 转换包初始化控制器的
+  `variable.roming.mask = variable.roming.mask ?? (0.0);` 报同一句): 变量名后再接 `.成员` 的一律判非法。
+- **控制流(2026-09-23 EvalMolangExpression 实测)**: loop 里 `条件 ? break;` / `条件 ? continue;` 放行且语义同 C(嵌套
+  循环里 break 只跳出内层); `return` 写在块里、循环里都放行, 并直接结束**整个表达式**(之前的赋值照常生效);
+  loop(2000, …) 照跑 2000 次; 读未定义的 t./v. 变量让整段表达式中止(返回 0, 不报错)。
 """
 import re
 
@@ -236,6 +241,8 @@ class _Parser(object):
                 return
             if head in _BARE_OPERANDS:
                 return
+            if head in ("break", "continue"):
+                return          # `条件 ? break;` 作条件分支(2026-09-23 引擎实测放行, Java 作者常用)
             raise _MolangSyntaxError(u"裸标识符 {}".format(value))
         if head not in _NAMESPACES:
             raise _MolangSyntaxError(u"未知命名空间 {}".format(parts[0]))
@@ -286,8 +293,8 @@ _ARITHMETIC_OPS = frozenset(("+", "-", "*", "/"))
 
 
 def _VariableRooted(node, text):
-    """?? 左操作数是否以变量为根(规则与实测见模块注释): 括号透明; 变量(含 [下标]); 一元运算套变量;
-    四则运算里至少一侧以变量为根; ?? 链看它自己的左侧"""
+    """?? 左操作数是否以变量为根(规则与实测见模块注释): 括号透明; 变量(含 [下标], 不含结构体成员访问);
+    一元运算套变量; 四则运算里至少一侧以变量为根; ?? 链看它自己的左侧"""
     while node.kind == "group" and node.children and text[node.start:node.start + 1] == "(":
         node = node.children[0]
     if node.kind == "atom" or node.kind == "call":
@@ -295,6 +302,8 @@ def _VariableRooted(node, text):
         head, dot, rest = source.partition(".")
         if not dot or head.strip().lower() not in _VARIABLE_ROOT_NAMESPACES:
             return False
+        if "." in rest.split("[", 1)[0]:
+            return False  # v.<结构体>.<成员>: 引擎不认成员访问作 ?? 左侧
         return node.kind == "atom" or "(" not in source
     if node.kind == "unary":
         return _VariableRooted(node.children[0], text)
@@ -318,7 +327,7 @@ def _NullishProblem(text):
         if node is None:
             continue
         if node.kind == "binary" and node.op == "??" and not _VariableRooted(node.children[0], text):
-            return u"?? 的左侧不是变量引用(三元 / 常量 / 查询 / 函数调用 / 比较 / 逻辑运算): {}".format(
+            return u"?? 的左侧不是变量引用(三元 / 常量 / 查询 / 函数调用 / 比较 / 逻辑运算 / 结构体成员): {}".format(
                 text[node.children[0].start:node.children[0].end])
         pending.extend(node.children or [])
     return None

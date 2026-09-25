@@ -22,16 +22,19 @@
 
 用法:
     python devtools/port_java_pack.py <Java包目录> [--name <包名>] [--collection <合集目录>] [--with-mods]
+                                      [--java-functions]
     python devtools/port_java_pack.py --list          # 列出子模块自带的官方包
 
 包名缺省取 Java 包目录名; --collection 把模型放进 ysm_models/<合集>/<包名>/,
 配合合集目录下的 ysm-pack.json 生成模型选择界面的文件夹分组。
-默认只移植 main/arm/extra/carryon/fp_arm 等本体动画, 第三方模组联动动画
-(tac/slashblade/parcool/...)整键跳过, 需要时加 --with-mods。
+默认只移植 main/arm/extra/carryon/fp_arm 等本体动画与枪械 tac 动画, 其余第三方模组联动动画
+(slashblade/parcool/...)整键跳过, 需要时加 --with-mods。
+Java 自定义函数(functions/*.molang)是实验性功能, 缺省不转换(fn.* / 音效调用置零), 需要时加 --java-functions。
 """
 import copy
 import errno
 import json
+import math
 import os
 import re
 import shutil
@@ -59,7 +62,10 @@ JAVA_BUILTIN_DIR = _FindJavaBuiltinDir()
 sys.path.insert(0, os.path.join(ROOT, "ysm_bp"))
 from ysmModelScripts.packLoader.packParser import (  # noqa: E402
     AnimationChannelPairs, BuildOneShotControllers, BuildStateChainController,
-    EscapeConditionKey, JAVA_TO_BEDROCK_ENTITY_IDS, JavaStateLoopType, ReplacedTargets,
+    EscapeConditionKey, IsSupportedTacAnimationName, JAVA_CRAWL_POSE, JAVA_SNEAK_POSE, JAVA_TO_BEDROCK_ENTITY_IDS,
+    JavaStateLoopType, SLIDE_POSTURE_WRAPPERS, _BASELINE_COMPAT_PREFIX,
+    PASSENGER_LOCATOR_KEY, ReplacedModelDecl,
+    ReplacedTargets, TacAnimationRole, _ONESHOT_TAC_FIRE_KEY, _TacFireMembers, _BuildTacHoldAnimates,
     StripJsonComments, _BuildConditionalAnimates, _BuildJavaStateAnimates, _CLASSIFY_TESTS,
     _ClassifySelfTest,
     _CONDITION_FALLBACK_KEYS, _OWNERSHIP_COMPANION_PATTERN, _OWNERSHIP_VARIABLE_PATTERN,
@@ -70,12 +76,14 @@ from ysmModelScripts.packLoader.packParser import (  # noqa: E402
     _SplitConditionKey, _STATE_CHAIN_KEY, _STATE_ENTER_BLEND, _UnescapeConditionKey)
 # 基岩 molang 语法判定与 Java 口径守卫(体检脚本共用同一判定, 见 molang_syntax.py 注)
 from molang_syntax import (  # noqa: E402
-    AnimationMolangSlots, ExplicitAnimationPrecedence, ExplicitControllerPrecedence, FormatSlotPath,
-    GuardAnimationMolang, GuardControllerMolang)
-# Java 脚本控制器(functions/*@player_ctrl_<通道>.molang)转换, 见 script_controller.py 注
-from script_controller import ConvertPackScripts  # noqa: E402
+    AnimationMolangSlots, ExplicitAnimationPrecedence, ExplicitControllerPrecedence, ExplicitPrecedence,
+    FormatSlotPath, GuardAnimationMolang, GuardControllerMolang, MolangSyntaxProblem)
+# Java 脚本控制器(functions/*@player_ctrl_<通道>.molang)能展开成决策树的转换, 见 script_controller.py 注
+from script_controller import ConvertScript, ScriptNotConvertible  # noqa: E402
 # Java 专有的环境/状态量、探针函数、骨骼旋转回读、roaming 声明 → 主包运行层(见 java_runtime_bindings.py 注)
 import java_runtime_bindings as runtime_bindings  # noqa: E402
+# Java 自定义函数(functions/*.molang): fn.* 内联、音效调用改写成主包宿主请求、事件体编译(见 java_functions.py 注)
+import java_functions  # noqa: E402
 
 RP = os.path.join(ROOT, "ysm_rp")
 BP_MODELS = os.path.join(ROOT, "ysm_bp", "ysm_models")
@@ -124,12 +132,27 @@ def _DisplayPath(path):
 ARM_ANIMATION_KEYS = ("fp_arm", "arm")
 
 # 第三方模组联动动画: 默认不移植。这些动画的条件键绑定 Java 侧模组物品
-# (tacz/slashblade/superbwarfare 等), 基岩既无对应物品也无对应判定 —— 移植过来
+# (slashblade/superbwarfare 等), 基岩既无对应物品也无对应判定 —— 移植过来
 # 只会堆无效注册与分类告警。要带上时传 --with-mods。
+# 枪械槽位 tac 例外, 默认移植: 基岩的枪械模组(Eplus军械库等)按旧版协议写 v.tac.*, 主包运行层归一成 Java 口径,
+# 解析器按 Java 三通道合成播放(packParser._TAC_HOLD_GUN 上方注); 只带基岩驱动得了的那些(TacSlotSkipNames)
 MOD_ANIMATION_KEYS = (
-    "tac", "parcool", "swem", "slashblade", "tlm",
+    "parcool", "swem", "slashblade", "tlm",
     "immersive_melodies", "irons_spell_books",
 )
+TAC_ANIMATION_KEY = "tac"
+
+
+def TacSlotSkipNames(slotKey, srcPath):
+    """枪械槽位里基岩驱动不了的 Java 动画原名(逐枪条件动画 —— 协议里没有枪 ID; Java 不播的类型后缀如 minigun;
+    手雷; 别的模组的动画)→ 集合; 其他槽位 → 空集"""
+    if slotKey != TAC_ANIMATION_KEY:
+        return set()
+    try:
+        animations = LoadJson(srcPath).get("animations") or {}
+    except (IOError, OSError, ValueError):
+        return set()
+    return set(name for name in animations if not IsSupportedTacAnimationName(name))
 
 
 def LoadJson(path):
@@ -878,9 +901,11 @@ _CTRL_MAIN_PRIORITY = [
     ("riptide", 2, None),                     # 基岩无 is_riptide/is_auto_spin_attack(实测), 恒假
     ("sleep", 3, "query.is_sleeping"),
     ("swim", 4, "query.swim_amount>0"),       # 原生 query; variable.swim_amount 有未初始化风险
-    # Java climb/climbing = Pose.SWIMMING 移动/静止(swim 已先判) —— 基岩原生 is_crawling
-    ("climb", 5, "query.is_crawling&&query.modified_move_speed>0.05"),
-    ("climbing", 6, "query.is_crawling"),
+    # Java climb/climbing = Pose.SWIMMING 移动/静止(swim 已先判) —— 基岩原生 is_crawling 并上枪械模组的趴下
+    # (packParser.JAVA_CRAWL_POSE: 枪械模组的趴下不改原版姿态, 写在协议 v.tac.is_crawling 上, 主包运行层归一)。
+    # 枪械模组的滑铲(基岩扩展的主链状态 slide)Java 没有对应的 ctrl, 不进这张表
+    ("climb", 5, JAVA_CRAWL_POSE + "&&query.modified_move_speed>0.05"),
+    ("climbing", 6, JAVA_CRAWL_POSE),
     ("ladder_up", 7, "query.mod.ysm_is_on_ladder>0.5&&query.mod.ysm_climbing_vector>0"),
     ("ladder_stillness", 8, "query.mod.ysm_is_on_ladder>0.5&&query.mod.ysm_climbing_vector==0"),
     ("ladder_down", 9, "query.mod.ysm_is_on_ladder>0.5&&query.mod.ysm_climbing_vector<0"),
@@ -890,9 +915,10 @@ _CTRL_MAIN_PRIORITY = [
     ("attacked", 13, "query.hurt_time>0"),
     # Java jump = !onGround && !inWater(含下落); 闩锁已含 !in_water
     ("jump", 14, _AIRBORNE_LATCH),
-    # Java sneak = 在地潜行**移动**(limbSwing > 0.05), sneaking = 在地潜行; "在地"由 jump 已先判保证
-    ("sneak", 15, "query.is_sneaking&&query.modified_move_speed>0.05"),
-    ("sneaking", 16, "query.is_sneaking"),
+    # Java sneak = 在地潜行**移动**(limbSwing > 0.05), sneaking = 在地潜行; "在地"由 jump 已先判保证。
+    # 原生潜行并上枪械模组的下蹲(packParser.JAVA_SNEAK_POSE, 与主链潜行组同一判据)
+    ("sneak", 15, JAVA_SNEAK_POSE + "&&query.modified_move_speed>0.05"),
+    ("sneaking", 16, JAVA_SNEAK_POSE),
     ("run", 17, "query.is_sprinting"),        # Java run = onGround && isSprinting(疾跑状态, 非速度阈值)
     ("walk", 18, "query.modified_move_speed>0.05"),
     ("idle", 19, None),                       # LOWEST 兜底: 其余都不成立
@@ -926,10 +952,13 @@ _CTRL_NAME_MAP = [
     ("iss_animation", "''"),
     ("tac_gun_type", "''"),
     ("tac_gun_id", "''"),
+    ("tac_fire_mode", "''"),
     ("tac_hold_gun", "0.0"),
     ("tac_is_fire", "0.0"),
     ("tac_is_aim", "0.0"),
     ("tac_is_reload", "0.0"),
+    ("tac_is_melee", "0.0"),
+    ("tac_is_draw", "0.0"),
     ("im_pitch", "0.0"),
     ("im_volume", "0.0"),
     ("im_current", "0.0"),
@@ -1183,7 +1212,8 @@ _PHYSICS_PI = 3.14159265358979
 
 
 def _SplitTopLevelStatements(text):
-    """按顶层 ';' 切分 molang 语句(括号/引号内不算); 返回 (语句列表, 是否以 ; 结尾)"""
+    """按顶层 ';' 切分 molang 语句(圆括号 / 花括号块 / 引号内不算 —— 块里的语句属于块所在的那条语句,
+    自定义函数内联产出的 `条件 ? {…; …;};` 与 loop(1, {…}) 不能从块中间切开); 返回 (语句列表, 是否以 ; 结尾)"""
     parts, depth, quote, current = [], 0, None, []
     for ch in text:
         if quote:
@@ -1193,9 +1223,9 @@ def _SplitTopLevelStatements(text):
             continue
         if ch in "'\"":
             quote = ch
-        elif ch == "(":
+        elif ch in "({":
             depth += 1
-        elif ch == ")":
+        elif ch in ")}":
             depth -= 1
         elif ch == ";" and depth <= 0:
             parts.append("".join(current))
@@ -1387,6 +1417,16 @@ _MATH_TOKEN = re.compile(r"\bmath\.([A-Za-z_][A-Za-z0-9_]*)")
 # unknown token, 整份文件作废
 _RESIDUAL_JAVA_TOKEN = re.compile(r"\b(?:ysm|ctrl|fn|tlm|args)\.[A-Za-z_][A-Za-z0-9_.]*")
 _ROAMING_PATTERN = re.compile(r"\b(v|variable)\.roaming\.([A-Za-z_][A-Za-z0-9_]*)")
+# 其余单层结构体成员 v.<结构体>.<成员>(作者自建, 实例: 萨赫梅特 v1.1 把 roaming 拼成 roming 的面罩开关)。Java
+# (ExpressionEvaluatorImpl)给成员赋值时结构体不存在就新建, 读不存在的成员得 null(按 0 算, ?? 照常兜底); 基岩读不存在的
+# 成员直接报 "unable to find member variable", 成员访问也不能作 ?? 左侧("isn't a direct-variable reference") —— 初始化
+# 控制器的 `v.x = v.x ?? 默认值` 落在它上面必错。扁平化成普通变量 v.<结构体>_<成员>(roaming 以外的 Java 结构体不存档,
+# 扁平化不丢语义)。两级以上不动(Java 不许结构体嵌套, 赋值恒无效); 前面是 `.` / 标识符的不是变量引用
+# (animation.<包>.v.a.b 之类的 ID)。_BEDROCK_STRUCT_VARIABLES 是基岩侧别的组件写入的结构体(网易 TACZ 的
+# variable.tac.*, compat 动画在读), 修复工具就地迁移时不能把它们冲掉。
+_STRUCT_MEMBER_PATTERN = re.compile(
+    r"(?<![\w.])(v|variable)\.([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)(?![\w.])", re.IGNORECASE)
+_BEDROCK_STRUCT_VARIABLES = frozenset(("tac",))
 # 残缺前缀: 点后没有标识符的 ysm./ctrl./fn.(作者手误或剪贴残片, 实例: 凋灵娘控制器里的
 # "q.all_animations_finishedctrl.")。上面的正则要求点后有标识符, 认不出它, 原样落盘后
 # 引擎报 unrecognized token, 该转移条件所在的整个控制器作废。不加 \b: 残片常粘在前一个
@@ -1666,6 +1706,33 @@ def FoldJavaMolangCase(text):
     return rewritten, counter[0]
 
 
+def FlattenStructMemberText(molang):
+    """一段 molang(不是 JSON 文本)里的 v.<结构体>.<成员> → v.<结构体>_<成员>(见 _STRUCT_MEMBER_PATTERN 注);
+    返回 (新文本, 改写数)。molang 单引号字符串原样; 幂等"""
+    counter = [0]
+
+    def _Flatten(match):
+        if match.group(2).lower() in _BEDROCK_STRUCT_VARIABLES:
+            return match.group(0)
+        counter[0] += 1
+        return "{}.{}_{}".format(match.group(1), match.group(2), match.group(3))
+
+    rewritten = _OutsideMolangStrings(molang, lambda piece: _STRUCT_MEMBER_PATTERN.sub(_Flatten, piece))
+    return rewritten, counter[0]
+
+
+def FlattenStructMembers(text):
+    """JSON 文本版 FlattenStructMemberText: 只动 JSON 值字符串(键是骨骼名 / 状态名 / 动画短名); 返回 (新文本, 改写数)"""
+    counter = [0]
+
+    def _Apply(piece):
+        piece, count = FlattenStructMemberText(piece)
+        counter[0] += count
+        return piece
+
+    return _MapJsonValueStrings(text, _Apply), counter[0]
+
+
 def RewriteJavaLexicalForms(text):
     """true/false 关键字 → 1.0/0.0, 隐式乘法 → 显式 `*`; 返回 (新文本, 关键字数, 乘法数)"""
     counters = [0, 0]
@@ -1771,13 +1838,17 @@ def PortMolangText(text, defaults=None, report=None):
     if foldCount:
         report["map:Java 词法大小写归一(YSM./Query./Math./V. 等 -> 小写)"] += foldCount
     # ① v.roaming.<名> 持久化域(Java 侧存档+网络同步的 Struct)扁平化为普通变量
-    # v.roaming_<名>: 基岩无自定义 struct, 嵌套名求值恒失败; 扁平化后由主包变量
-    # 扫描自动初始化, 丢持久化保功能(builtin 68 个文件 547 处在用)。
+    # v.roaming_<名>: 基岩结构体读不存在的成员报错、成员访问不能作 ?? 左侧(见 _STRUCT_MEMBER_PATTERN 注);
+    # 扁平化后由主包变量扫描自动初始化, 存档与同步由主包运行层接管(builtin 68 个文件 547 处在用)。
     # 排在 ② 之前: ?? 默认值按扁平化后的名字收集
     count = len(_ROAMING_PATTERN.findall(text))
     if count:
         report["map:v.roaming.* -> v.roaming_*(持久化域扁平化)"] += count
         text = _ROAMING_PATTERN.sub(r"\1.roaming_\2", text)
+    # ①' 其余单层结构体成员同样扁平化(见 _STRUCT_MEMBER_PATTERN 注), 同样排在 ② 之前
+    text, structCount = FlattenStructMembers(text)
+    if structCount:
+        report["map:v.<结构体>.<成员> -> v.<结构体>_<成员>(结构体成员扁平化)"] += structCount
 
     # ② ?? 默认值收敛进初始化表。**只处理作者原文**, 所以排在 ②.5 函数调用剥离之前:
     #    ctrl.swing/ctrl.use 的替换体是主包运行时门控(packParser._JAVA_ATTACK_TIME /
@@ -1984,6 +2055,8 @@ def _ShouldOverridePrevious(shortKey, additiveKeys=None, preKeys=None):
         return False
     if _PARALLEL_SHORT_PATTERN.match(shortKey):     # pre_parallelN
         return False
+    if shortKey == java_functions.EXECUTOR_KEY:
+        return False     # 自定义函数逐帧执行体只借骨骼通道跑语句(返回 0), 不能按骨骼整体清掉前面的条目
     matched = _OWNERSHIP_COMPANION_PATTERN.match(shortKey)
     if matched:
         # 通道覆盖伴生动画(ApplyChannelOwnership)与原动画同宿主、同条件播放, 等价原动画的一部分
@@ -2439,6 +2512,13 @@ def ApplyJavaLoopSemantics(shortKey, body):
     raw = body.get("loop")
     current = _NormalizeLoopValue(raw)
     loopType = JavaStateLoopType(shortKey)
+    # 枪械 hold / fire 通道: TacCompatInner 设动画时显式给循环类型(hold 通道 LOOP、fire 通道 PLAY_ONCE), 文件里的 loop
+    # 不算(AnimationPlayer.setAnimation 的 loopTypeOverride); PLAY_ONCE 同挥击族改 hold_on_last_frame(出态不露底)
+    tacRole = TacAnimationRole(shortKey)
+    if tacRole is not None and tacRole[0] == "hold":
+        loopType = "loop"
+    elif tacRole is not None and tacRole[0] == "fire":
+        loopType = "once"
     if loopType == "loop":
         if raw is True:
             return False
@@ -3025,7 +3105,7 @@ def WriteSoundResources(packName, javaDir, soundDirRel, sink):
 # ---- 手持物品的定位骨骼(基岩固定骨骼名) ----
 # 基岩把手持物品渲染在**名为 rightItem / leftItem 的骨骼**上(原版 geometry.humanoid.custom:
 # `rightItem` 是 `rightArm` 的子骨骼, pivot 在掌心并把 z 前推 1, 骨骼里那个 `lead_hold`
-# locator 只是拴绳点)。Java YSM 则渲染在 `RightHandLocator` / `LeftHandLocator` 骨骼上
+# locator 只是拴绳点 —— 生成物不带它, 见 MigrateHeldItemBones 注)。Java YSM 则渲染在 `RightHandLocator` / `LeftHandLocator` 骨骼上
 # (client/model/PlayerLocator.java 的注册表, renderer/layer/CustomPlayerItemInHandLayer
 # 用 visitLocatorGroup 取该组)。两边概念一一对应, 但**基岩只认那两个固定骨骼名** —— Java 包
 # 没有它们, 直接转换过来手持物品不会出现在手上。故移植期自动补一根空骨骼挂到定位骨骼下。
@@ -3143,7 +3223,6 @@ def AddHeldItemBones(geoPath, forward=0.0):
             ("name", itemBone),
             ("parent", str(parent.get("name"))),
             ("pivot", anchor),
-            ("locators", OrderedDict([(leadName, list(anchor))])),
         ]))
         added.append((itemBone, str(parent.get("name"))))
     if added:
@@ -3152,18 +3231,22 @@ def AddHeldItemBones(geoPath, forward=0.0):
 
 
 def MigrateHeldItemBones(geoPath, forward=0.0, legacyForward=_HELD_ITEM_LEGACY_FORWARD):
-    """把本工具早先生成的物品骨骼挪到新挂点 → [(骨骼名, 父骨骼名)]。幂等。
+    """把本工具早先生成的物品骨骼改成现行形态(pivot = 父骨骼 pivot 前推 forward, 不带 locator) → [(骨骼名, 父骨骼名)]。幂等。
 
-    只认**形状完全等于生成物**的骨骼: 名字与 AddHeldItemBones 补的一致(大小写也一致)、父骨骼就是它会
-    选的那根、只有 name/parent/pivot/locators 四个字段、locators 只有同位置的拴绳点、pivot 恰为父骨骼
-    pivot 前推 legacyForward。创作者手写的骨骼(带 cubes/旋转/别的 pivot/别的父骨骼)一律不动。
+    早先的生成物与现行形态有两处不同:
+    - 2026-09-17 之前两种几何都前推 legacyForward(主几何现为 0, 见 _HELD_ITEM_FORWARDS 注);
+    - 2026-09-23 之前带同位置的拴绳 locator(lead_hold / lead_hold2, 照抄原版 rightItem)。玩家身上同时挂着锚点几何
+      default_steve(原版手上的 lead_hold)、模型主几何与 arm 几何, 引擎把各几何的 locator 并进同一张表, 同名不同位置
+      报 "model already has a locator lead_hold that doesn't exactly match" 并丢掉后来者。Java 的拴绳挂点是原版
+      Player.getRopeHoldPosition 的固定偏移, 与模型无关 —— 只留锚点几何那一个。
+    只认**形状等于生成物**的骨骼: 名字与 AddHeldItemBones 补的一致(大小写也一致)、父骨骼就是它会选的那根、只有
+    name/parent/pivot(/locators) 字段、locators 只有同位置的拴绳点、pivot 恰为父骨骼 pivot 前推 legacyForward 或 forward。
+    创作者手写的骨骼(带 cubes/旋转/别的 pivot/别的父骨骼/别的 locator)一律不动。
     """
-    if abs(forward - legacyForward) < 1e-9:
-        return []
     data, bones = _LoadGeometryBones(geoPath)
     if bones is None:
         return []
-    moved = []
+    migrated = []
     for itemBone, locatorBase, fallbacks, leadName in _HELD_ITEM_BONE_SPECS:
         boneIndex = _FindBoneIndex(bones, itemBone)
         if boneIndex < 0:
@@ -3172,25 +3255,30 @@ def MigrateHeldItemBones(geoPath, forward=0.0, legacyForward=_HELD_ITEM_LEGACY_F
         parentIndex = _HeldItemParentIndex(bones, locatorBase, fallbacks)
         if parentIndex < 0 or bone.get("name") != itemBone \
                 or str(bone.get("parent")) != str(bones[parentIndex].get("name")) \
-                or set(bone.keys()) != set(("name", "parent", "pivot", "locators")):
+                or not set(bone.keys()) <= set(("name", "parent", "pivot", "locators")):
             continue
-        legacyAnchor = _HeldItemAnchor(bones[parentIndex], legacyForward)
         anchor = _HeldItemAnchor(bones[parentIndex], forward)
+        legacyAnchor = _HeldItemAnchor(bones[parentIndex], legacyForward)
         pivot = bone.get("pivot")
-        if legacyAnchor is None or not (isinstance(pivot, list) and len(pivot) == 3) \
-                or [round(float(value), 5) for value in pivot] != legacyAnchor:
+        if anchor is None or not (isinstance(pivot, list) and len(pivot) == 3):
+            continue
+        pivot = [round(float(value), 5) for value in pivot]
+        if pivot != anchor and pivot != legacyAnchor:
             continue
         locators = bone.get("locators")
-        if not (isinstance(locators, dict) and list(locators.keys()) == [leadName]
+        if locators is not None and not (
+                isinstance(locators, dict) and list(locators.keys()) == [leadName]
                 and isinstance(locators[leadName], list)
-                and [round(float(value), 5) for value in locators[leadName]] == legacyAnchor):
+                and [round(float(value), 5) for value in locators[leadName]] == pivot):
             continue
+        if pivot == anchor and locators is None:
+            continue                      # 已是现行形态
         bone["pivot"] = anchor
-        bone["locators"] = OrderedDict([(leadName, list(anchor))])
-        moved.append((itemBone, str(bone.get("parent"))))
-    if moved:
+        bone.pop("locators", None)
+        migrated.append((itemBone, str(bone.get("parent"))))
+    if migrated:
         DumpJson(geoPath, data)
-    return moved
+    return migrated
 
 
 def EnsureHeldItemBones(rpModels):
@@ -3212,7 +3300,8 @@ def AddGeometryLocators(geoPath, locators):
     """把 locator 表打到几何文件的根骨骼上(模型空间坐标); 返回新增数。幂等。
 
     "根骨骼"取**模型自己的**第一根无父骨骼 —— 跳过本工具外包的滑翔根(它只在滑翔时反向旋转,
-    平时恒等): locator 打在模型根上才跟着身体动, 打在外包根上粒子就不跟随了。
+    平时恒等): locator 打在模型根上才跟着身体动, 打在外包根上粒子就不跟随了。模型根本身被滑铲姿态骨骼
+    外包过(AllBody 就是模型根)时同理, 打到被包的那根上。
     """
     if not locators or not os.path.isfile(geoPath):
         return 0
@@ -3221,12 +3310,16 @@ def AddGeometryLocators(geoPath, locators):
     if not geometries or not isinstance(geometries[0], dict):
         return 0
     bones = geometries[0].get("bones") or []
+    slideWrappers = set(SLIDE_POSTURE_WRAPPERS.values())
     root = next((bone for bone in bones
                  if isinstance(bone, dict) and not bone.get("parent")
                  and bone.get("name") != GLIDE_ROOT_BONE), None)
     if root is None:
         root = next((bone for bone in bones
                      if isinstance(bone, dict) and bone.get("parent") == GLIDE_ROOT_BONE), None)
+    while root is not None and root.get("name") in slideWrappers:
+        root = next((bone for bone in bones
+                     if isinstance(bone, dict) and bone.get("parent") == root.get("name")), None)
     if root is None:
         return 0
     table = root.setdefault("locators", OrderedDict())
@@ -3333,8 +3426,13 @@ def GatePreviewEntityQueriesInBody(body):
 def RewriteAnimations(srcPath, dstPath, namespace, molangDefaults=None, molangReport=None,
                       nameMapper=None, foundVars=None, additiveKeys=None, physics=None,
                       forceStateLoops=False, preKeys=None, particles=None, sounds=None,
-                      previewGate=False, boneRenames=None):
+                      previewGate=False, boneRenames=None, functions=None, skipNames=None):
     """动画文件 → 裸短名加 animation.<namespace>. 前缀 + 条件名引擎安全转义。
+
+    skipNames: 不移植的 Java 动画原名(枪械槽位里基岩驱动不了的逐枪/手雷动画, 见 TacSlotSkipNames), 当分组标题一样跳过。
+
+    srcPath 也可以直接是动画文件数据(dict: 自定义函数逐帧执行体这类生成物, 走同一条流水线)。
+    functions: 包级 java_functions.FunctionCompiler(fn.* 内联 / 音效调用改写, 排在物理改写之前); None = 不改。
 
     physics: 包级 PhysicsRewriter(second_order/first_order → 状态积分, 键槽位跨文件共享);
     forceStateLoops: 玩家侧动画按 Java 主链运行语义改写 loop(ApplyJavaLoopSemantics),
@@ -3352,7 +3450,7 @@ def RewriteAnimations(srcPath, dstPath, namespace, molangDefaults=None, molangRe
     该文件全部动画丢失。规则与主包解析器共用(packParser.EscapeConditionKey)。
     同理需要规范化 geckolib 的标量通道值(见 _ExpandVector)。
     """
-    data = LoadJson(srcPath)
+    data = srcPath if isinstance(srcPath, dict) else LoadJson(srcPath)
     animations = data.get("animations")
     if not isinstance(animations, dict):
         return 0, [], (0, 0, 0, 0, 0, 0), []
@@ -3373,7 +3471,7 @@ def RewriteAnimations(srcPath, dstPath, namespace, molangDefaults=None, molangRe
             molangReport[label] += count
 
     for name in animations:
-        if IsDecorativeKey(name, animations[name]):
+        if IsDecorativeKey(name, animations[name]) or (skipNames and name in skipNames):
             dropped.append(name)
             continue
         # py2: 动画名可能含中文(Java 允许), 模板必须是 unicode 否则拼接按 ascii 解码崩溃
@@ -3396,6 +3494,10 @@ def RewriteAnimations(srcPath, dstPath, namespace, molangDefaults=None, molangRe
                 _Note(u"norm:loop 字段按 Java LoopType.fromJson 归一(字符串/未知值)")
             _Note(u"norm:删掉 Java 运行时忽略的字段(anim_time_update/start_delay/loop_delay)",
                   DropJavaIgnoredAnimationFields(body))
+            # 自定义函数调用处内联 + 音效调用改写(见 java_functions.py 注): 排在物理改写之前 ——
+            # 内联进来的函数体里的 second_order 要逐语句改写, 积分语句才紧贴所在语句
+            if functions is not None:
+                functions.RewriteAnimationBody(body)
             _Note(u"norm:timeline 里的字符串字面量语句(Java 当注释)删除", StripStringStatements(body))
             # 物理函数先改写: 产出的是带 return 的复杂表达式, 后面的语句规范化据此放行
             if physics is not None:
@@ -3587,33 +3689,39 @@ def _StateSafe(name):
     return _STATE_SAFE_PATTERN.sub("_", Pinyinize(name)) or "state"
 
 
-def _FlattenRoamingStrings(node):
-    """容器内全部字符串值的 v.roaming.* → v.roaming_*(原地), 返回改写处数。
+def _FlattenVariableString(value):
+    """PortMolangText ① 的两条扁平化(v.roaming.* 与其余单层结构体成员)用在单个字符串上; 返回 (新串, 改写数)"""
+    value, roamingCount = _ROAMING_PATTERN.subn(r"\1.roaming_\2", value)
+    value, structCount = FlattenStructMemberText(value)
+    return value, roamingCount + structCount
 
-    与 PortMolangText 的 ① 同一条规则(_ROAMING_PATTERN), 供 ysm.json 的
-    properties 子树(config_forms 的 value/labels 等 molang 字符串)同步改写。
-    只动值不动键 —— dict 键是显示名/动画短名, 不是 molang。
+
+def _FlattenVariableStrings(node):
+    """容器内全部字符串值的 v.roaming.* → v.roaming_*、v.<结构体>.<成员> → v.<结构体>_<成员>(原地), 返回改写处数。
+
+    与 PortMolangText 的 ① 同一套规则, 供 ysm.json 的 properties 子树(config_forms 的 value/labels 等
+    molang 字符串)与顶层 initialize 同步改写。只动值不动键 —— dict 键是显示名/动画短名, 不是 molang。
     """
     count = 0
     if isinstance(node, dict):
         for key in list(node.keys()):
             value = node[key]
             if isinstance(value, (str, unicode)):  # noqa: F821
-                replaced, n = _ROAMING_PATTERN.subn(r"\1.roaming_\2", value)
+                replaced, n = _FlattenVariableString(value)
                 if n:
                     node[key] = replaced
                     count += n
             else:
-                count += _FlattenRoamingStrings(value)
+                count += _FlattenVariableStrings(value)
     elif isinstance(node, list):
         for index, value in enumerate(node):
             if isinstance(value, (str, unicode)):  # noqa: F821
-                replaced, n = _ROAMING_PATTERN.subn(r"\1.roaming_\2", value)
+                replaced, n = _FlattenVariableString(value)
                 if n:
                     node[index] = replaced
                     count += n
             else:
-                count += _FlattenRoamingStrings(value)
+                count += _FlattenVariableStrings(value)
     return count
 
 
@@ -4258,8 +4366,10 @@ def ApplyShortestPathBlend(body):
 
 
 def RewriteControllers(srcPath, dstPath, namespace, molangDefaults=None, molangReport=None,
-                       nameMapper=None, knownAnimKeys=None, foundVars=None, physics=None, section=None):
+                       nameMapper=None, knownAnimKeys=None, foundVars=None, physics=None, section=None,
+                       functions=None):
     """动画控制器文件 → controller.animation.<namespace>.<名称>, 动画引用同步转义。
+    functions: 包级 java_functions.FunctionCompiler(fn.* 内联 / 音效调用改写, 排在物理改写之前); None = 不改。
 
     返回 (控制器数, 接管的直播动画键列表, 动画引用改名数, 剪掉的死引用列表,
     剪掉的非法转移目标列表)。
@@ -4309,6 +4419,8 @@ def RewriteControllers(srcPath, dstPath, namespace, molangDefaults=None, molangR
                 continue
             _Note(u"norm:控制器状态按 Java 语义规范化(blend 曲线->数字 / 状态级音效粒子删除 / "
                   u"多键条目取首键 / apply 条件布尔化)", NormalizeJavaControllerStates(body))
+            if functions is not None:
+                functions.RewriteControllerBody(body)   # 内联进来的函数体里的物理调用由它逐语句改写
             if physics is not None:
                 physics.RewriteTree(body)   # 转移条件/权重/on_entry 里的物理调用
             for state in states.values():
@@ -4819,6 +4931,8 @@ def BypassEmptyHubStatesInPack(packName):
         if not name.endswith(".json") or name in (
                 STATE_FILE, ONESHOT_FILE, VARIABLE_INIT_FILE, STATE_RESET_CONTROLLER_FILE):
             continue
+        if name.startswith(java_functions.SCRIPT_CONTROLLER_PREFIX):
+            continue     # 执行体驱动的脚本控制器: 空闲态是"什么都不播", 播放态之间本来就直连
         path = os.path.join(ctlDir, name)
         try:
             data = LoadJson(path)
@@ -5020,7 +5134,12 @@ def _SingleStateControllers(packName):
 def _GuiOnlyPreviewKey(packName, manifest):
     """GUI 展示动画(properties.preview_animation)键 —— 仅当它只在卡片上播: 不是并行族/主链成员/轮盘键,
     也没被作者控制器状态引用(那些情形它在世界里另有通道); 否则 None"""
-    previewKey = _PreviewAnimationKey(manifest)
+    return _GuiOnlyKey(packName, manifest, _PreviewAnimationKey(manifest))
+
+
+def _GuiOnlyKey(packName, manifest, previewKey):
+    """动画键只在选择界面卡片上播(GUI 展示动画 / 选择界面交互动画)→ 原键; 它在世界里另有通道时 → None。
+    口径见 _GuiOnlyPreviewKey"""
     if previewKey is None or _PARALLEL_SHORT_PATTERN.match(previewKey):
         return None
     # 主链成员口径与 _CollectOwnershipOccurrences 一致(_MainChainKeys 是候选全集, 过一遍状态判定才是成员)
@@ -5069,6 +5188,55 @@ def LoopPreviewAnimation(packName, manifest=None):
         changed.append((key, body.get("loop")))
         body["loop"] = True
         dirty.add(fileIndex)
+    for fileIndex in sorted(dirty):
+        DumpJson(animFiles[fileIndex][0], animFiles[fileIndex][1])
+    return changed
+
+
+# Java 2.2.2 选择界面动画(AnimationRegister.HOVER / HOVER_FADEOUT / FOCUS): 名字写死, 模型动画表里有就在选择卡片上播,
+# 通道 player.gui_hover(hover / hover_fadeout 互斥)与 player.gui_focus(focus), 排在 cap(展示动画)之后、parallel 之前。
+# 运行层: packParser gui_card_animations → previewRender 共享控制器 → client/ui/cardPreviewAnimation 状态机
+GUI_CARD_ANIMATION_KEYS = ("hover", "hover_fadeout", "focus")
+_GUI_CARD_CHANNEL_RANKS = (("hover", (20, "player_gui_hover")), ("hover_fadeout", (20, "player_gui_hover")),
+                           ("focus", (21, "player_gui_focus")))
+GUI_CARD_HOST_PREFIX = "gui_card:"
+
+
+def LoopGuiCardAnimations(packName, manifest=None):
+    """选择界面交互动画按 Java 口径定循环; 返回改写的 [(动画键, 原 loop, 新 loop)]。
+
+    Java HoverPredicate / FocusPredicate 一律 playLoopAnimation(LoopType.LOOP), 无视动画文件自己的 loop:
+    - hover / focus: 悬停 / 有焦点期间一直循环 → loop: true(坚守者娘的 hover 没写 loop, 基岩会播完 50 秒就停);
+    - hover_fadeout: 同样按 LOOP 播, 但状态机(CatalogModelPreviewAnimationState)在最后一帧悬停之后恰好一个
+      animation_length 切走, 而 fadeout 晚一帧才起播 —— 实际只播一遍、到不了回绕。基岩由界面按同一时长切态,
+      文件写成播一遍(去掉 loop)等价, 还避开界面计时比动画时钟慢一帧时回绕到开头闪一下。
+    只改只在卡片上播的键(与 _GuiOnlyPreviewKey 同口径: 在世界里另有通道的归那个通道管); 伴生 <键>__own<N> 一并改。幂等。
+    """
+    if manifest is None:
+        manifestPath = PackManifestPath(packName)
+        manifest = LoadJson(manifestPath) if os.path.isfile(manifestPath) else {}
+    animFiles = _LoadPackAnimationFiles(packName)
+    bodyIndex = _OwnershipBodyIndex(packName, animFiles)
+    changed, dirty = [], set()
+    for guiKey in GUI_CARD_ANIMATION_KEYS:
+        if guiKey not in bodyIndex or _GuiOnlyKey(packName, manifest, guiKey) is None:
+            continue
+        companionPattern = re.compile(r"^{}__own\d+$".format(re.escape(guiKey)))
+        for key, (fileIndex, _animId, body) in bodyIndex.items():
+            if key != guiKey and not companionPattern.match(key):
+                continue
+            before = body.get("loop")
+            if guiKey == "hover_fadeout":
+                if "loop" not in body:
+                    continue
+                body.pop("loop")
+                after = None
+            else:
+                if before is True:
+                    continue
+                body["loop"] = after = True
+            changed.append((key, before, after))
+            dirty.add(fileIndex)
     for fileIndex in sorted(dirty):
         DumpJson(animFiles[fileIndex][0], animFiles[fileIndex][1])
     return changed
@@ -5355,6 +5523,7 @@ class ChannelOwnershipPlan(object):
         self.bareKeys = set()               # 拆出伴生的裸 pre_parallelN/parallelN 直挂早层
         self.previewCompanions = set()      # 给 GUI 展示动画让位的 pre_parallel 伴生键(预览实体按权重注册)
         self.previewStrips = None           # (GUI 展示动画键, 被裸 parallel 覆盖而删掉的通道数)
+        self.guiCardStrips = []             # [(选择界面交互动画键, 被裸 parallel 覆盖而删掉的通道数)]
         self.mainCompanions = OrderedDict()  # 主链键 → [(伴生键, 权重)](BuildStateChainController)
         self.overrideKeys = set()           # 带 override 的早层原动画键(伴生精确 0 让出, 不加下限)
         # 直挂伴生键 → 权重(ysm.json 顶级 channel_ownership): 带 override 的直挂条件动画记核心权重
@@ -5427,13 +5596,17 @@ def _StateAnimationItems(state):
 def _CollectOwnershipOccurrences(bodyIndex, ctlFiles, mainKeys):
     """全部宿主里的动画出现 → (出现列表, 被第一人称/非通道控制器引用的键集)"""
     occurrences, blocked, driven, controllerNames = [], set(), set(), set()
-    for _path, data in ctlFiles:
+    for path, data in ctlFiles:
+        # 执行体驱动的脚本控制器(java_functions.ScriptChannel)在 Java 是硬编码控制器: 并行族运行中旋转相加
+        # (CodedAnimationController.blendRotation), 与内置并行通道同口径; 基岩式作者控制器才连旋转也覆盖
+        coded = os.path.basename(path).startswith(java_functions.SCRIPT_CONTROLLER_PREFIX)
         for ctlId, body in (data.get("animation_controllers") or {}).items():
             if not isinstance(body, dict):
                 continue
             name = str(ctlId).split(".")[-1]
             controllerNames.add(name)
             rank = JavaChannelRank(name)
+            additive = coded and rank is not None and rank[0] == 22
             states = body.get("states") or {}
             stateNames = [stateName for stateName in states if isinstance(states[stateName], dict)]
             single = len(stateNames) == 1 and not states[stateNames[0]].get("transitions")
@@ -5451,7 +5624,7 @@ def _CollectOwnershipOccurrences(bodyIndex, ctlFiles, mainKeys):
                             condition = active if base is None else u"({})&&({})".format(base, active)
                         occurrences.append(_OwnershipOccurrence(
                             ref, rank, name, stateName, stateIndex, condition,
-                            alwaysActive=single))
+                            additiveRotation=additive, alwaysActive=single))
     for name in controllerNames:
         matched = re.match(r"^player_(pre_)?parallel_(\d+)$", name)
         if matched:
@@ -5486,9 +5659,11 @@ def BaselineAnimationLoops(packName):
     if packName == JAVA_BASELINE_PACK:
         return OrderedDict()
     mainLoops, _fpLoops = CollectPackAnimationLoops(JAVA_BASELINE_PACK, root=REF_RP)
+    # compat.* 是基线动画的旧写法孪生(滑铲, 见 BuildBaselineExtensions), 运行层按几何换进正式键, 本身不是状态键
     return OrderedDict((key, loop) for key, loop in mainLoops.items()
                        if not _PARALLEL_SHORT_PATTERN.match(key)
-                       and not _OWNERSHIP_COMPANION_PATTERN.match(key))
+                       and not _OWNERSHIP_COMPANION_PATTERN.match(key)
+                       and not key.startswith(_BASELINE_COMPAT_PREFIX))
 
 
 def CollectBaselineVariables(packName):
@@ -5530,6 +5705,9 @@ _OVERRIDE_CONDITION_RANKS = {
 _CARRY_ON_RANK = (18, "player_carry_on")
 _ONESHOT_SWING_RANK = (12, "player_swing")
 _ONESHOT_USE_RANK = (15, "player_use")
+# 枪械: hold 通道条件动画与 hold_mainhand 同通道, fire 通道状态机在 post_hold 之后、pre_swing 之前
+_TAC_HOLD_RANK = _OVERRIDE_CONDITION_RANKS["hold_mainhand"]
+_ONESHOT_TAC_FIRE_RANK = (10, "player_fire")
 DIRECT_HOST_PREFIX = "direct:"
 # 裸 pre_parallelN/parallelN(没有同名作者控制器、也没被控制器状态引用 → 主包直挂恒播)的宿主名前缀
 BARE_HOST_PREFIX = "bare:"
@@ -5571,10 +5749,14 @@ def _CollectOverrideOccurrences(bodyIndex, mainKeys):
         rank = _DirectConditionRank(key)
         if rank is not None:
             occurrences.append(_OwnershipOccurrence(key, rank, DIRECT_HOST_PREFIX + key))
+    # 枪械 hold 通道条件动画(主包 packParser._ApplyTacChannels 直挂, 伴生权重同样走 channel_ownership)
+    for key, _condition in _BuildTacHoldAnimates(keys):
+        occurrences.append(_OwnershipOccurrence(key, _TAC_HOLD_RANK, DIRECT_HOST_PREFIX + key))
     channels = [(_OneShotSwingMembers(keys), _ONESHOT_SWING_RANK, _ONESHOT_SWING_KEY)]
     for prefix, ctlKey, slot, handIndex, _trigger in _ONESHOT_USE_CHANNELS:
         channels.append((_OneShotConditionMembers(keys, prefix, slot, handIndex, prefix),
                          _ONESHOT_USE_RANK, ctlKey))
+    channels.append(((_TacFireMembers(keys), None), _ONESHOT_TAC_FIRE_RANK, _ONESHOT_TAC_FIRE_KEY))
     for (members, fallback), rank, host in channels:
         for key in [member for member, _test in members] + ([fallback] if fallback else []):
             occurrences.append(_OwnershipOccurrence(key, rank, host))
@@ -5779,13 +5961,25 @@ def _PlanChannelOwnership(packName, animFiles, ctlFiles, mainKeys, manifest):
     # ② parallel 晚于 cap: 卡片上裸 parallel 恒播覆盖展示动画的位移/缩放(旋转相加不动)。实例: 小小酒狐
     #    gui 把 Root 放大 1.6, parallel1 又按体型变量写 Root 缩放 —— Java 取后者, 基岩 1.6 × 1 卡片偏大
     #    (2026-09-17 用户报告)。只删不拆: 预览实体只叠并行族动画(作者控制器不在预览里跑), 只对照裸并行。
+    bareWriters = dict((pair, [(o, v) for o, v in items if o.host.startswith(BARE_HOST_PREFIX)])
+                       for pair, items in writers.items())
     if hasCap:
-        bareWriters = dict((pair, [(o, v) for o, v in items if o.host.startswith(BARE_HOST_PREFIX)])
-                           for pair, items in writers.items())
         capOccurrence = _OwnershipOccurrence(previewKey, _CAP_CHANNEL_RANK, CAP_HOST_PREFIX + previewKey)
         _GroupOwnershipPairs(plan, previewKey, bodyIndex[previewKey][2], [capOccurrence], bareWriters)
         if plan.strips.get(previewKey):
             plan.previewStrips = (previewKey, len(plan.strips[previewKey]))
+    # ③ 选择界面交互动画(gui_hover / gui_focus 通道, 同样晚于 cap、早于 parallel): 被裸 parallel 恒播覆盖的位移/缩放
+    #    照 ② 删掉(预览实体上它们也排在 parallel 族之前, 见 previewRender._AddGuiCardAnimations)。
+    #    它们与 pre_parallel / 展示动画同写的通道不必像 ① 那样拆伴生: 交互动画都带 override, 排在后面整骨清掉前面的层;
+    #    在世界里另有通道的同名键(主链成员/轮盘/作者控制器引用)不归这里
+    for guiKey, guiRank in _GUI_CARD_CHANNEL_RANKS:
+        if (guiKey not in bodyIndex or guiKey in mainMembers or guiKey in rouletteKeys or guiKey in blocked
+                or guiKey in byKey or guiKey in overrideByKey or guiKey == previewKey):
+            continue
+        guiOccurrence = _OwnershipOccurrence(guiKey, guiRank, GUI_CARD_HOST_PREFIX + guiKey)
+        _GroupOwnershipPairs(plan, guiKey, bodyIndex[guiKey][2], [guiOccurrence], bareWriters)
+        if plan.strips.get(guiKey):
+            plan.guiCardStrips.append((guiKey, len(plan.strips[guiKey])))
     # 纯状态集合编号: 表达式字典序(输入相同则编号相同, 幂等)
     setExpressions = set()
     for _key, groups, _hosts in pending:
@@ -5800,7 +5994,8 @@ def _PlanChannelOwnership(packName, animFiles, ctlFiles, mainKeys, manifest):
         plan.stateSets[variable] = (expression, involved)
         plan.indexedHosts |= involved
         setVariables[stateTerms] = variable
-    oneShotHosts = set([_ONESHOT_SWING_KEY] + [ctlKey for _p, ctlKey, _s, _h, _t in _ONESHOT_USE_CHANNELS])
+    oneShotHosts = set([_ONESHOT_SWING_KEY, _ONESHOT_TAC_FIRE_KEY]
+                       + [ctlKey for _p, ctlKey, _s, _h, _t in _ONESHOT_USE_CHANNELS])
     armPrefix = "animation.{}_arm.".format(packName)
     for key, groups, hosts in pending:
         companions = []
@@ -6043,6 +6238,9 @@ def OwnershipReportLines(plan):
     if plan.previewStrips:
         lines.append(u"GUI 展示动画 {}: 被裸 parallel 恒播覆盖的位移/缩放 {} 个通道已删(Java cap 通道早于 parallel, "
                      u"预览里 parallel 族注册在展示动画之后)".format(*plan.previewStrips))
+    if plan.guiCardStrips:
+        lines.append(u"选择界面交互动画 {}: 被裸 parallel 恒播覆盖的位移/缩放通道已删(Java gui_hover / gui_focus 通道早于 "
+                     u"parallel)".format(u", ".join(u"{}({} 个)".format(key, count) for key, count in plan.guiCardStrips)))
     if plan.previewCompanions:
         lines.append(u"GUI 展示动画覆盖 pre_parallel: 伴生 {} 条在卡片上(variable.ysm_show)让出同写的通道 —— Java cap 通道晚于 "
                      u"pre_parallel, 舞台骨骼(幕布/背景板)由展示动画放出来; 权重写入 ysm.json {}".format(
@@ -6251,6 +6449,8 @@ def _FadeControllerOneShotsData(ctlFiles, bodyIndex):
     """FadeControllerOneShots 的内存版; 返回 ([(控制器短名, 状态名, 动画键)], 改动的文件路径集)"""
     faded, dirtyPaths = [], set()
     for path, data in ctlFiles:
+        if os.path.basename(path).startswith(java_functions.SCRIPT_CONTROLLER_PREFIX):
+            continue     # 执行体驱动的脚本控制器: 执行体照 Java 在播完时转尾过渡, 离开状态的 blend 就是尾过渡
         for ctlId, body in (data.get("animation_controllers") or {}).items():
             if not isinstance(body, dict):
                 continue
@@ -6481,8 +6681,13 @@ def BuildOneShotControllerFile(packName, ownership=None, withCompanions=True):
     ])
 
 
+_DIRECT_VARIABLE_NAME = re.compile(r"^(?:variable|v)\.[A-Za-z_][A-Za-z0-9_]*$", re.IGNORECASE)
+
+
 def _NullCoalescedAssignment(line):
-    """`variable.x = 表达式;` → `variable.x = variable.x ?? (表达式);`; 非赋值行返回 None"""
+    """`variable.x = 表达式;` → `variable.x = variable.x ?? (表达式);`; 非赋值行返回 None。
+    左侧不是直接变量(结构体成员 v.a.b 等)也返回 None: 引擎不许它作 ?? 左侧, 读不存在的成员还会报错
+    (见 _STRUCT_MEMBER_PATTERN 注; 单层成员移植期已扁平化, 走到这里的只剩多层名与 _BEDROCK_STRUCT_VARIABLES)"""
     text = line.strip()
     if text.endswith(";"):
         text = text[:-1]
@@ -6490,13 +6695,16 @@ def _NullCoalescedAssignment(line):
     if not sep or tail.startswith("="):  # 无赋值 / 是比较(==)
         return None
     name, value = head.strip(), tail.strip()
-    if not name or not value:
+    if not name or not value or not _DIRECT_VARIABLE_NAME.match(name):
         return None
     return "{} = {} ?? ({});".format(name, name, value)
 
 
-def BuildVariableInitController(packName, initLines):
+def BuildVariableInitController(packName, initLines, extraStatements=None):
     """每实例变量初始化控制器 controller.animation.<包>.ysm_variable_init(文件 VARIABLE_INIT_FILE)。
+
+    extraStatements: Java @player_init 事件体(已是基岩形态的复杂表达式, ysm.json java_functions.init),
+    排在变量默认值之后原样追加 —— Java 先有变量(未定义读 null)再触发 player_init。
 
     玩家的纸娃娃(原版背包/模型设置界面的网易触屏控件与 PC live_player_renderer)是
     独立渲染实例, 有自己的 molang 作用域 —— 主包对世界实体做的 SetPlayerVariable
@@ -6518,6 +6726,9 @@ def BuildVariableInitController(packName, initLines):
         wrapped = _NullCoalescedAssignment(line)
         if wrapped:
             onEntry.append(wrapped)
+    for statement in extraStatements or []:
+        if isinstance(statement, (str, unicode)) and statement.strip():  # noqa: F821
+            onEntry.append(statement.strip())
     if not onEntry:
         return None
     # 单状态无转移: on_entry 在状态机启动(每个渲染实例创建)时跑一次即停。
@@ -6575,6 +6786,44 @@ def WrapProjectileGeometry(geoPath):
 VEHICLE_ROOT_BONE = "ysm_vehicle_root"
 
 
+# 替换实体(载具 / 投射物)的动画读的是**它自己**的运动量(Java 值绑定对任何实体上下文求值: 载具读载具的速度), 而玩家侧映射
+# 表把这些量换成了主包只给玩家逐帧写的 query.mod(见 _GROUND_SPEED_EXPR 注) —— 载具上恒为注册默认值 0, 01 酒狐狐狸车的
+# 车轮 / 18 号 GMA_T.50 的转速都不动。有原生对应的换回实体自己的原生查询(ground_speed 原生值 = 20×每 tick 水平位移,
+# 与 Java 两个速度量同单位); 输入方向 / 按键量 / 眨眼等没有原生对应的保持注册默认值
+_REPLACED_ENTITY_QUERIES = (
+    (re.compile(r"query\.mod\.ysm_ground_speed2\b"), "query.ground_speed"),
+    (re.compile(r"query\.mod\.ysm_ground_speed\b"), "query.ground_speed"),
+    (re.compile(r"query\.mod\.ysm_yaw_speed\b"), "query.yaw_speed"),
+    (re.compile(r"query\.mod\.ysm_head_pitch\b"), "(-query.target_x_rotation)"),
+)
+
+
+def LocalizeReplacedEntityQueries(path):
+    """替换实体的动画 / 控制器文件: 玩家专用的运动量换成实体自己的原生查询(见 _REPLACED_ENTITY_QUERIES 注); 返回改写数(幂等)"""
+    if not os.path.isfile(path):
+        return 0
+    data = LoadJson(path)
+    counter = [0]
+
+    def _Walk(node):
+        if isinstance(node, dict):
+            for key in list(node.keys()):
+                node[key] = _Walk(node[key])
+            return node
+        if isinstance(node, list):
+            return [_Walk(item) for item in node]
+        if isinstance(node, (str, unicode)):  # noqa: F821
+            for pattern, replacement in _REPLACED_ENTITY_QUERIES:
+                node, count = pattern.subn(replacement, node)
+                counter[0] += count
+        return node
+
+    _Walk(data)
+    if counter[0]:
+        DumpJson(path, data)
+    return counter[0]
+
+
 def WrapVehicleGeometry(geoPath):
     """载具几何外包一层缩放根骨骼; 返回是否改动(幂等)。
 
@@ -6601,6 +6850,115 @@ def WrapVehicleGeometry(geoPath):
     if changed:
         DumpJson(geoPath, data)
     return changed
+
+
+# 载具座位的定位组(Java 发行版 2.5 起, Wiki "骑乘实体动画"): 下标 = 乘客序号, 按名字对应(见 packParser._PassengerSeats 注)
+PASSENGER_LOCATOR_BONES = ("PassengerLocator",) + tuple("PassengerLocator{}".format(index) for index in range(2, 9))
+
+
+def _BindRotated(point, pivot, rotation):
+    """点绕枢轴按骨骼的绑定旋转转(基岩 / Blockbench 口径: x 取反的坐标系里 R = Rz(z)·Ry(-y)·Rx(-x), 先绕 X)"""
+    x, y, z = -(point[0] - pivot[0]), point[1] - pivot[1], point[2] - pivot[2]
+    rx, ry, rz = math.radians(-rotation[0]), math.radians(-rotation[1]), math.radians(rotation[2])
+    y, z = y * math.cos(rx) - z * math.sin(rx), y * math.sin(rx) + z * math.cos(rx)
+    x, z = x * math.cos(ry) + z * math.sin(ry), -x * math.sin(ry) + z * math.cos(ry)
+    x, y = x * math.cos(rz) - y * math.sin(rz), x * math.sin(rz) + y * math.cos(rz)
+    return [-x + pivot[0], y + pivot[1], z + pivot[2]]
+
+
+def PassengerLocators(geoData):
+    """载具几何 → 定位组的静止位置 [[x, y, z] | None, ...](下标 = 乘客序号, 模型坐标像素; 没有定位组 → [])。
+
+    乘客原点在定位骨骼的枢轴上(Java prepMatrixForLocator 最后一根只做到"平移到枢轴"), 位置累计祖先骨骼的绑定旋转;
+    定位骨骼自己的旋转转的是乘客朝向, 不改位置(只取位置, 见 packParser._PassengerSeats 注)。
+    """
+    for geo in geoData.get("minecraft:geometry") or []:
+        bones = geo.get("bones") if isinstance(geo, dict) else None
+        if not isinstance(bones, list):
+            continue
+        byName = dict((bone.get("name"), bone) for bone in bones if isinstance(bone, dict))
+        locators = []
+        for name in PASSENGER_LOCATOR_BONES:
+            bone = byName.get(name)
+            if bone is None:
+                locators.append(None)
+                continue
+            point = [float(value) for value in (bone.get("pivot") or [0, 0, 0])]
+            seen = set()
+            parent = byName.get(bone.get("parent"))
+            while parent is not None and parent.get("name") not in seen:
+                seen.add(parent.get("name"))
+                rotation = parent.get("rotation")
+                if rotation and any(rotation):
+                    point = _BindRotated(point, parent.get("pivot") or [0, 0, 0], rotation)
+                parent = byName.get(parent.get("parent"))
+            locators.append([round(value, 4) + 0.0 for value in point])
+        while locators and locators[-1] is None:
+            locators.pop()
+        if locators:
+            return locators
+    return []
+
+
+def PassengerLocatorReportLine(table):
+    return u"载具座位(顶层 {}): {}(骑手的渲染原点按定位组摆, 只挪模型)".format(
+        PASSENGER_LOCATOR_KEY, u", ".join(u"{} {} 个定位组".format(model, sum(1 for item in locators if item))
+                                         for model, locators in table.items()))
+
+
+def ApplyPassengerLocators(manifest, table):
+    """ysm.json 顶层 passenger_locators 按产物重写({model 声明: 定位组}, 空表撤键); 返回是否改动"""
+    if table:
+        if manifest.get(PASSENGER_LOCATOR_KEY) == table:
+            return False
+        manifest[PASSENGER_LOCATOR_KEY] = table
+        return True
+    if PASSENGER_LOCATOR_KEY in manifest:
+        del manifest[PASSENGER_LOCATOR_KEY]
+        return True
+    return False
+
+
+# 原版马系实体(马/驴/骡/骷髅马/僵尸马, 资源包 entity/<名>_v1|v2.entity.json)的 scripts 按骨骼名查询:
+# v2 pre_animation 每帧 query.bone_aabb('leg1a'), v1 initialize 查 bone_origin('leg1a'/'leg3a') 与 bone_rotation('head')。
+# 替换成载具几何后这些骨骼不在, 引擎每次求值报 "Could not find specified bone"(2026-09-23 实机: 狐狸车)。实体脚本
+# 没有接口按实体改, Java 也不跑基岩实体脚本, 无对应物 —— 给载具几何补同名占位骨骼(挂缩放根下, 查到的值只喂给已被
+# 换成空动画的原版马动画)。占位骨骼带一个看不见的极小方块: 对没有 cube 的骨骼查 bone_aabb 的引擎行为未验证。
+_VANILLA_QUERY_BONES = {
+    entityId: ("leg1a", "leg3a", "head")
+    for entityId in ("minecraft:horse", "minecraft:donkey", "minecraft:mule",
+                     "minecraft:skeleton_horse", "minecraft:zombie_horse")
+}
+_QUERY_BONE_CUBE = OrderedDict([("origin", [0, 0, 0]), ("size", [0.001, 0.001, 0.001]), ("uv", [0, 0])])
+
+
+def AddVanillaQueryBones(geoPath, entityIds):
+    """替换目标的原版实体脚本按名字查询的骨骼, 几何里没有的补占位骨骼 → 补上的骨骼名列表(幂等, 大小写不敏感)"""
+    needed = []
+    for entityId in entityIds or ():
+        for name in _VANILLA_QUERY_BONES.get(JAVA_TO_BEDROCK_ENTITY_IDS.get(entityId, entityId), ()):
+            if name not in needed:
+                needed.append(name)
+    if not needed:
+        return []
+    data, bones = _LoadGeometryBones(geoPath)
+    if bones is None:
+        return []
+    parent = VEHICLE_ROOT_BONE if _FindBoneIndex(bones, VEHICLE_ROOT_BONE) >= 0 else None
+    added = []
+    for name in needed:
+        if _FindBoneIndex(bones, name) >= 0:
+            continue                      # 模型自己就有(如马形载具的 head), 查的是它
+        bone = OrderedDict([("name", name)])
+        if parent:
+            bone["parent"] = parent
+        bone["pivot"] = [0, 0, 0]
+        bone["cubes"] = [OrderedDict(_QUERY_BONE_CUBE)]
+        bones.append(bone)
+        added.append(name)
+    if added:
+        DumpJson(geoPath, data)
+    return added
 
 
 GLIDE_ROOT_BONE = "ysm_glide_root"
@@ -6635,6 +6993,37 @@ def WrapGlideRootGeometry(geoPath):
     if changed:
         DumpJson(geoPath, data)
     return changed
+
+
+def WrapSlidePostureGeometry(geoPath):
+    """玩家主几何给 AllBody / UpperBody 各外包一层滑铲姿态骨骼(packParser.SLIDE_POSTURE_WRAPPERS); 返回新包的骨骼名(幂等)。
+
+    外包骨骼挂在被包骨骼原来的父骨骼下、枢轴与它相同、不带旋转和方块, 平时恒等。基线滑铲把整身翻转 / 上身抬起写在这两根上
+    (见 packParser.SLIDE_POSTURE_WRAPPERS 注): 枪械 hold / fire 通道的 override 动画只写原骨骼, 清不到外包骨骼。
+    被包骨骼带绑定旋转时不包: 轨道从原骨骼挪到外包骨骼后, 欧拉角相加变成矩阵相乘, 带绑定旋转的两者不等 —— 缺哪一根,
+    解析器都整体回落旧写法(基线的 compat.* 滑铲)。
+    """
+    data, bones = _LoadGeometryBones(geoPath)
+    if bones is None:
+        return []
+    wrapped = []
+    for target, wrapper in SLIDE_POSTURE_WRAPPERS.items():
+        index = _FindBoneIndex(bones, target)
+        if index < 0 or _FindBoneIndex(bones, wrapper) >= 0:
+            continue
+        bone = bones[index]
+        if any(float(value) != 0 for value in (bone.get("rotation") or ())):
+            continue
+        node = OrderedDict([("name", wrapper)])
+        if bone.get("parent"):
+            node["parent"] = bone["parent"]
+        node["pivot"] = list(bone.get("pivot") or [0, 0, 0])
+        bone["parent"] = wrapper
+        bones.insert(index, node)
+        wrapped.append(wrapper)
+    if wrapped:
+        DumpJson(geoPath, data)
+    return wrapped
 
 
 def ExplicitPackPrecedence(packName):
@@ -6702,8 +7091,15 @@ def PortBaselinePack(javaDir, packName=JAVA_BASELINE_PACK, withMods=False):
         count, _dropped, _fixes, _ids = RewriteAnimations(
             src, os.path.join(rpAnims, "{}.animation.json".format(key)), namespace,
             molangDefaults, molangReport, nameMapper, packVars, set(),
-            physics=physics, forceStateLoops=True, preKeys=set(), previewGate=True)
+            physics=physics, forceStateLoops=True, preKeys=set(), previewGate=True,
+            skipNames=TacSlotSkipNames(key, src))
         report.append("基线动画 {} → animation.{}.* ({} 条)".format(key, namespace, count))
+    extensions = WriteBaselineExtensions(packName)
+    if extensions:
+        report.append(u"基岩扩展状态的默认动画 {} → animation.{}.* ({} 条)".format(
+            BASELINE_EXTENSION_FILE, packName, extensions))
+    else:
+        report.append(u"[WARN] 旧版枪械兼容的滑铲动画缺失, 没有生成基岩扩展状态的默认动画")
     held = HoldControllerOneShots(packName)
     if held:
         report.append(u"一次性通道成员补 hold_on_last_frame {} 条".format(len(held)))
@@ -6724,6 +7120,73 @@ def PortBaselinePack(javaDir, packName=JAVA_BASELINE_PACK, withMods=False):
         if textLabel.startswith((u"zero:", u"warn:")):
             report.append(u"  [!] {} x{}".format(textLabel, molangReport[label]))
     return report
+
+
+# ---- 基岩扩展状态的默认动画(Java 没有这些状态, 默认模型里也就没有; 不进基线就只能靠各包自带) ----
+# 滑铲(packParser.JAVA_SLIDE_POSE): 取旧版枪械兼容(ysm_rp/animations/compat/ysm_tacz)的 animation.tac.sliding —— 它按 YSM
+# 标准骨骼写(AllBody / UpperBody / 四肢 / Root), 与 Java 默认模型同一套骨骼。出两份:
+# - slide(没拿枪): 整身照搬, 双臂张开保持平衡;
+# - tac:slide(拿枪): 去掉手臂与手持物定位骨骼, 手臂交给 hold 通道(tac:hold / tac:aim, 或模型自己的 tac:slide:<类型>) ——
+#   基线动画被各包共用, 不拆逐通道覆盖伴生, 两层同写手臂会相加。
+# 去掉旧版的 override 标志(主链成员不带, 会吃掉状态机的交叉淡化)、旧版专有的零值骨骼(Longhair / MHead)和把副手物品
+# 藏起来的 LeftHandLocator 缩放 0。PortBaselinePack 重建基线时一起重写(它先清空基线目录)。
+# 两份各出两种写法: 正式键把 AllBody / UpperBody 的轨道原样挪到滑铲姿态骨骼上(packParser.SLIDE_POSTURE_WRAPPERS, 枪械通道
+# 的 override 清不到), compat.* 键是旧写法原样, 给几何里还没有姿态骨骼的旧产物(解析器与渲染层按主几何挑, packParser.SelectPostureVariants)
+BASELINE_EXTENSION_FILE = "bedrock_ext.animation.json"
+_LEGACY_TACZ_ANIMATION_FILE = ("animations", "compat", "ysm_tacz.animation.json")
+_LEGACY_SLIDE_ANIMATION = "animation.tac.sliding"
+_SLIDE_DROPPED_BONES = frozenset(["longhair", "mhead", "lefthandlocator"])
+_SLIDE_ARM_BONES = frozenset(["arm", "leftarm", "rightarm", "leftforearm", "rightforearm", "lefthand", "righthand",
+                              "righthandlocator"])
+
+
+def BuildBaselineExtensions(packName=JAVA_BASELINE_PACK):
+    """基岩扩展状态的默认动画 → 动画文件体; 旧版源动画缺失 → None(骨骼名按引擎口径不分大小写比对)"""
+    path = os.path.join(RP, *_LEGACY_TACZ_ANIMATION_FILE)
+    if not os.path.isfile(path):
+        return None
+    legacy = LoadJson(path)
+    source = (legacy.get("animations") or {}).get(_LEGACY_SLIDE_ANIMATION)
+    if not isinstance(source, dict):
+        return None
+
+    def _Variant(dropped, retarget=None):
+        body = OrderedDict()
+        for field, value in source.items():
+            if field == "bones":
+                body[field] = OrderedDict(((retarget or {}).get(bone.lower(), bone), copy.deepcopy(channels))
+                                          for bone, channels in value.items() if bone.lower() not in dropped)
+            elif field != "override_previous_animation":
+                body[field] = copy.deepcopy(value)
+        body["loop"] = True
+        SanitizeAnimationBody(body)
+        return body
+
+    whole = _SLIDE_DROPPED_BONES
+    armless = _SLIDE_DROPPED_BONES | _SLIDE_ARM_BONES
+    prefix = "animation.{}.".format(packName)
+    compat = prefix + _BASELINE_COMPAT_PREFIX
+    tacSlide = EscapeConditionKey("tac:slide")
+    return OrderedDict([
+        ("format_version", legacy.get("format_version", "1.8.0")),
+        ("animations", OrderedDict([
+            (prefix + "slide", _Variant(whole, SLIDE_POSTURE_WRAPPERS)),
+            (prefix + tacSlide, _Variant(armless, SLIDE_POSTURE_WRAPPERS)),
+            (compat + "slide", _Variant(whole)),
+            (compat + tacSlide, _Variant(armless)),
+        ])),
+    ])
+
+
+def WriteBaselineExtensions(packName=JAVA_BASELINE_PACK):
+    """BuildBaselineExtensions 的产物写进基线动画目录; 返回写入的动画条数(源缺失 → 0)"""
+    data = BuildBaselineExtensions(packName)
+    if data is None:
+        return 0
+    target = os.path.join(RP, "animations", packName)
+    EnsureDir(target)
+    DumpJson(os.path.join(target, BASELINE_EXTENSION_FILE), data)
+    return len(data["animations"])
 
 
 GUI_IMAGE_KEYS = ("gui_background", "gui_foreground")
@@ -6759,6 +7222,66 @@ def PortGuiImages(manifest, srcOf, rpTextures, packName, report):
         report.append(u"{} {} → textures/entity/{}/{}".format(guiKey, guiRel, packName, guiName))
         copied.append(guiKey)
     return copied
+
+
+PBR_TEXTURE_FIELDS = ("normal", "specular")
+_PBR_IMAGE_FILE = re.compile(r"\.(png|jpg|jpeg|tga)$", re.I)
+
+
+def PortPbrTextures(textureDecl, srcOf, rpTextures, packName, report, label):
+    """Java PBR 贴图形态 {uv, normal?, specular?} 的法线/高光图 → RP 贴图, 与皮肤贴图同一拍平规则(包贴图目录 + 文件名)。
+
+    主包解析器按同一规则写 pbr 字段(packParser._PbrMapsFromDecl), 运行层挂到渲染控制器的 PBR 贴图槽并换 pbr
+    材质预设(ysm_rp/shaders/glsl/ysm_pbr.glsl, LabPBR 编码原样可用)。无图片扩展名的声明是基岩真实引用路径, 不拷;
+    缺文件告警并从声明里去掉这一项(Java 光影包同样拿不到, 按无这张图处理; 留着声明, 解析器照样写 pbr, 运行层会绑
+    一张不存在的贴图)。textureDecl 是要写出的 ysm.json 里的那份声明, 就地修改。返回拷贝成功的字段列表。
+    srcOf: 包内相对路径 → 源文件路径。
+    """
+    copied = []
+    if not isinstance(textureDecl, dict):
+        return copied
+    for field in PBR_TEXTURE_FIELDS:
+        rel = textureDecl.get(field)
+        if not isinstance(rel, (str, unicode)) or not rel.strip() or not _PBR_IMAGE_FILE.search(rel):  # noqa: F821
+            continue
+        src = srcOf(rel)
+        if not os.path.isfile(src):
+            del textureDecl[field]
+            report.append(u"[WARN] {} 的 PBR {} 贴图缺失, 已从 ysm.json 去掉这项声明: {}".format(label, field, rel))
+            continue
+        fileName = os.path.basename(rel.replace(chr(92), "/"))
+        CopyBinary(src, os.path.join(rpTextures, fileName))
+        report.append(u"PBR {} {} → textures/entity/{}/{}".format(field, rel, packName, BaseName(fileName)))
+        copied.append(field)
+    return copied
+
+
+def PrunePbrDeclarations(manifest, textureExists):
+    """已落盘 ysm.json 里指向不存在贴图的 PBR 声明去掉(修复工具用, 幂等; 口径同 PortPbrTextures 缺文件那一支:
+    早先移植缺文件时只告警、声明留着, 解析器照样写 pbr)。管玩家皮肤与载具两处(投射物不接 PBR)。
+    textureExists: 声明的包内相对路径 → 资源包里有没有这张图。返回 [(位置, 字段, 路径), ...]"""
+    files = manifest.get("files") if isinstance(manifest, dict) else None
+    if not isinstance(files, dict):
+        return []
+    decls = []
+    player = files.get("player")
+    if isinstance(player, dict):
+        for texEntry in player.get("texture") or []:
+            if isinstance(texEntry, dict):
+                decls.append((u"贴图 {}".format(texEntry.get("uv")), texEntry))
+    for section, _entityIds, entry, modelSegment, _namespaceSegment in ReplacedTargets(files):
+        if section == "vehicles" and isinstance(entry.get("texture"), dict):
+            decls.append((u"{} {}".format(section, modelSegment), entry["texture"]))
+    removed = []
+    for label, decl in decls:
+        for field in PBR_TEXTURE_FIELDS:
+            rel = decl.get(field)
+            if not isinstance(rel, (str, unicode)) or not rel.strip() or not _PBR_IMAGE_FILE.search(rel):  # noqa: F821
+                continue
+            if not textureExists(rel):
+                del decl[field]
+                removed.append((label, field, rel))
+    return removed
 
 
 # ---- Java 合集(ysm_models/<合集>/<子包>, 合集目录带 ysm-pack.json, 可选封面 ysm-pack.png) ----
@@ -6807,9 +7330,92 @@ def PortCollectionManifest(collectionDir, collection):
     return report
 
 
-def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None):
+def _JavaAnimationCatalog(animationDecl, srcPath, withMods):
+    """玩家模型的 Java 动画原名 → (Java 循环类型, Java 时长秒); 脚本控制器按它判"包里有没有这个动画"与播完时刻。
+    口径同 Java 玩家动画表(大小写敏感的原名): 声明的动画文件里除第一人称手臂(fp_arm)之外全部, 跳过的模组联动文件不算"""
+    catalog = OrderedDict()
+    for key, relPath in animationDecl.items():
+        if key == "fp_arm" or (not withMods and key in MOD_ANIMATION_KEYS):
+            continue
+        if not isinstance(relPath, (str, unicode)) or not os.path.isfile(srcPath(relPath)):  # noqa: F821
+            continue
+        try:
+            animations = LoadJson(srcPath(relPath)).get("animations")
+        except ValueError:
+            continue
+        for name, body in (animations or {}).items():
+            if isinstance(body, dict):
+                catalog.setdefault(name, (java_functions.JavaLoopType(body.get("loop")),
+                                          java_functions.AnimationLengthSeconds(body)))
+    return catalog
+
+
+def PlanScriptControllers(functionCompiler, declaredControllerNames, javaAnimationCatalog, allowExecutor=True):
+    """包里的脚本控制器 → ([(通道, Java 格式控制器数据或 None, 备注, ScriptChannel 或 None)], [(文件名, 跳过原因)])。
+
+    按 Java 通道处理序: 纯决策树(空白通道、没有决策树转换会丢掉的副作用)展开成有序规则的状态机
+    (script_controller.ConvertScript, 不经执行体); 其余第 2 阶段通道(空白 / 并行)编进逐帧执行体, 配按播放码切换的
+    控制器(java_functions.ScriptChannel)。同名基岩控制器已存在时 Java 用它(脚本只在它的内置状态里跑), 不转换。
+    allowExecutor=False(自定义函数这一实验性功能没开): 只做决策树展开(副作用调用照旧忽略), 展开不了的跳过。"""
+    loopTypes = dict((name, entry[0]) for name, entry in javaAnimationCatalog.items())
+    handlers = java_functions.ScriptHandlers(functionCompiler.functionSet)
+    handlers.sort(key=lambda item: JavaChannelRank(u"player_" + item[0]) or (99, item[0]))
+    converted, skipped = [], []
+    for channel, handler in handlers:
+        fileName = handler.fileName + u".molang"
+        if u"player.{}".format(channel) in declaredControllerNames:
+            skipped.append((fileName, u"已有同名基岩控制器 player.{}(Java 优先用它)".format(channel)))
+            continue
+        if not allowExecutor or not functionCompiler.ScriptNeedsExecutor(handler):
+            try:
+                data, notes = ConvertScript(handler.text, channel)
+            except ScriptNotConvertible as error:
+                if not allowExecutor:
+                    # 执行体接得住的通道才提示去开实验性开关; main / use / swing 等开了也不支持, 照实说
+                    hint = (u"(逐帧执行体属于自定义函数, 实验性功能未开启)"
+                            if java_functions.SCRIPT_CHANNEL_PATTERN.match(channel)
+                            else u"(通道 {} 的内置逻辑是主链 / 一次性状态机, 尚未支持)".format(channel))
+                    skipped.append((fileName, error.args[0] + hint))
+                    continue
+            else:
+                converted.append((channel, data, notes, None))
+                continue
+        try:
+            script = functionCompiler.PlanScriptChannel(channel, handler, loopTypes)
+        except java_functions.ScriptChannelError as error:
+            skipped.append((fileName, error.args[0]))
+            continue
+        converted.append((channel, script.BuildController(), script.notes, script))
+    return converted, skipped
+
+
+def _ApplyScriptControllerBlends(path, script):
+    """执行体驱动的脚本控制器: blend_transition 直接按基岩口径(离开的状态)写定(见 java_functions.ScriptChannel 注),
+    不用 Java 口径的重映射结果"""
+    data = LoadJson(path)
+    blends = script.BedrockBlends()
+    for body in (data.get("animation_controllers") or {}).values():
+        if not isinstance(body, dict):
+            continue
+        for stateName, state in (body.get("states") or {}).items():
+            if not isinstance(state, dict):
+                continue
+            value = blends.get(stateName)
+            if value:
+                state["blend_transition"] = value
+            else:
+                state.pop("blend_transition", None)
+            state.pop("blend_via_shortest_path", None)
+        ApplyShortestPathBlend(body)
+    DumpJson(path, data)
+
+
+def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None, javaFunctions=False):
     """移植一个 Java 包; 返回汇总行列表。molangSink 传入 Counter 时把 molang 替换/降级计数原样并入
-    (宿主据此做结构化告警, 汇总文本里的 "[!] label xN" 行是同一份数据的可读形态)。"""
+    (宿主据此做结构化告警, 汇总文本里的 "[!] label xN" 行是同一份数据的可读形态)。
+    javaFunctions: 转换 Java 自定义函数(functions/*.molang, 见 java_functions.py 注), **实验性, 缺省关** ——
+    关着时与支持它之前一样: fn.* / ysm.play_sound 等调用置零, @player_init / @player_update / @sync 不转换,
+    脚本控制器只做决策树展开。"""
     manifestPath = os.path.join(javaDir, "ysm.json")
     if not os.path.isfile(manifestPath):
         raise SystemExit(u"[ERROR] 不是 Java 模型包目录(缺 ysm.json): {}".format(_DisplayPath(javaDir)))
@@ -6880,6 +7486,16 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     particleSink = {"effects": OrderedDict(), "locators": OrderedDict()}
     # 音频汇: 玩家侧动画 sound_effects 关键帧 → 效果键 + ogg 拷贝 + sound_definitions + 注册
     soundSink = SoundSink(packName)
+    # Java 自定义函数(functions/*.molang, 见 java_functions.py 注): fn.* 调用处内联、ysm.play_sound 等改写成主包音效
+    # 宿主请求。全包共用一个编译器 —— 内联帧编号与音效请求槽位跨文件唯一; 函数里登记的音效走同一个音频汇
+    soundDirRel = _SoundSourceDir(manifest)
+    functionCompiler = java_functions.FunctionCompiler(
+        java_functions.LoadFunctionSet(javaDir, (manifest.get("files") or {}).get("function_path")),
+        packName, physics=physics, sounds=soundSink, report=molangReport,
+        soundPath=lambda name: os.path.join(javaDir, _FsPath(soundDirRel, javaDir).replace("/", os.sep),
+                                            _FsPath(name, javaDir) + ".ogg"))
+    # 实验性功能没开: 编译器只用来枚举脚本控制器, 动画 / 控制器里的调用不改写(交给 PortMolangText 置零)
+    activeFunctions = functionCompiler if javaFunctions else None
     # 同理预扫 pre 通道控制器(player.pre_parallel_N/pre_main/vehicle)状态引用的动画:
     # 排在主链之前、同处淡化链路, 也不带 override
     preKeys = set()
@@ -6888,16 +7504,19 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
             controllerData = LoadJson(_Src(relPath))
             additiveKeys |= CollectParallelChannelAnimKeys(controllerData, nameMapper)
             preKeys |= CollectPreChannelAnimKeys(controllerData, nameMapper)
-    # Java 脚本控制器(functions/*@player_ctrl_<通道>.molang) → 基岩式控制器(见 script_controller.py 注);
-    # 与声明的控制器同样参与 pre/parallel 通道的 override 预扫
+    # Java 脚本控制器(<函数目录>/*@player_ctrl_<通道>.molang) → 基岩式控制器; 与声明的控制器同样参与 pre/parallel
+    # 通道的 override 预扫
     declaredControllerNames = set()
     for relPath in (player.get("animation_controllers") or []):
         if isinstance(relPath, (str, unicode)) and os.path.isfile(_Src(relPath)):  # noqa: F821
             declaredControllerNames |= set((LoadJson(_Src(relPath)).get("animation_controllers") or {}).keys())
-    scriptControllers, skippedScripts = ConvertPackScripts(javaDir, declaredControllerNames)
-    for _channel, scriptData, _notes in scriptControllers:
-        additiveKeys |= CollectParallelChannelAnimKeys(scriptData, nameMapper)
-        preKeys |= CollectPreChannelAnimKeys(scriptData, nameMapper)
+    javaAnimationCatalog = _JavaAnimationCatalog(animationDecl, _Src, withMods)
+    scriptControllers, skippedScripts = PlanScriptControllers(
+        functionCompiler, declaredControllerNames, javaAnimationCatalog, allowExecutor=javaFunctions)
+    for _channel, scriptData, _notes, _script in scriptControllers:
+        if scriptData is not None:
+            additiveKeys |= CollectParallelChannelAnimKeys(scriptData, nameMapper)
+            preKeys |= CollectPreChannelAnimKeys(scriptData, nameMapper)
     for key in list(animationDecl.keys()):
         if not withMods and key in MOD_ANIMATION_KEYS:
             del animationDecl[key]
@@ -6909,6 +7528,10 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
             report.append(u"[WARN] 动画缺失: {}".format(relPath))
             continue
         namespace = "{}_arm".format(packName) if key in ARM_ANIMATION_KEYS else packName
+        tacSkipped = TacSlotSkipNames(key, src)
+        if tacSkipped:
+            report.append(u"枪械动画: 跳过基岩驱动不了的 {} 条(逐枪条件动画 / 非 pistol·rifle·rpg 类型 / 手雷等): {}{}".format(
+                len(tacSkipped), u", ".join(sorted(tacSkipped)[:6]), u" ..." if len(tacSkipped) > 6 else u""))
         count, dropped, (vectorFixes, stmtFixes, loopFixes, physicsFixes, sanitizeFixes,
                          lerpFixes), \
             animIds = RewriteAnimations(
@@ -6918,7 +7541,9 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                 sounds=soundSink, previewGate=True,
                 # 第一人称手臂动画独占改名表: arm 文件(第三人称手部条件动画)不能改 ——
                 # 它按短键并进主域, 作用在**主几何**的 RightArm 上
-                boneRenames=fpArmBoneRenames if key == "fp_arm" else None)
+                boneRenames=fpArmBoneRenames if key == "fp_arm" else None,
+                functions=activeFunctions, skipNames=tacSkipped)
+        dropped = [name for name in dropped if name not in tacSkipped]
         nsPrefix = u"animation.{}.".format(namespace)
         for animId in animIds:
             if animId.startswith(nsPrefix):
@@ -6945,7 +7570,7 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     for geoFile, action, heldItemBones in EnsureHeldItemBones(rpModels):
         report.append(u"手持物品定位骨骼[{}]: {} {} (基岩认这两个固定骨骼名, Java 用 "
                       u"<Left|Right>HandLocator)".format(
-                          geoFile, u"补" if action == "added" else u"挪到新挂点",
+                          geoFile, u"补" if action == "added" else u"旧生成物改成现行形态(挂点/去拴绳 locator)",
                           u", ".join(u"{}→{}".format(bone, parent)
                                      for bone, parent in heldItemBones)))
     # 滑翔根骨骼排在粒子 locator 之后包: locator 要打在**模型自己的**根骨骼上(跟着身体动),
@@ -6954,6 +7579,10 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
         report.append(u"主几何外包滑翔根骨骼 {}: 主包在它上面播 animation.ysm.java_glide_fix, "
                       u"抵消基岩滑翔时实体层的 (90+pitch) 原生旋转(Java 版渲染器不转, 姿态全在 "
                       u"elytra_fly 动画里)".format(GLIDE_ROOT_BONE))
+    slideWrappers = WrapSlidePostureGeometry(os.path.join(rpModels, "main.geo.json"))
+    if slideWrappers:
+        report.append(u"主几何补滑铲姿态骨骼 {}: 滑铲的整身翻转 / 上身抬起写在它们上面, 持枪 / 开火 / 近战动画的 "
+                      u"override 清不到".format(u", ".join(slideWrappers)))
     # 资源登记表的标准位置是 files.player(基岩扩展字段与 Java 原生声明同居, 见 pack-guide);
     # 早先写在 netease 段的旧产物一并迁到 files.player
     playerDeclNode = manifest.setdefault("files", OrderedDict()).setdefault("player", OrderedDict())
@@ -7004,7 +7633,7 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
             dst = os.path.join(rpControllers, outName)
             count, takeovers, refFixes, prunedRefs, prunedTransitions = \
                 RewriteControllers(src, dst, packName, molangDefaults, molangReport,
-                                   nameMapper, knownAnimKeys, packVars, physics)
+                                   nameMapper, knownAnimKeys, packVars, physics, functions=activeFunctions)
             channelTakeovers += takeovers
             note = " (动画引用转义 {} 处)".format(refFixes) if refFixes else ""
             shownName = srcName if outName == srcName else u"{}(文件名转为 {})".format(srcName, outName)
@@ -7024,31 +7653,43 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                     u", ".join(sorted(set(prunedTransitions))[:6])))
     # 脚本控制器落盘, 声明登记进 files.player.animation_controllers(主包按声明文件名定位控制器文件)
     scriptDecls = []
-    for channel, scriptData, notes in scriptControllers:
-        outName = "ysm_script_{}.json".format(channel)
+    for channel, scriptData, notes, script in scriptControllers:
+        if scriptData is None:
+            report.append(u"脚本控制器 @player_ctrl_{}: 从不播放包里的动画, 只编进逐帧执行体(变量 / 音效等照跑)".format(
+                channel))
+            continue
+        outName = script.fileName if script is not None else "ysm_script_{}.json".format(channel)
+        outPath = os.path.join(rpControllers, outName)
         tempDir = tempfile.mkdtemp()
         try:
             tempPath = os.path.join(tempDir, "script.json")
             DumpJson(tempPath, scriptData)
             _count, takeovers, _refFixes, prunedRefs, _prunedTransitions = RewriteControllers(
-                tempPath, os.path.join(rpControllers, outName), packName, molangDefaults, molangReport,
-                nameMapper, knownAnimKeys, packVars, physics)
+                tempPath, outPath, packName, molangDefaults, molangReport,
+                nameMapper, knownAnimKeys, packVars, physics, functions=activeFunctions)
         finally:
             shutil.rmtree(tempDir, ignore_errors=True)
         channelTakeovers += takeovers
         scriptDecls.append("controller/{}".format(outName))
         stateCount = len(list(scriptData["animation_controllers"].values())[0]["states"])
-        report.append(u"脚本控制器 @player_ctrl_{} → controller.animation.{}.player_{} ({} 个状态{}): Java 每帧脚本的"
-                      u"决策树展开成有序规则, 首个命中者播放{}".format(
-                          channel, packName, channel, stateCount,
-                          u", 剪掉死引用 {} 处".format(len(prunedRefs)) if prunedRefs else u"",
-                          (u"; " + u"; ".join(notes)) if notes else u""))
+        suffix = u"{}{}".format(u", 剪掉死引用 {} 处".format(len(prunedRefs)) if prunedRefs else u"",
+                                (u"; " + u"; ".join(notes)) if notes else u"")
+        if script is None:
+            report.append(u"脚本控制器 @player_ctrl_{} → controller.animation.{}.player_{} ({} 个状态): Java 每帧脚本的"
+                          u"决策树展开成有序规则, 首个命中者播放{}".format(channel, packName, channel, stateCount, suffix))
+            continue
+        _ApplyScriptControllerBlends(outPath, script)
+        report.append(u"脚本控制器 @player_ctrl_{} → 逐帧执行体 + controller.animation.{}.player_{} ({} 个动画{}): "
+                      u"脚本连同 Java 动画播放器状态机逐帧复刻, 控制器按播放码切换{}".format(
+                          channel, packName, channel, len(script.animations),
+                          u", 内置并行动画 {}".format(script.builtin) if script.builtin else u"", suffix))
     for fileName, reason in skippedScripts:
         report.append(u"[!] 脚本控制器 {} 未转换: {}".format(fileName, reason))
     if os.path.isdir(rpControllers):
         keepNames = set(decl.rsplit("/", 1)[-1] for decl in scriptDecls)
         for name in os.listdir(rpControllers):
-            if name.startswith("ysm_script_") and name.endswith(".json") and name not in keepNames:
+            if name.startswith(("ysm_script_", java_functions.SCRIPT_CONTROLLER_PREFIX)) and name.endswith(".json") \
+                    and name not in keepNames:
                 os.remove(os.path.join(rpControllers, name))
     if scriptDecls:
         declList = player.get("animation_controllers")
@@ -7071,6 +7712,59 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                           len(droppedPreRefs),
                           u", ".join(u"{}.{}:{}".format(*item) for item in droppedPreRefs[:6])))
 
+    # ---- 自定义函数的事件体(见 java_functions 注): player_update → 逐帧执行体动画, player_init → 初始化语句 ----
+    # 执行体是 Java 形态的生成物, 走与包动画相同的流水线(映射 / 物理 / 纸娃娃门控 / 语法守卫 / 优先级显式化);
+    # 主包按 ysm.json java_functions.executor 挂在 Java 模式 animate 表的共享状态动画之后
+    executorPath = os.path.join(rpAnims, java_functions.EXECUTOR_FILE)
+    if functionCompiler.scriptChannels:
+        # 脚本控制器的播放器状态机要知道动画的 Java 时长(源文件口径)与基岩产物是否自己循环
+        producedBodies = CollectPackAnimationBodies(packName)
+        for script in functionCompiler.scriptChannels:
+            for name in script.animations:
+                body = producedBodies.get(nameMapper.Lookup(name))
+                script.info[name] = (javaAnimationCatalog[name][1],
+                                     body is not None and _NormalizeLoopValue(body.get("loop")) is True)
+    executorBody = functionCompiler.BuildExecutorAnimation() if javaFunctions else None
+    executorId = None
+    if executorBody is not None:
+        RewriteAnimations(
+            OrderedDict([("format_version", "1.8.0"),
+                         ("animations", OrderedDict([(java_functions.EXECUTOR_KEY, executorBody)]))]),
+            executorPath, packName, molangDefaults, molangReport, nameMapper, packVars, additiveKeys,
+            physics=physics, preKeys=preKeys, previewGate=True)
+        executorId = u"animation.{}.{}".format(packName, java_functions.EXECUTOR_KEY)
+        knownAnimKeys.add(java_functions.EXECUTOR_KEY)
+        report.append(u"自定义函数: player_update 事件体 / 脚本控制器 → 逐帧执行体 {}(主包挂在共享状态动画之后, "
+                      u"每帧一次)".format(executorId))
+    elif os.path.isfile(executorPath):
+        os.remove(executorPath)
+    initStatements = []
+    for line in (functionCompiler.BuildInitStatements() if javaFunctions else []):
+        mapped = PortMolangText(line, molangDefaults, molangReport)
+        mapped, _gated = GatePreviewEntityQueries(mapped)
+        problem = MolangSyntaxProblem(mapped)
+        if problem:
+            molangReport[u"zero:@player_init 事件体基岩解析不了, 整条删除(Java 同样作废): {}".format(problem)] += 1
+            continue
+        mapped, _parens = ExplicitPrecedence(mapped)
+        initStatements.append(mapped)
+        packVars.update(_MOLANG_VAR_SCAN.findall(mapped))
+    if initStatements:
+        report.append(u"自定义函数: player_init 事件体 {} 段 → 变量初始化控制器 / 预览实体 initialize".format(
+            len(initStatements)))
+    if javaFunctions:
+        functionCompiler.ReportUnsupportedEvents()
+    elif len(functionCompiler.functionSet):
+        report.append(u"[!] 自定义函数 {} 个文件没有转换(实验性功能, 缺省关): fn.* / ysm.play_sound 等调用置零, "
+                      u"@player_init / @player_update / @sync 不转换; 需要时开启转换自定义函数"
+                      u"(转换器勾选, 命令行 --java-functions)".format(len(functionCompiler.functionSet)))
+    if javaFunctions and len(functionCompiler.functionSet):
+        report.append(u"自定义函数 {} 个文件: 可调用 {} 个, 事件订阅 {}; 音效请求 {} 处 / 停止 {} 处(主包宿主播放)".format(
+            len(functionCompiler.functionSet), len(functionCompiler.functionSet.functions),
+            u", ".join(u"{} {}".format(event, len(handlers))
+                       for event, handlers in functionCompiler.functionSet.handlers.items()) or u"无",
+            len(functionCompiler.soundSlots), len(functionCompiler.stopSlots) + len(functionCompiler.stopAllSlots)))
+
     # ---- 替换实体(弹射物/载具, 含 Java 废弃字段 files.arrow)的几何与动画 ----
     # 命名与主包解析器共用 packParser.ReplacedTargets: 几何 geometry.<包名>_<模型段>,
     # 动画命名空间 <包名>_<动画命名空间段>(同模型配不同动画文件时带动画段区分, 01 酒狐的马/骡子)。
@@ -7081,23 +7775,35 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     # 第一层, 它们按玩家通道语义改写, 不能碰替换实体的控制器; 资源索引与引擎加载都递归子目录。
     rpReplacedControllers = os.path.join(rpControllers, REPLACED_CONTROLLER_DIR)
     writtenReplacedControllers = set()
-    for section, _entityIds, entry, modelSegment, namespaceSegment in ReplacedTargets(
+    # 几条替换目标共用同一个模型(18 号 GMA_T.50 同时替换船和马)时几何只写一次: 每条都从源文件重写会冲掉前面
+    # 目标补上的东西(马系查询骨骼补在"马"那条上, 排在后面的"船"一重写就没了)
+    writtenReplacedGeometries = set()
+    passengerLocatorTable = OrderedDict()   # 载具 model 声明 → 定位组(顶层 passenger_locators)
+    for section, entityIds, entry, modelSegment, namespaceSegment in ReplacedTargets(
             manifest.get("files")):
         modelRel = entry.get("model")
         if not isinstance(modelRel, (str, unicode)) or not modelRel \
                 or modelRel.startswith("geometry.") or not os.path.isfile(_Src(modelRel)):  # noqa: F821
             continue
         identifier = "geometry.{}_{}".format(packName, modelSegment)
-        RewriteGeometry(_Src(modelRel),
-                        os.path.join(rpModels, "{}.geo.json".format(modelSegment)), identifier)
-        if section == "projectiles" and WrapProjectileGeometry(
-                os.path.join(rpModels, "{}.geo.json".format(modelSegment))):
-            report.append(u"  投射物几何外包朝向根骨骼 {} → {}(Y -90°): 运行层在根上播 Java 的朝向与缩放(0.7 换算为 0.8)".format(
-                PROJECTILE_ROOT_BONE, PROJECTILE_FIX_BONE))
-        if section == "vehicles" and WrapVehicleGeometry(
-                os.path.join(rpModels, "{}.geo.json".format(modelSegment))):
-            report.append(u"  载具几何外包缩放根骨骼 {}: 运行层在根上播 Java 硬编码的缩放(0.7 换算为 0.8)".format(
-                VEHICLE_ROOT_BONE))
+        geoOut = os.path.join(rpModels, "{}.geo.json".format(modelSegment))
+        if geoOut not in writtenReplacedGeometries:
+            writtenReplacedGeometries.add(geoOut)
+            RewriteGeometry(_Src(modelRel), geoOut, identifier)
+            if section == "projectiles" and WrapProjectileGeometry(geoOut):
+                report.append(u"  投射物几何外包朝向根骨骼 {} → {}(Y -90°): 运行层在根上播 Java 的朝向与缩放(0.7 换算为 0.8)".format(
+                    PROJECTILE_ROOT_BONE, PROJECTILE_FIX_BONE))
+            if section == "vehicles" and WrapVehicleGeometry(geoOut):
+                report.append(u"  载具几何外包缩放根骨骼 {}: 运行层在根上播 Java 硬编码的缩放(0.7 换算为 0.8)".format(
+                    VEHICLE_ROOT_BONE))
+        if section == "vehicles":
+            queryBones = AddVanillaQueryBones(os.path.join(rpModels, "{}.geo.json".format(modelSegment)), entityIds)
+            if queryBones:
+                report.append(u"  载具几何补原版实体脚本查询的占位骨骼 {}(马系实体脚本按名字查骨骼, 缺了引擎每次报"
+                              u" Could not find specified bone)".format(u", ".join(queryBones)))
+            locators = PassengerLocators(LoadJson(geoOut))
+            if locators:
+                passengerLocatorTable[ReplacedModelDecl(entry)] = locators
         animRel = entry.get("animation")
         replacedNamespace = "{}_{}".format(packName, namespaceSegment)
         replacedAnimKeys = set()
@@ -7108,7 +7814,17 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                 _Src(animRel),
                 os.path.join(rpAnims, "{}.animation.json".format(namespaceSegment)),
                 replacedNamespace,
-                molangDefaults, molangReport, nameMapper, physics=physics, sounds=soundSink)
+                # 变量并进包变量表: 主包给带包动画的替换实体同样挂本包的变量初始化控制器(packParser._WithVariableInit),
+                # 修复工具扫包动画目录时本来就算上它们 —— 两边口径一致, 转换器只跑移植时载具也不缺初值
+                molangDefaults, molangReport, nameMapper, packVars, physics=physics, sounds=soundSink,
+                # Java 的载具/弹射物动画同样调自定义函数(18 号 GMA_T.50 的 fn.motorSynth / fn.move); 音效请求
+                # 计数器落在替换实体自己身上, 主包宿主按实体轮询
+                functions=activeFunctions)
+            localized = LocalizeReplacedEntityQueries(
+                os.path.join(rpAnims, "{}.animation.json".format(namespaceSegment)))
+            if localized:
+                report.append(u"  {} {} 动画: 运动量换成实体自己的原生查询 {} 处(玩家侧映射的 query.mod 只写在玩家身上)".format(
+                    section, modelSegment, localized))
             nsPrefix = u"animation.{}.".format(replacedNamespace)
             replacedAnimKeys = set(str(animId[len(nsPrefix):]) for animId in replacedIds
                                    if animId.startswith(nsPrefix))
@@ -7127,8 +7843,9 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                 ctlCount, _takeovers, _refFixes, prunedRefs, _prunedTransitions = RewriteControllers(
                     _Src(ctlRel), os.path.join(rpReplacedControllers, ctlOutName), replacedNamespace,
                     molangDefaults, molangReport, nameMapper, replacedAnimKeys or None, physics=physics,
-                    section=section)
+                    section=section, functions=activeFunctions)
                 writtenReplacedControllers.add(ctlOutName)
+                LocalizeReplacedEntityQueries(os.path.join(rpReplacedControllers, ctlOutName))
                 ctlSrcName = ctlRel.replace(chr(92), "/").rsplit("/", 1)[-1]
                 if ctlSrcName != ctlOutName:
                     entry["controller"] = ctlRel[:len(ctlRel) - len(ctlSrcName)] + ctlOutName
@@ -7140,6 +7857,9 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
         if texPath and os.path.isfile(_Src(texPath)):
             CopyBinary(_Src(texPath),
                        os.path.join(rpTextures, os.path.basename(str(texPath))))
+        # PBR 贴图只有载具接得上(自有渲染控制器带贴图槽); 投射物沿用原版渲染控制器, 解析器告警忽略
+        if section == "vehicles":
+            PortPbrTextures(texRel, _Src, rpTextures, packName, report, u"{} {}".format(section, modelSegment))
         report.append("{} {} → {}".format(section, modelSegment, identifier))
     if os.path.isdir(rpReplacedControllers):
         for name in os.listdir(rpReplacedControllers):
@@ -7183,6 +7903,7 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
         CopyBinary(src, os.path.join(rpTextures, os.path.basename(str(texPath))))
         report.append("贴图 {} → textures/entity/{}/{}".format(
             texPath, packName, BaseName(texPath)))
+        PortPbrTextures(texEntry, _Src, rpTextures, packName, report, u"贴图 {}".format(texPath))
 
     # ---- GUI 卡片前景/背景图(properties.gui_background / gui_foreground) ----
     PortGuiImages(manifest, _Src, rpTextures, packName, report)
@@ -7262,14 +7983,15 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                 ", ".join(u"{}→{}".format(a, b) for a, b in cjk[:4])
                 + (u" ..." if len(cjk) > 4 else u"")))
 
-    # ---- properties 子树的 v.roaming.* 同步扁平化 ----
-    # 动画/控制器文件里的 v.roaming.<名> 已由 PortMolangText 扁平化为 v.roaming_<名>
-    # (基岩无自定义 struct, 嵌套名求值恒失败); ysm.json 的 config_forms(value/labels
-    # 表达式)引用同一批变量, 不同步改写的话表单写的是死变量, 动画读的是另一个 ——
+    # ---- properties 子树与顶层 initialize 的变量名同步扁平化 ----
+    # 动画/控制器文件里的 v.roaming.<名> / v.<结构体>.<成员> 已由 PortMolangText 扁平化
+    # (见 _STRUCT_MEMBER_PATTERN 注); ysm.json 的 config_forms(value/labels 表达式)与 initialize
+    # 引用同一批变量, 不同步改写的话表单写的是死变量, 动画读的是另一个 ——
     # 实机表现: 模型配置表单全体无效(凋灵娘"隐藏悬浮头颅"等)。
-    flattenCount = _FlattenRoamingStrings(manifest.get("properties"))
+    flattenCount = _FlattenVariableStrings(manifest.get("properties")) \
+        + _FlattenVariableStrings(manifest.get("initialize"))
     if flattenCount:
-        report.append(u"ysm.json 表单变量 v.roaming.* 扁平化 {} 处(与动画侧同步)".format(
+        report.append(u"ysm.json 表单变量 / initialize 的 v.roaming.* 与结构体成员扁平化 {} 处(与动画侧同步)".format(
             flattenCount))
 
     # ---- 主包运行层声明(顶层 java_state): 本包要哪些 Java 专有的环境/状态量、roaming 变量清单、探针表 ----
@@ -7280,6 +8002,18 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     if declarationLine:
         report.append(declarationLine)
     runtime_bindings.EndPack()
+
+    # ---- 自定义函数声明(顶层 java_functions): 执行体 ID、初始化语句、音效宿主的请求槽位表 ----
+    functionDeclaration = functionCompiler.Declaration(executorId, initStatements) if javaFunctions else None
+    if functionDeclaration:
+        manifest[java_functions.DECLARATION_KEY] = functionDeclaration
+    else:
+        manifest.pop(java_functions.DECLARATION_KEY, None)
+
+    # ---- 载具座位(顶层 passenger_locators): 载具几何里定位组的静止位置, 主包解析器换算成座位 ----
+    ApplyPassengerLocators(manifest, passengerLocatorTable)
+    if passengerLocatorTable:
+        report.append(PassengerLocatorReportLine(passengerLocatorTable))
 
     if not manifest.get("netease"):
         manifest.pop("netease", None)     # 空的兼容段不落盘
@@ -7342,7 +8076,7 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                     "variable.ysm_skin = 0.0;", "variable.ysm_gui = 0.0;",
                     "variable.ysm_show = 0.0;", "variable.ysm_preview = 0.0;",
                     "variable.ysm_light = 0.0;",
-                ] + packInitLines)])),
+                ] + packInitLines + initStatements)])),
             ])),
         ])),
     ])
@@ -7351,7 +8085,7 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
         packName, len(packInitLines)))
 
     # ---- 每实例变量初始化控制器(玩家侧纸娃娃, 见 BuildVariableInitController 注) ----
-    initController = BuildVariableInitController(packName, packInitLines)
+    initController = BuildVariableInitController(packName, packInitLines, initStatements)
     initControllerPath = os.path.join(rpControllers, VARIABLE_INIT_FILE)
     if initController is not None:
         DumpJson(initControllerPath, initController)
@@ -7374,6 +8108,10 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     if loopedPreview:
         report.append(u"GUI 展示动画按 Java 强制循环(CapPredicate playLoopAnimation): {}".format(
             u", ".join(u"{}(原 loop={})".format(key, loop) for key, loop in loopedPreview)))
+    loopedGuiCard = LoopGuiCardAnimations(packName, manifest)
+    if loopedGuiCard:
+        report.append(u"选择界面交互动画按 Java 定循环(hover/focus 循环, hover_fadeout 播一遍): {}".format(
+            u", ".join(u"{}(loop {}→{})".format(key, before, after) for key, before, after in loopedGuiCard)))
 
     foldedVariants, skippedVariants = ReconcileConditionalVariants(packName, manifest)
     if foldedVariants:
@@ -7464,11 +8202,16 @@ def main():
     packName = None
     collection = None
     withMods = False
+    javaFunctions = False
     baseline = False
     index = 1
     while index < len(args):
         if args[index] == "--with-mods":
             withMods = True
+            index += 1
+            continue
+        if args[index] == "--java-functions":
+            javaFunctions = True
             index += 1
             continue
         if args[index] == "--baseline":
@@ -7491,7 +8234,7 @@ def main():
         print("[DONE] {} 基线动画移植完成 —— 记得重启游戏(资源包改动需重载)".format(packName))
         return
     packName = packName or os.path.basename(os.path.normpath(javaDir))
-    for line in PortPack(javaDir, packName, collection, withMods):
+    for line in PortPack(javaDir, packName, collection, withMods, javaFunctions=javaFunctions):
         if isinstance(line, unicode):  # noqa: F821 — py2 stdout 是字节流
             line = line.encode("utf-8")
         print("  " + line)

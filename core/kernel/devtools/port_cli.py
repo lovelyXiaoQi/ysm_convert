@@ -18,6 +18,7 @@
                                      "folder_texture": "<可省: 文件夹封面的资源包纹理路径; 省略时沿用
                                                         Java 源旁 ysm-pack.png 拷进资源包的那张>"}},
       "options": {"withMods": false, "validate": true,
+                  "javaFunctions": false,                # 转换 Java 自定义函数(实验性, 缺省关; 1.2 起)
                   "compactJson": false,                  # 产物 JSON 压成一行(缺省缩进; 转换器壳默认 true)
                   "writeCollections": true}              # 末尾写合集清单(按包并行的子任务关掉, 交给 finalize)
     }
@@ -51,7 +52,7 @@ import port_java_pack as port  # noqa: E402
 import fix_ported_controllers as fix  # noqa: E402
 import validate_rp_animations as validate  # noqa: E402
 
-VERSION = "1.1"    # 1.1: molang 事件新增 const / norm / skip / tick 类别
+VERSION = "1.2"    # 1.1: molang 事件新增 const / norm / skip / tick 类别; 1.2: options.javaFunctions(实验性开关)
 _FS_ENCODING = sys.getfilesystemencoding() or "mbcs"
 _PY2 = sys.version_info[0] < 3
 
@@ -425,6 +426,7 @@ def _WriteCollections(sink, usedCollections, collections):
 def RunConvert(sink, job):
     options = job.get("options") or {}
     withMods = bool(options.get("withMods"))
+    javaFunctions = bool(options.get("javaFunctions"))
     packs = job.get("packs") or []
     collections = job.get("collections") or {}
     okCount = failCount = 0
@@ -444,7 +446,8 @@ def RunConvert(sink, job):
         started = time.time()
         molang = Counter()
         try:
-            lines = port.PortPack(javaDir, packName, collection, withMods, molangSink=molang)
+            lines = port.PortPack(javaDir, packName, collection, withMods, molangSink=molang,
+                                  javaFunctions=javaFunctions)
         except SystemExit as error:  # 内核用 SystemExit 报"不是 Java 包"之类的输入错误
             failCount += 1
             sink.Emit("pack_done", pack=_ToText(packName), ok=False, seconds=round(time.time() - started, 2),

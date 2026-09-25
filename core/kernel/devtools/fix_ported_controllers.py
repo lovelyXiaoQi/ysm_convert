@@ -13,8 +13,9 @@ port_java_pack.py 后补的三条转换规则只对"再跑一次移植"生效, �
    "can't find animation" 且有连坐控制器失效的风险;
 3. 控制器状态里引用的 parallel/pre_parallel 直播键并入 ysm.json 的
    ysm.json 精简迁移: initialize 提到顶层, 删掉可自动推导的字段(见 _OBSOLETE_NETEASE_KEYS);
-4. ysm.json properties 子树的 v.roaming.* → v.roaming_*(与动画侧扁平化同步,
-   否则 config_forms 表单写死变量, 动画读的是另一个);
+4. ysm.json properties 子树与顶层 initialize 的 v.roaming.* → v.roaming_*、v.<结构体>.<成员> →
+   v.<结构体>_<成员>(与动画侧扁平化同步, 否则 config_forms 表单写死变量, 动画读的是另一个;
+   动画/控制器里的结构体成员由 _MigrateOneString 就地扁平化, 见 port._STRUCT_MEMBER_PATTERN 注);
 5. 预览实体 scripts.initialize 回填包变量(port.BuildPackVariableDefaults):
    GUI 纸娃娃是独立实例, 玩家侧初始化到不了它 —— 预览并行动画引用的换装/定位/
    表情变量未初始化, 引擎逐骨骼通道刷 "unhandled request for unknown variable",
@@ -324,7 +325,7 @@ _OBSOLETE_NETEASE_KEYS = ("animate_remove", "java_state_driver")
 
 def _FixManifest(packName, referencedParallels, report):
     """ysm.json 精简迁移: initialize 提到顶层, 删掉可自动推导的字段与空 netease 段,
-    properties 里的 v.roaming.* 扁平化"""
+    properties 与 initialize 里的 v.roaming.* / 结构体成员扁平化"""
     path = port.PackManifestPath(packName)
     if not os.path.isfile(path):
         return
@@ -360,10 +361,12 @@ def _FixManifest(packName, referencedParallels, report):
             del manifest["netease"]
             changed = True
             report.append("  ysm.json: 删掉空的 netease 兼容段")
-    flattened = port._FlattenRoamingStrings(manifest.get("properties"))
+    flattened = port._FlattenVariableStrings(manifest.get("properties")) + port._FlattenVariableStrings(
+        manifest.get("initialize")
+    )
     if flattened:
         changed = True
-        report.append("  ysm.json: 表单变量 v.roaming.* 扁平化 {} 处".format(flattened))
+        report.append("  ysm.json: 表单变量 / initialize 的 v.roaming.* 与结构体成员扁平化 {} 处".format(flattened))
     if changed:
         port.DumpJson(path, manifest)
     else:
@@ -397,6 +400,21 @@ def _ScanPackVars(packName):
     return variables
 
 
+def _FunctionInitStatements(manifest):
+    """ysm.json java_functions.init: Java @player_init 事件体的基岩形态(移植期编译, 修复工具拿不到 Java 源, 原样沿用)"""
+    declaration = manifest.get(port.java_functions.DECLARATION_KEY) or {}
+    return [line for line in (declaration.get("init") or [])
+            if isinstance(line, (str, unicode)) and line.strip()]  # noqa: F821
+
+
+def _PackInitVariables(packName, manifest):
+    """初始化表要覆盖的变量: 产物文本扫描 + player_init 事件体里读写的变量"""
+    variables = _ScanPackVars(packName)
+    for line in _FunctionInitStatements(manifest):
+        variables.update(port._MOLANG_VAR_SCAN.findall(line))
+    return variables
+
+
 def _FixEntityInitialize(packName, report):
     """预览实体 scripts.initialize = ysm_* 五件套 + 包变量默认值(幂等重建)。
 
@@ -409,7 +427,8 @@ def _FixEntityInitialize(packName, report):
     if not os.path.isfile(entityPath) or not os.path.isfile(manifestPath):
         return
     manifest = port.LoadJson(manifestPath)
-    newInit = _ENTITY_BASE_INIT + port.BuildPackVariableDefaults(manifest, _ScanPackVars(packName))
+    newInit = _ENTITY_BASE_INIT + port.BuildPackVariableDefaults(manifest, _PackInitVariables(packName, manifest)) \
+        + _FunctionInitStatements(manifest)
     entity = port.LoadJson(entityPath)
     description = (entity.get("minecraft:client_entity") or {}).get("description")
     if not isinstance(description, dict):
@@ -451,8 +470,8 @@ def _FixVariableInitController(packName, report):
     if not os.path.isfile(manifestPath):
         return
     manifest = port.LoadJson(manifestPath)
-    initLines = port.BuildPackVariableDefaults(manifest, _ScanPackVars(packName))
-    controller = port.BuildVariableInitController(packName, initLines)
+    initLines = port.BuildPackVariableDefaults(manifest, _PackInitVariables(packName, manifest))
+    controller = port.BuildVariableInitController(packName, initLines, _FunctionInitStatements(manifest))
     path = os.path.join(RP, "animation_controllers", packName, port.VARIABLE_INIT_FILE)
     if controller is None:
         if os.path.isfile(path):
@@ -670,7 +689,9 @@ def _MigrateAttackTime(text):
 
 def _MigrateOneString(value):
     """单个表达式串的整串迁移; 返回 (新串, 替换数)"""
-    fixes = 0
+    # Java 单层结构体成员 v.<结构体>.<成员> → v.<结构体>_<成员>(移植期 PortMolangText ①'; 早先的产物漏了
+    # roaming 以外的结构体, 初始化控制器的 ?? 落在成员访问上引擎报错, 见 port._STRUCT_MEMBER_PATTERN 注)
+    value, fixes = port.FlattenStructMemberText(value)
     for oldExpr, newExpr in _OLD_TO_NEW_EXPANSIONS:
         if oldExpr != newExpr and oldExpr in value:
             fixes += value.count(oldExpr)
@@ -944,6 +965,25 @@ def _WrapProjectileGeometries(packName, report):
         )
 
 
+def _LocalizeReplacedEntityQueries(packName, report):
+    """替换实体(载具 / 投射物)的动画与控制器: 玩家专用的运动量换成实体自己的原生查询(port.LocalizeReplacedEntityQueries,
+    幂等)。早先的产物载具上读的是只写给玩家的 query.mod, 狐狸车车轮不随车速转"""
+    manifestPath = port.PackManifestPath(packName)
+    if not os.path.isfile(manifestPath):
+        return
+    manifest = port.LoadJson(manifestPath)
+    paths = set()
+    for _section, _entityIds, entry, _modelSegment, namespaceSegment in port.ReplacedTargets(manifest.get("files")):
+        if entry.get("animation"):
+            paths.add(os.path.join(RP, "animations", packName, "{}.animation.json".format(namespaceSegment)))
+    controllerDir = os.path.join(RP, "animation_controllers", packName, port.REPLACED_CONTROLLER_DIR)
+    if os.path.isdir(controllerDir):
+        paths.update(os.path.join(controllerDir, name) for name in os.listdir(controllerDir) if name.endswith(".json"))
+    total = sum(port.LocalizeReplacedEntityQueries(path) for path in sorted(paths))
+    if total:
+        report.append("  替换实体的运动量换成实体自己的原生查询 {} 处(ground_speed / yaw_speed / 头部俯仰)".format(total))
+
+
 def _WrapVehicleGeometries(packName, report):
     """已落盘载具几何补缩放根骨骼(port.WrapVehicleGeometry, 幂等)。载具动画的音频关键帧要 Java 源音频, 只能重新移植"""
     manifestPath = port.PackManifestPath(packName)
@@ -951,20 +991,68 @@ def _WrapVehicleGeometries(packName, report):
         return
     manifest = port.LoadJson(manifestPath)
     wrapped = []
-    for section, _entityIds, _entry, modelSegment, _namespaceSegment in port.ReplacedTargets(
+    queryBones = []
+    for section, entityIds, _entry, modelSegment, _namespaceSegment in port.ReplacedTargets(
         manifest.get("files")
     ):
-        if section != "vehicles" or modelSegment in wrapped:
+        if section != "vehicles":
             continue
         geoPath = os.path.join(RP, "models", "entity", packName, "{}.geo.json".format(modelSegment))
-        if os.path.isfile(geoPath) and port.WrapVehicleGeometry(geoPath):
+        if not os.path.isfile(geoPath):
+            continue
+        if modelSegment not in wrapped and port.WrapVehicleGeometry(geoPath):
             wrapped.append(modelSegment)
+        # 同一几何可能挂多个目标(狐狸车 = 马 + 骡): 每个目标都过一遍, 幂等
+        for name in port.AddVanillaQueryBones(geoPath, entityIds):
+            queryBones.append("{}.{}".format(modelSegment, name))
     if wrapped:
         report.append(
             "  载具几何外包缩放根骨骼 {}: {}(运行层在根上播缩放: Java 硬编码 0.7, 同玩家换算成 0.8)".format(
                 port.VEHICLE_ROOT_BONE, ", ".join(wrapped)
             )
         )
+    if queryBones:
+        report.append(
+            "  载具几何补原版实体脚本查询的占位骨骼 {}(马系实体脚本按名字查骨骼, 缺了引擎每次报 "
+            "Could not find specified bone)".format(", ".join(queryBones))
+        )
+
+
+def _FixPassengerLocators(packName, report):
+    """ysm.json 顶层 passenger_locators 按已落盘的载具几何重算(port.PassengerLocators, 幂等): 早先移植的包没有这个键,
+    骑手按坐骑的原版座位摆(01 酒狐坐在狐狸车车顶上)"""
+    manifestPath = port.PackManifestPath(packName)
+    if not os.path.isfile(manifestPath):
+        return
+    manifest = port.LoadJson(manifestPath)
+    table = OrderedDict()
+    for section, _entityIds, entry, modelSegment, _namespaceSegment in port.ReplacedTargets(manifest.get("files")):
+        if section != "vehicles":
+            continue
+        geoPath = os.path.join(RP, "models", "entity", packName, "{}.geo.json".format(modelSegment))
+        locators = port.PassengerLocators(port.LoadJson(geoPath)) if os.path.isfile(geoPath) else []
+        if locators:
+            table[port.ReplacedModelDecl(entry)] = locators
+    if port.ApplyPassengerLocators(manifest, table):
+        port.DumpJson(manifestPath, manifest)
+        report.append("  " + (port.PassengerLocatorReportLine(table) if table
+                              else "{}(顶层): 载具几何里已没有定位组, 已撤掉".format(port.PASSENGER_LOCATOR_KEY)))
+
+
+def _PruneMissingPbr(packName, report):
+    """ysm.json 里指向资源包中不存在贴图的 PBR 声明去掉(port.PrunePbrDeclarations, 幂等): 早先移植缺文件时只告警、
+    声明留着, 主包解析器照样写 pbr, 运行层绑一张不存在的贴图"""
+    manifestPath = port.PackManifestPath(packName)
+    if not os.path.isfile(manifestPath):
+        return
+    manifest = port.LoadJson(manifestPath)
+    textures = os.path.join(RP, "textures", "entity", packName)
+    removed = port.PrunePbrDeclarations(manifest, lambda rel: os.path.isfile(
+        os.path.join(textures, os.path.basename(rel.replace(chr(92), "/")))))
+    if removed:
+        port.DumpJson(manifestPath, manifest)
+        report.append(u"  PBR 声明指向的贴图资源包里没有, 已去掉 {} 项: {}".format(
+            len(removed), u", ".join(u"{} {}".format(label, field) for label, field, _rel in removed)))
 
 
 def _WrapGlideRoot(packName, report):
@@ -979,6 +1067,22 @@ def _WrapGlideRoot(packName, report):
             "  主几何外包滑翔根骨骼 {}(主包在它上面反向旋转, 还原 Java 的鞘翅姿态)".format(
                 port.GLIDE_ROOT_BONE
             )
+        )
+
+
+def _WrapSlidePosture(packName, report):
+    """已落盘玩家主几何补滑铲姿态骨骼(port.WrapSlidePostureGeometry, 幂等)。
+
+    基线滑铲把整身翻转 / 上身抬起写在这两根外包骨骼上, 枪械通道的 override 动画清不到(见 packParser.SLIDE_POSTURE_WRAPPERS 注);
+    没补的旧产物由解析器回落旧写法, 端步枪滑铲照旧会倒地。
+    """
+    geoPath = os.path.join(RP, "models", "entity", packName, "main.geo.json")
+    if not os.path.isfile(geoPath):
+        return
+    wrapped = port.WrapSlidePostureGeometry(geoPath)
+    if wrapped:
+        report.append(
+            "  主几何补滑铲姿态骨骼 {}(滑铲姿态写在它们上面, 持枪 / 开火 / 近战动画清不到)".format(", ".join(wrapped))
         )
 
 
@@ -1115,6 +1219,13 @@ def FixPack(packName):
                 ", ".join("{}(原 loop={})".format(key, loop) for key, loop in loopedPreview)
             )
         )
+    loopedGuiCard = port.LoopGuiCardAnimations(packName)
+    if loopedGuiCard:
+        report.append(
+            "  选择界面交互动画按 Java 定循环(hover/focus 循环, hover_fadeout 播一遍): {}".format(
+                ", ".join("{}(loop {}->{})".format(key, before, after) for key, before, after in loopedGuiCard)
+            )
+        )
     foldedVariants, skippedVariants = port.ReconcileConditionalVariants(packName)
     if foldedVariants:
         report.append(
@@ -1134,8 +1245,8 @@ def FixPack(packName):
             )
         else:
             report.append(
-                "  手持物品定位骨骼[{}]: 旧生成物挪到新挂点 {}(主几何 pivot 放在定位骨骼上, "
-                "对齐作者自制基岩版; 摆位由主包物品修正动画补)".format(
+                "  手持物品定位骨骼[{}]: 旧生成物改成现行形态 {}(主几何 pivot 放在定位骨骼上、对齐作者自制基岩版, "
+                "摆位由主包物品修正动画补; 去掉照抄原版的拴绳 locator —— 与锚点几何的 lead_hold 冲突)".format(
                     geoFile, ", ".join("{}→{}".format(bone, parent) for bone, parent in heldItemBones)
                 )
             )
@@ -1187,7 +1298,11 @@ def FixPack(packName):
     _FixStateChainController(packName, report, ownership=ownership)
     _WrapProjectileGeometries(packName, report)
     _WrapVehicleGeometries(packName, report)
+    _LocalizeReplacedEntityQueries(packName, report)
+    _FixPassengerLocators(packName, report)
+    _PruneMissingPbr(packName, report)
     _WrapGlideRoot(packName, report)
+    _WrapSlidePosture(packName, report)
     _RebuildFirstPersonArm(packName, report)
     # 收尾: 资源包按旧版 Molang 语义解析, 两种语义可能分叉处补括号(见 molang_syntax.ExplicitPrecedence 注)
     precedence = port.ExplicitPackPrecedence(packName)

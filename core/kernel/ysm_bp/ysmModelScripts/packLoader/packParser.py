@@ -15,6 +15,7 @@
   properties.default_texture 指定者(缺省第一项)作为网易 "default" 皮肤
 - 网易↔Java 动画键名差异由 NETEASE_TO_JAVA_ANIM_KEYS 自动映射(use_righthand→use_mainhand 等)
 - properties.preview_animation(字符串) → 网易 gui_animation(GUI 展示动画)
+- 动画表里的 hover / hover_fadeout / focus → gui_card_animations(选择卡片的悬停/移出/焦点动画)
 
 纯数据变换, 无引擎依赖, 可离线单测。字段参考: .ref/ysm-java-wiki(项目结构篇)。
 """
@@ -53,7 +54,7 @@ def CollectInitializedVariableNames(expressions):
 
 _BASE_VARIABLE_NAMES = CollectInitializedVariableNames(BASE_INITIALIZE)
 
-NULL_ICON = "textures/ui/ysm_default_icon"
+NULL_ICON = "textures/ui/ysm_ui/ysm_default_icon"
 DEFAULT_MODEL_NAMESPACE = "ysm_pack"
 
 # 轮盘动画默认停止条件(系统维护, 对齐 Java 版"配置零感知"):
@@ -64,7 +65,22 @@ DEFAULT_EXTRA_STOP_EXPRESSION = 'query.vertical_speed>0.3||query.ground_speed>0.
 JAVA_TO_BEDROCK_ENTITY_IDS = {
     "minecraft:trident": "minecraft:thrown_trident",
     "minecraft:fishing_bobber": "minecraft:fishing_hook",
+    "minecraft:potion": "minecraft:splash_potion",
+    "minecraft:experience_bottle": "minecraft:xp_bottle",
+    "minecraft:firework_rocket": "minecraft:fireworks_rocket",
+    "minecraft:wind_charge": "minecraft:wind_charge_projectile",
+    "minecraft:breeze_wind_charge": "minecraft:breeze_wind_charge_projectile",
 }
+# Java 一个实体类型在基岩拆成几个的(投掷药水的喷溅 / 滞留、凋灵骷髅的普通 / 蓝色): 替换表同样铺到这些 ID 上
+_JAVA_TO_BEDROCK_EXTRA_ENTITY_IDS = {
+    "minecraft:potion": ("minecraft:lingering_potion",),
+    "minecraft:wither_skull": ("minecraft:wither_skull_dangerous",),
+}
+
+
+def BedrockEntityIds(javaId):
+    """Java 实体 ID → 基岩实体 ID 元组(主 ID 在前)"""
+    return (JAVA_TO_BEDROCK_ENTITY_IDS.get(javaId, javaId),) + _JAVA_TO_BEDROCK_EXTRA_ENTITY_IDS.get(javaId, ())
 
 # ---- 条件动画(Java ConditionManager 家族) → 基岩原生 molang 条件 ----
 # Java 把条件编码进动画名(hold_mainhand$minecraft:diamond_sword), 逐 tick 由
@@ -356,8 +372,24 @@ _CONTROLLER_ANIMATE_GATE = _NON_GUI_GUARD + "&&" + _THIRD_PERSON_GUARD
 # sahmet 换装件全亮并逐通道刷 unknown variable)。该控制器每个渲染实例创建时各跑一次
 # on_entry(`v.x = v.x ?? 默认值;`, 世界实体已有值原样保留)。条件恒 "1": 必须在所有
 # 渲染域生效, 不经双门。资源索引发现即自动注册, 不需要 ysm.json 声明。
+# 排在 animate 表**最前**(_VariableInitFirst): 条目逐个交错求值, 排在后面时新渲染实例的第一帧里前面的
+# 动画 / 执行体已经读了未定义变量(2026-09-23 实机日志: 纸娃娃上执行体刷 unknown variable 'variable.ysm_fx_t')
 _VARIABLE_INIT_KEY = "ysm_variable_init"
 _VARIABLE_INIT_CONDITION = "1"
+
+# ---- Java 自定义函数(移植工具 devtools/java_functions.py) ----
+# functions/*.molang 的 player_update 事件体编成逐帧执行体动画(ysm.json 顶级 java_functions.executor), 在 Java 模式
+# animate 表的共享状态动画(使用状态 / 输入锁存 / 主状态 / 鞘翅角)之后恒开挂载 —— Java 的 player_update 在每次动画
+# 更新前跑, 读到的 ctrl.* 与锁存都是本帧值。执行体自带逐帧守卫(同一 q.life_time 只跑一次)。声明里的宿主表(音效请求
+# 槽位 / ysm.sync 槽位 / @sync 处理函数 / 键鼠)原样直通进配置 java_functions, 业务包 client/javaFunctionHost 按它
+# 轮询实体变量、播放/停止音效、转发同步、写本机键鼠状态(键鼠与同步事件落 query.mod.ysm_kb_* / ysm_ms_* / ysm_si_*)。
+# 条件只放行世界里的玩家实体: 原版界面的纸娃娃(背包 / 暂停界面的皮肤预览)也跑玩家的整张 animate 表, 但它没有实体 ——
+# 执行体里的 query.relative_block_has_any_tag 这类查询逐帧刷 "Scope requires an Actor"(2026-09-23 实机日志), 纸娃娃
+# 上 variable.is_paperdoll 又不置位。query.mod.ysm_is_model 由 client/modelSystem 应用模型时写在实体上, 纸娃娃读到
+# 注册默认值 0。代价: 纸娃娃上没有脚本控制器驱动的动画(Java 在 GUI 里照跑函数, 基岩纸娃娃是另一套变量作用域)
+_FUNCTION_EXECUTOR_KEY = "ysm_fx_frame"
+_FUNCTION_EXECUTOR_CONDITION = "query.mod.ysm_is_model"
+_FUNCTION_HOST_FIELDS = ("sounds", "stops", "stop_all", "syncs", "sync_handlers", "keys", "mouse")
 
 # ---- 一次性(Java PLAY_ONCE)动画通道 → 生成式动画控制器 ----
 # 基岩直挂 animate 条目对**不循环的定时动画**不做重放: 条件 false→true 只是再次
@@ -430,14 +462,38 @@ _JAVA_GLIDE_STATE_CONTROLLER = "controller.animation.ysm.java_glide_state"
 # 骑乘/创造飞行(Java 的姿态判定里这些都压过 CROUCHING); 腾空潜行照样偏移(Java 同样)。没有 ysm_glide_root 的旧产物空转。
 _JAVA_SNEAK_OFFSET_KEY = "ysm_java_sneak_offset"
 _JAVA_SNEAK_OFFSET_ANIMATION = "animation.ysm.java_sneak_offset"
-_JAVA_CROUCH_POSE = ("query.is_sneaking&&!query.is_swimming&&!query.is_crawling&&!query.is_gliding"
-                     "&&!query.is_sleeping&&!query.is_riding&&!(query.mod.ysm_is_flying>0.5)")
+# 载具座位的渲染偏移(见 _PassengerSeats 上方注): 骑着已替换载具时, 业务包运行层(client/render/vehicleSeatSync)逐 tick 算
+# "载具定位点 - 引擎给的骑手原点", 写 query.mod.ysm_seat_*(格, 骑手模型的几何轴向); 这里在 ysm_glide_root 上平移
+# (÷ 实体缩放 → 模型单位)。只挪模型, 与 Java 一样实体位置与摄像机不动。没有 ysm_glide_root 的旧产物空转
+_JAVA_SEAT_OFFSET_KEY = "ysm_java_seat_offset"
+_JAVA_SEAT_OFFSET_ANIMATION = "animation.ysm.java_seat_offset"
+# 枪械模组的姿态(趴下 / 滑铲 / 下蹲)多半不改原版姿态, 只写在协议 v.tac.is_crawling / slide / is_sneaking 上, 主包运行层
+# 归一成 query.mod.ysm_tac_is_*(config/tacState)。凡按 Java 口径判这几种姿态的地方一律读下面三个判据:
+# 爬行 —— Java !isSwimming && pose == SWIMMING(TACZ 的趴下键同样置这个姿态) = 原生 is_crawling ∪ 枪械模组的趴下。
+#   主链爬行组、ctrl.climb/climbing、蹲下偏移的"不在爬行"、枪械 hold/fire 通道的爬行族都读它
+JAVA_CRAWL_POSE = "(query.is_crawling||query.mod.ysm_tac_is_crawling>0.5)"
+# 潜行 —— 原生潜行 ∪ 枪械模组的下蹲。主链潜行组、ctrl.sneak/sneaking、蹲下偏移读它(举盾 / 物品使用的锁存仍读原版潜行:
+#   那是原版盾牌的机制; 轮盘动画的"按潜行停止"是按键语义, 同样不换)
+JAVA_SNEAK_POSE = "(query.is_sneaking||query.mod.ysm_tac_is_sneaking>0.5)"
+# 滑铲 —— Java 没有(TACZ 不做滑铲), 基岩扩展: 主链状态 slide / 持枪版 tac:slide(模型没有时回落主包默认动画
+#   java_default/bedrock_ext, 取自旧版枪械兼容的滑铲), hold 通道另有 tac:slide:<类型>(有才占位)
+JAVA_SLIDE_POSE = "query.mod.ysm_tac_is_slide>0.5"
+# 滑铲姿态的专用外包骨骼(移植 / 修复工具给 Java 模式包的主几何生成, port_java_pack.WrapSlidePostureGeometry): 旧版滑铲把
+# 整身翻转写在 AllBody、上身抬起写在 UpperBody, 而枪械 hold / fire 通道的动画带 override_previous_animation, 按骨骼整体清掉
+# 排在前面的主链姿态 —— 步枪全族与全部近战写 AllBody(偏航跟随), 近战与部分包的持枪写 UpperBody(恒等); 2026-09-24 实机:
+# 端步枪滑铲只剩 Root 转 90°, 脸朝下倒地。两根骨骼各外包一层同枢轴、无旋转的空骨骼, 滑铲把这两条轨道写到外包骨骼上: 别的
+# 动画都不写它们, 谁也清不掉; 枢轴取被包骨骼自己的, 姿态与写在原骨骼上逐包相同(持枪通道再在原骨骼上叠自己的站姿)。
+# 基线里两套滑铲都有(见 SelectPostureVariants): 正式键写外包骨骼, compat.* 键是旧写法, 给几何里还没有这两根的旧产物
+SLIDE_POSTURE_WRAPPERS = OrderedDict([("allbody", "ysm_body_root"), ("upperbody", "ysm_torso_root")])
+_BASELINE_COMPAT_PREFIX = "compat."
+_JAVA_CROUCH_POSE = (JAVA_SNEAK_POSE + "&&!query.is_swimming&&!" + JAVA_CRAWL_POSE + "&&!(" + JAVA_SLIDE_POSE + ")"
+                     "&&!query.is_gliding&&!query.is_sleeping&&!query.is_riding&&!(query.mod.ysm_is_flying>0.5)")
 # 输入状态动画逐帧维护的变量, 加上挥击状态机 on_entry 记下的已见序号: 不参与"文件扫描变量补 0"
 # 初始化(与占用变量同理)。读取处都带 ?? 回落; 补 0 会让回落失效, 且移植工具只扫作者文件、
 # 修复工具连生成的挥击状态机一起扫, 两条路径的初始化表对不上
 _INPUT_STATE_VARIABLE_PATTERN = re.compile(
     r"^ysm_(?:input_attack|attack_prev|attack_last|attack_recent|shield_held|block_last|block_hold"
-    r"|item_in_use|use_last|use_hold|swing_edge|swing_muted|swing_serial|(?:fp_)?swing_seen|ctrl_main)$",
+    r"|item_in_use|use_last|use_hold|swing_edge|swing_muted|swing_serial|(?:fp_)?swing_seen|ctrl_main|tac_seen)$",
     re.IGNORECASE)
 # 主包运行层(业务包 client/javaStateSync + config/javaState)维护的变量: Java 专有的环境/状态量(字符串落
 # variable.ysm_env_*)、带常量参数的函数探针(variable.ysm_pb_*)、共享动画逐帧算的鞘翅追随角。读取处都带 ?? 回落,
@@ -463,6 +519,67 @@ _ONESHOT_USE_CHANNELS = (
     ("use_mainhand", "ysm_use_mainhand", "slot.weapon.mainhand", 0, _USE_MAINHAND_GATE),
     ("use_offhand", "ysm_use_offhand", "slot.weapon.offhand", 1, _USE_OFFHAND_GATE),
 )
+
+# ---- 枪械模组联动(Java TACZCompat / TacCompatInner 的三通道) ----
+# Java 装了 TACZ 时: ① main 通道持枪时状态动画换成 tac:<状态名>(包里或默认模型有才换, 骑乘链归 vehicle 通道不换);
+# ② hold_mainhand 通道持枪时循环播 tac:<climb|climbing|aim|run|hold>:<类型>(爬行移动 > 爬行静止 > 瞄准 >
+# 地面疾跑 > 持枪), 压过该通道其余条件动画; ③ 独立的 fire 通道(hold 之后、swing 之前, 起始过渡 0)一次性播
+# tac:reload: > tac:melee: > tac:<climbing|aim|hold>:fire:<类型>, 开火 / 近战 / 换弹开始各让它从头重播, 挥动或使用
+# 物品时停。类型只分 pistol / rpg / 其余 rifle。各通道的循环类型由代码强制(hold 通道 LOOP、fire 通道 PLAY_ONCE,
+# 主链随状态), 文件里的 loop 不算。
+# 基岩侧的数据是主包运行层(业务包 client/tacStateSync + config/tacState)把枪械模组写在 v.tac.* 上的协议归一成的
+# query.mod.ysm_tac_*(本节常量与 config/tacState 逐项一致, devtools/test_tac_state.py 守护; 协议与动画键对照见
+# docs/ysm-tac-protocol.md)。动画键是 Java 名的引擎安全转义形态(EscapeConditionKey: tac:hold:rifle → tac.cls.hold.rifle)。
+# 逐枪条件动画(tac:hold$tacz:ak47)暂不支持: 协议里的枪 ID 还没接, 移植工具不带
+_TAC_HOLD_GUN = "query.mod.ysm_tac_hold_gun"
+_TAC_GUN_KIND = "query.mod.ysm_tac_gun_kind"
+_TAC_IS_AIM = "query.mod.ysm_tac_is_aim"
+_TAC_IS_RELOAD = "query.mod.ysm_tac_is_reload"
+_TAC_IS_FIRE = "query.mod.ysm_tac_is_fire"
+_TAC_IS_MELEE = "query.mod.ysm_tac_is_melee"
+_TAC_IS_CRAWLING = "query.mod.ysm_tac_is_crawling"
+_TAC_IS_SLIDE = "query.mod.ysm_tac_is_slide"
+_TAC_IS_SNEAKING = "query.mod.ysm_tac_is_sneaking"
+_TAC_ACTION_SERIAL = "query.mod.ysm_tac_action_serial"
+# 枪种分组: 动画名后缀 → query.mod.ysm_tac_gun_kind 取值(config/tacState.KIND_*)
+_TAC_KIND_CODES = OrderedDict([("rifle", 1), ("pistol", 2), ("rpg", 3)])
+_TAC_KEY_HEAD = "tac.cls."
+_TAC_HOLDING = _TAC_HOLD_GUN + ">0.5"
+# Java: !isSwimming && pose == SWIMMING(爬行; 枪械模组的趴下并进来, 见 JAVA_CRAWL_POSE 注)
+_TAC_CRAWLING = JAVA_CRAWL_POSE
+_TAC_SLIDING = JAVA_SLIDE_POSE
+_TAC_MOVING = "query.modified_move_speed>0.05"          # Java |limbSwingAmount| > 0.05(与主链同一阈值)
+_TAC_AIMING = _TAC_IS_AIM + ">0.5"
+# Java onGround() && isSprinting(): 在地读腾空闩锁(query.is_on_ground 走路时逐帧翻转, 见 _JUMP_GROUP_TEST 注);
+# 滑铲不算疾跑(枪械模组的滑铲多由疾跑触发, 原版疾跑位可能还留着; 滑铲时手上是持枪 / 瞄准, 不是跑步姿势)
+_TAC_SPRINTING = "(!((variable.ysm_airborne??0)>0.5)&&query.is_sprinting&&!(" + _TAC_SLIDING + "))"
+# hold 通道(TacCompatInner.playGunHoldAnimation)的动画族 → 判据, 按 Java 优先级排好、互斥。
+# slide 是基岩扩展族(Java 没有滑铲, 见 _TAC_EXTENSION_HOLD_FAMILIES): 该类型有动画才占位, 占位时瞄准 / 持枪让开;
+# 没有就滑铲时照常走瞄准 / 持枪
+_TAC_HOLD_FAMILIES = OrderedDict([
+    ("climb", _TAC_CRAWLING + "&&" + _TAC_MOVING),
+    ("climbing", _TAC_CRAWLING + "&&!(" + _TAC_MOVING + ")"),
+    ("slide", "!" + _TAC_CRAWLING + "&&" + _TAC_SLIDING),
+    ("aim", "!" + _TAC_CRAWLING + "&&" + _TAC_AIMING),
+    ("run", "!" + _TAC_CRAWLING + "&&!(" + _TAC_AIMING + ")&&" + _TAC_SPRINTING),
+    ("hold", "!" + _TAC_CRAWLING + "&&!(" + _TAC_AIMING + ")&&!" + _TAC_SPRINTING),
+])
+# 扩展族 → 它占位时要让开的族(Java 族缺动画 = 不播, 与 setAnimation 找不到动画一致; 扩展族缺动画 = 不占位)
+_TAC_EXTENSION_HOLD_FAMILIES = OrderedDict([("slide", ("aim", "hold"))])
+# fire 通道(TacCompatInner.playGunOnceAnimation)的动画族 → 判据, 按 Java 优先级排(状态机转移取首个成立项)
+_TAC_FIRE_FAMILIES = OrderedDict([
+    ("reload", _TAC_IS_RELOAD + ">0.5"),
+    ("melee", _TAC_IS_MELEE + ">0.5"),
+    ("climbing.fire", _TAC_IS_FIRE + ">0.5&&" + _TAC_CRAWLING + "&&!(" + _TAC_MOVING + ")"),
+    ("aim.fire", _TAC_IS_FIRE + ">0.5&&" + _TAC_AIMING),
+    ("hold.fire", _TAC_IS_FIRE + ">0.5"),
+])
+# fire 通道状态机(移植/修复工具按包生成 controller.animation.<包>.ysm_tac_fire): 动作序号(开火 / 近战 / 换弹开始各 +1,
+# 运行层维护)一变就按当前状态从头播对应成员 —— 成员状态成对(<键> / <键>__re)来回切, 同挥击通道。GunFirePredicate:
+# 挥动中或使用物品时整个通道停
+_ONESHOT_TAC_FIRE_KEY = "ysm_tac_fire"
+_TAC_SEEN_VARIABLE = "variable.ysm_tac_seen"
+_TAC_FIRE_ENABLED = _TAC_HOLDING + "&&!(" + _SWING_ACTIVE_TEST + ")&&!" + _ITEM_IN_USE_TEST
 
 # Java AnimationRegister 的标准状态里, 主包基础控制器未驱动的几个(死亡/爬梯三态):
 # 模型自己提供了同名动画时才合成播放条件(没提供的模型无任何影响)。
@@ -767,6 +884,54 @@ def _TextureEntryPath(entry):
     return path or None
 
 
+# ---- PBR 附属贴图(Java 版 {uv, normal?, specular?}, LabPBR 编码; 见主包 ysm_rp/shaders/glsl/ysm_pbr.glsl) ----
+# Java 版 YSM 自己不渲染它们, 只交给 Oculus/Iris 光影包; 基岩这边由主包的 pbr 材质预设按前向光照近似
+# (法线图调制漫反射、太阳方向高光、高光图 alpha 自发光接泛光)。按皮肤各带一套, 皮肤名仍只取 uv 的文件名。
+# 字段名 pbr = {"normal": 资源包路径, "specular": 资源包路径}, 只含声明了的; 不参与皮肤继承(modelNormalizer 逐字段列举)。
+def _PbrTexturePath(raw, prefix):
+    """PBR 贴图声明 → 资源包贴图路径: 与皮肤贴图同一规则(拍平成 prefix + 文件名);
+    无图片扩展名 = 基岩真实引用路径, 原样直通; 空白串按 Java 忽略(StringUtils.isBlank)"""
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    path = _TextureEntryPath(raw)
+    if not path:
+        return None
+    if not _IMAGE_EXT_PATTERN.search(raw):
+        return path
+    return prefix + path.split("/")[-1]
+
+
+def _PbrMapsFromDecl(textureDecl, prefix):
+    """Java PBR 形态 {uv, normal?, specular?} → {"normal": 路径, "specular": 路径}(只含声明了的)"""
+    if not isinstance(textureDecl, dict):
+        return {}
+    maps = OrderedDict()
+    for field in ("normal", "specular"):
+        path = _PbrTexturePath(textureDecl.get(field), prefix)
+        if path:
+            maps[field] = path
+    return maps
+
+
+def _DerivePbrMaps(jsonDict, netease, packName, textureMap):
+    """files.player.texture 的 PBR 形态 → {皮肤名: pbr}; 按 uv 推导出的贴图路径对回皮肤名(与 _DeriveSkins 同一前缀)"""
+    playerFiles = (jsonDict.get("files") or {}).get("player") or {}
+    prefix = netease.get("texture_path_prefix") or "textures/entity/{}/".format(packName)
+    skinByPath = dict((path, skinName) for skinName, path in (textureMap or {}).items())
+    result = OrderedDict()
+    for entry in playerFiles.get("texture") or []:
+        if not isinstance(entry, dict) or "uv" not in entry:
+            continue
+        maps = _PbrMapsFromDecl(entry, prefix)
+        uvPath = _TextureEntryPath(entry)
+        if not maps or not uvPath:
+            continue
+        skinName = skinByPath.get(prefix + uvPath.split("/")[-1])
+        if skinName and skinName not in result:
+            result[skinName] = maps
+    return result
+
+
 def _DeriveSkins(jsonDict, netease, packName, warnings):
     """皮肤序列推导: netease.textures 简式优先, 否则从 files.player.texture 推导。
 
@@ -913,6 +1078,32 @@ def _QueryIndexAnimations(namespace, foundVars=None):
     return entries
 
 
+def _AppendFunctionExecutor(declaration, animEntries, animateEntries):
+    """声明了自定义函数执行体时补进动画注册表, animate 条目插在鞘翅角共享动画之后(恒开); 已注册过的不重复"""
+    executorId = declaration.get("executor") if isinstance(declaration, dict) else None
+    if not isinstance(executorId, _STRING_TYPES) or not executorId:
+        return animEntries, animateEntries
+    if any(key == _FUNCTION_EXECUTOR_KEY for key, _animId in animEntries):
+        return animEntries, animateEntries
+    position = 0
+    for index, (key, _condition) in enumerate(animateEntries):
+        if key == _JAVA_ELYTRA_STATE_KEY:
+            position = index + 1
+            break
+    animateEntries = list(animateEntries)
+    animateEntries.insert(position, (_FUNCTION_EXECUTOR_KEY, _FUNCTION_EXECUTOR_CONDITION))
+    return animEntries + [(_FUNCTION_EXECUTOR_KEY, executorId)], animateEntries
+
+
+def _FunctionHostDeclaration(declaration):
+    """配置里给业务包音效宿主的那部分声明(请求槽位表); 没有返回 None"""
+    if not isinstance(declaration, dict):
+        return None
+    picked = dict((field, declaration[field]) for field in _FUNCTION_HOST_FIELDS
+                  if isinstance(declaration.get(field), list) and declaration[field])
+    return picked or None
+
+
 def _AppendVariableInitController(namespace, ctlEntries, animateEntries):
     """资源索引里有本包的变量初始化控制器(_VARIABLE_INIT_KEY 注)时补进注册表(恒开)。
 
@@ -922,14 +1113,47 @@ def _AppendVariableInitController(namespace, ctlEntries, animateEntries):
     """
     if any(key == _VARIABLE_INIT_KEY for key, _ctlId in ctlEntries):
         return ctlEntries, animateEntries
-    index = _GetResourceIndex()
-    if index is None:
-        return ctlEntries, animateEntries
-    ctlId = "controller.animation.{}.{}".format(namespace, _VARIABLE_INIT_KEY)
-    if ctlId not in set(resId for _key, resId in index.QueryNamespaceControllers(namespace)):
+    ctlId = _PackVariableInitController(namespace)
+    if ctlId is None:
         return ctlEntries, animateEntries
     return (ctlEntries + [(_VARIABLE_INIT_KEY, ctlId)],
             animateEntries + [(_VARIABLE_INIT_KEY, _VARIABLE_INIT_CONDITION)])
+
+
+def _PackVariableInitController(namespace):
+    """资源索引里本包的变量初始化控制器 ID; 索引不可用 / 包没有该文件返回 None"""
+    index = _GetResourceIndex()
+    if index is None:
+        return None
+    ctlId = "controller.animation.{}.{}".format(namespace, _VARIABLE_INIT_KEY)
+    if ctlId not in set(resId for _key, resId in index.QueryNamespaceControllers(namespace)):
+        return None
+    return ctlId
+
+
+def _WithVariableInit(replace, ctlId):
+    """替换实体(载具 / 投射物)的数据 → 带包变量初始化控制器的副本, 控制器排 animate 表最前(见 _VARIABLE_INIT_KEY 注)。
+
+    替换动画读的包变量(18 号 GMA_T.50 的 v.realrpm / 音效计数器 v.ysm_hx_2 等)原先只靠业务包应用替换时的 Python 初始化:
+    投射物那条路径没有初始化, 引擎为界面另建的渲染实例 Python 也够不着(2026-09-23 实机日志: 马身上逐通道刷
+    unknown variable)。移植 / 修复工具产出的初始化控制器已含替换实体文件里的变量; on_entry 里 Java @player_init 的语句
+    对替换实体没有意义但无害(只写变量)。"""
+    if not ctlId or not replace.get("animate"):
+        return replace
+    withInit = OrderedDict(replace)
+    withInit["animation_controllers"] = [[_VARIABLE_INIT_KEY, ctlId]] + [
+        list(item) for item in (replace.get("animation_controllers") or []) if item[0] != _VARIABLE_INIT_KEY]
+    withInit["animate"] = [[_VARIABLE_INIT_KEY, _VARIABLE_INIT_CONDITION]] + [
+        list(item) for item in replace["animate"] if item[0] != _VARIABLE_INIT_KEY]
+    return withInit
+
+
+def _VariableInitFirst(animateEntries):
+    """变量初始化控制器挪到 animate 表最前(见 _VARIABLE_INIT_KEY 注); 没有该条目原样返回"""
+    head = [entry for entry in animateEntries if entry[0] == _VARIABLE_INIT_KEY]
+    if not head:
+        return animateEntries
+    return head + [entry for entry in animateEntries if entry[0] != _VARIABLE_INIT_KEY]
 
 
 def _ShortAnimKey(animId):
@@ -1491,6 +1715,41 @@ def _BuildSwingControllerBody(members, fallback, loopFlags, seenVariable, compan
     return OrderedDict([("initial_state", "idle"), ("states", states)])
 
 
+def _BuildTacFireControllerBody(members, loopFlags, companions=None):
+    """枪械 fire 通道状态机体(见 _ONESHOT_TAC_FIRE_KEY 注), 结构同挥击通道: 动作序号变了(开火 / 近战 / 换弹开始)就按
+    当前状态进首个成立的成员(成对的孪生态来回切 = 从头重播, Java TacEvent → 播 "empty" 再设动画); 播完回 idle
+    (Java PLAY_ONCE; 移植工具已把成员改成 hold_on_last_frame, 出态那一帧不露底)。持枪没了、挥动或使用物品时立即回 idle
+    (GunFirePredicate 返回 STOP)。换弹 / 近战提前结束不出态, 动画照样播完(Java 这时返回 CONTINUE)。
+    idle 与成员 on_entry 都记下当前序号: 渲染重建 / 切视角时不补播旧动作。不写 blend_transition(Java fire 通道
+    起始过渡 0, 成员带 override 会吃掉淡化)。companions: 成员的通道覆盖伴生(与挥击成员同一规则)。
+    """
+    if not members:
+        return None
+    newAction = "({})!=({}??0)".format(_TAC_ACTION_SERIAL, _TAC_SEEN_VARIABLE)
+    record = ["{} = {};".format(_TAC_SEEN_VARIABLE, _TAC_ACTION_SERIAL)]
+    trigger = "{}&&{}".format(_TAC_FIRE_ENABLED, newAction)
+    stop = _Negate(_TAC_FIRE_ENABLED)
+
+    def _ActionTransitions(twinSuffix):
+        return [OrderedDict([(key + twinSuffix, "{}&&{}".format(trigger, test))]) for key, test in members]
+
+    states = OrderedDict([("idle", OrderedDict([
+        ("on_entry", list(record)),
+        ("transitions", _ActionTransitions("")),
+    ]))])
+    for key, test in members:
+        # 成员改成循环的(移植工具已按 Java 强制 PLAY_ONCE, 手写包才会有): 永不播完, 该动作的电平落下就走
+        finished = _Negate(test) if (loopFlags or {}).get(key) is True else "query.any_animation_finished"
+        exitCondition = "({})||({})".format(stop, finished)
+        for suffix, twinSuffix in (("", _SWING_RETRIGGER_SUFFIX), (_SWING_RETRIGGER_SUFFIX, "")):
+            states[key + suffix] = OrderedDict([
+                ("on_entry", list(record)),
+                ("animations", _MemberStateAnimations(key, companions)),
+                ("transitions", _ActionTransitions(twinSuffix) + [OrderedDict([("idle", exitCondition)])]),
+            ])
+    return OrderedDict([("initial_state", "idle"), ("states", states)])
+
+
 _STATE_CHAIN_GUARD_PREFIX = _NON_GUI_GUARD + "&&!variable.is_first_person&&"
 
 
@@ -1534,6 +1793,10 @@ def BuildOneShotControllers(namespace, mainKeys, fpKeys=(), loopFlags=None, comp
                                            holdWhileTriggered=True, companions=companions)
         if body:
             controllers[_ControllerId(ctlKey)] = body
+    # 枪械 fire 通道(见 _ONESHOT_TAC_FIRE_KEY 注): 成员多来自默认模型基线(移植工具并进 mainKeys)
+    body = _BuildTacFireControllerBody(_TacFireMembers(mainKeys), loopFlags, companions)
+    if body:
+        controllers[_ControllerId(_ONESHOT_TAC_FIRE_KEY)] = body
     stateConditions = dict(_BuildJavaStateAnimates(mainKeys))
     for stateKey, ctlKey in _ONESHOT_STATE_KEYS.items():
         condition = stateConditions.get(stateKey)
@@ -1584,7 +1847,8 @@ def BuildStateChainController(namespace, mainKeys, blend=_STATE_ENTER_BLEND, com
         ("blend_transition", blend),
     ])
     for index, (key, condition) in enumerate(stripped):
-        hold = _JAVA_STATE_HOLDS.get(key)
+        # 持枪版(tac.cls.<状态>)与原状态同一粘滞
+        hold = _JAVA_STATE_HOLDS.get(key[len(_TAC_KEY_HEAD):] if key.startswith(_TAC_KEY_HEAD) else key)
         transitions = []
         for otherIndex, (otherKey, otherCondition) in enumerate(stripped):
             if otherKey == key:
@@ -1635,6 +1899,10 @@ def JavaStateLoopType(key):
     移植工具据此改写动画文件的 loop 字段(Java 包常把 sleep/sit 等写成不循环, 基岩
     听 JSON 会播一遍就停)。"""
     escaped = EscapeConditionKey(key)
+    if escaped.startswith(_TAC_KEY_HEAD):
+        # 持枪时的主链动画 tac:<状态名>(TACZCompat.playGunMainAnimation 沿用该状态的循环类型); 手持/开火通道的不算主链
+        base = escaped[len(_TAC_KEY_HEAD):]
+        return JavaStateLoopType(base) if base in _TAC_MAIN_STATES else None
     if escaped in _JAVA_PLAY_ONCE_STATES:
         return "once"
     if escaped in _JAVA_STATE_MEMBER_KEYS:
@@ -1704,10 +1972,13 @@ def _ApplyOneShotControllers(namespace, ownKeys, ctlEntries, conditionalAnimates
         chainKeys = set(ownKeys) | set(key for key in (stateRefs or ()) if not _IsOwnershipCompanionKey(key))
         ownChainKeys = set(key for key, _cond in _BuildJavaStateAnimates(sorted(chainKeys)))
         if ownChainKeys:
-            # 伴生动画(<键>__own<N>)随原键一起交给状态机(状态机文件里与原动画同状态播放)
+            # 伴生动画(<键>__own<N>)随原键一起交给状态机(状态机文件里与原动画同状态播放)。
+            # 状态机没收的持枪版主链成员(旧产物的状态机不认识基线的 tac.cls.idle 等)不留直挂: 状态机里原状态
+            # 不分持枪与否一直在播, 直挂的持枪版再叠上去就是两份相加 —— 旧产物宁可没有持枪姿态
             stateAnimates = [(_STATE_CHAIN_KEY, _CONTROLLER_ANIMATE_GATE)] + [
                 entry for entry in stateAnimates
-                if _CompanionBaseKey(entry[0]) not in ownChainKeys]
+                if _CompanionBaseKey(entry[0]) not in ownChainKeys
+                and (TacAnimationRole(_CompanionBaseKey(entry[0])) or ("",))[0] != "main"]
             conditionalAnimates = [
                 entry for entry in conditionalAnimates
                 if _CompanionBaseKey(entry[0]) not in ownChainKeys]
@@ -2179,10 +2450,11 @@ def _BuildConditionalAnimates(animKeys, warnings, keyPrefix="", extraGate=None,
 #
 # 顺序/判据严格对齐 Java AnimationRegister + PlayerMainPredicate(dev/1.20 源码):
 # death > 骑乘链(Java 载具上 main 整体让位 vehicle 控制器) > sleep > swim(泳姿)
-# > climb/climbing(SWIMMING pose 落地=爬行, 基岩 is_crawling) > ladder 三态
+# > [slide(枪械模组的滑铲, 基岩扩展, Java 没有; 见 JAVA_SLIDE_POSE)]
+# > climb/climbing(SWIMMING pose 落地=爬行, 基岩 is_crawling 并上枪械模组的趴下, 见 JAVA_CRAWL_POSE) > ladder 三态
 # > fly(创造飞行, 主包 ysm_is_flying) > elytra_fly > swim_stand(踩水, NORMAL)
 # > attacked(受击 hurtTime>0, NORMAL) > jump(!onGround&&!inWater) > sneak(潜行移动)
-# /sneaking(潜行兜底) > run(isSprinting)/walk(移动量>0.05)/idle。
+# /sneaking(潜行兜底; 原生潜行并上枪械模组的下蹲, 见 JAVA_SNEAK_POSE) > run(isSprinting)/walk(移动量>0.05)/idle。
 # "移动中"阈值 0.05 对齐 Java MIN_SPEED(limbSwingAmount 域 ≈ modified_move_speed)。
 # riptide 不纳入: 基岩无 is_auto_spin_attack(实测 expression not valid)。
 _RIDE_SADDLE_TEST = ("query.is_riding_any_entity_of_type('minecraft:horse',"
@@ -2205,7 +2477,9 @@ _JAVA_STATE_GROUPS = [
     ]),
     ("query.is_sleeping", [("sleep", None)]),
     ("query.is_swimming", [("swim", None)]),
-    ("query.is_crawling", [
+    # 滑铲(基岩扩展): 模型自己没有 slide / tac:slide 时回落主包默认动画(java_default/bedrock_ext)
+    (JAVA_SLIDE_POSE, [("slide", None)]),
+    (JAVA_CRAWL_POSE, [
         ("climb", "query.modified_move_speed>0.05"),
         ("climbing", None),
     ]),
@@ -2225,7 +2499,7 @@ _JAVA_STATE_GROUPS = [
     # 另放行真实下落(实测走路误触帧的垂直速度约 -1.6, 故阈值取 -4)。
     # 该死区只作**进入**判据; 留在空中靠状态机粘滞(见 _JAVA_STATE_HOLDS)。
     (_JUMP_GROUP_TEST, [("jump", None)]),
-    ("query.is_sneaking", [
+    (JAVA_SNEAK_POSE, [
         ("sneak", "query.modified_move_speed>0.05"),
         ("sneaking", None),
     ]),
@@ -2240,6 +2514,8 @@ _JAVA_STATE_GROUPS = [
 # 主链固定成员的转义键全集(JavaStateLoopType 判成员; vehicle$ 动态成员另判前缀)
 _JAVA_STATE_MEMBER_KEYS = frozenset(
     EscapeConditionKey(key) for _test, members in _JAVA_STATE_GROUPS for key, _t in members)
+# 基岩扩展的主链组(Java 没有的状态): 没有动画就不占位(见 _BuildJavaStateAnimates 末尾注)
+_JAVA_EXTENSION_STATE_GROUPS = frozenset([JAVA_SLIDE_POSE])
 
 
 def _Negate(expression):
@@ -2273,20 +2549,26 @@ def _BuildJavaStateAnimates(animKeys, keyPrefix="", extraGate=None, premiseOverr
     EscapeConditionKey 的引擎安全形态。
     premiseOverrides: {组前提: 替换前提} —— 预留: 整体替换某组的进入前提(例如把空中组
     的防抖死区换成纯"腾空"判据), 当前主链路不使用。
+    持枪分支(见 _TAC_HOLD_GUN 上方注): 骑乘链以外的成员有 tac.cls.<状态> 时, 它紧排在原成员前面、多一条"持枪",
+    原成员相应多一条"没持枪"(没有持枪版的成员不加) —— Java 同一状态持枪时换动画, 不改变状态选择。
     """
     available = set(animKeys)
     entries = []
     priorGroupTests = []
     vehicleMembers = _VehicleStateMembers(animKeys)
     for groupTest, members in _JAVA_STATE_GROUPS:
+        tacGroup = groupTest != _JAVA_RIDING_GROUP_TEST
+        extension = groupTest in _JAVA_EXTENSION_STATE_GROUPS
         if premiseOverrides and groupTest in premiseOverrides:
             groupTest = premiseOverrides[groupTest]
-        if groupTest == _JAVA_RIDING_GROUP_TEST and vehicleMembers:
+        if not tacGroup and vehicleMembers:
             members = vehicleMembers + members
-        present = [
-            (EscapeConditionKey(key), test) for key, test in members
-            if EscapeConditionKey(key) in available
-        ]
+        present = []
+        for key, test in members:
+            escaped = EscapeConditionKey(key)
+            tacKey = _TAC_KEY_HEAD + escaped if tacGroup and _TAC_KEY_HEAD + escaped in available else None
+            if escaped in available or tacKey:
+                present.append((escaped, test, tacKey))
         if present:
             parts = [_NON_GUI_GUARD, "!variable.is_first_person", "!query.is_spectator"]
             if groupTest:
@@ -2295,22 +2577,120 @@ def _BuildJavaStateAnimates(animKeys, keyPrefix="", extraGate=None, premiseOverr
             groupCondition = "&&".join(parts)
 
             priorMemberTests = []
-            for key, memberTest in present:
+            for key, memberTest, tacKey in present:
                 memberParts = [groupCondition]
                 if memberTest:
                     memberParts.append(memberTest)
                 memberParts.extend(_Negate(prior) for prior in priorMemberTests)
-                condition = "&&".join(memberParts)
-                if extraGate:
-                    condition = "{}&&{}".format(condition, extraGate)
-                entries.append((keyPrefix + key, condition))
+                variants = []
+                if tacKey:
+                    variants.append((tacKey, memberParts + [_TAC_HOLDING]))
+                if key in available:
+                    variants.append((key, memberParts + ([_Negate(_TAC_HOLDING)] if tacKey else [])))
+                for variantKey, variantParts in variants:
+                    condition = "&&".join(variantParts)
+                    if extraGate:
+                        condition = "{}&&{}".format(condition, extraGate)
+                    entries.append((keyPrefix + variantKey, condition))
                 if memberTest:
                     priorMemberTests.append(memberTest)
         # 组前提参与后续否定链, 与该组是否有可用动画无关 —— 否则缺 sleep 动画的
-        # 模型会在睡觉时播 idle(Java 语义是"该状态无动画则不播", 不是回落)
-        if groupTest:
+        # 模型会在睡觉时播 idle(Java 语义是"该状态无动画则不播", 不是回落)。
+        # 基岩扩展组(滑铲)例外: 一条动画都没有(连主包默认也缺)就不占位, 照常落到后面的组
+        if groupTest and (present or not extension):
             priorGroupTests.append(groupTest)
     return entries
+
+
+# 有持枪版(tac:<状态名>)的主链状态: 骑乘链以外的固定成员(Java 骑乘时 main 通道整体让位 vehicle 通道, 那里不换枪械动画)
+_TAC_MAIN_STATES = frozenset(
+    EscapeConditionKey(key) for groupTest, members in _JAVA_STATE_GROUPS
+    if groupTest != _JAVA_RIDING_GROUP_TEST for key, _test in members)
+
+
+def TacAnimationRole(key):
+    """转义短键 → 枪械动画的通道角色: ("main", 状态键) / ("hold", 动画族, 类型) / ("fire", 动画族, 类型);
+    不是能驱动的枪械动画 → None(逐枪条件动画、Java 不播的类型后缀如 minigun、手雷等)"""
+    if not isinstance(key, _KEY_STRING_TYPES) or not key.startswith(_TAC_KEY_HEAD):
+        return None
+    rest = key[len(_TAC_KEY_HEAD):]
+    if rest in _TAC_MAIN_STATES:
+        return ("main", rest)
+    family, _dot, kind = rest.rpartition(".")
+    if kind not in _TAC_KIND_CODES:
+        return None
+    if family in _TAC_HOLD_FAMILIES:
+        return ("hold", family, kind)
+    if family in _TAC_FIRE_FAMILIES:
+        return ("fire", family, kind)
+    return None
+
+
+def IsSupportedTacAnimationName(name):
+    """Java 动画原名(tac:hold:rifle 等)是不是基岩能驱动的枪械动画(移植工具按它筛 tac 槽位)"""
+    return isinstance(name, _KEY_STRING_TYPES) and TacAnimationRole(EscapeConditionKey(name)) is not None
+
+
+def _TacKindTest(kind):
+    return "{}=={}".format(_TAC_GUN_KIND, _TAC_KIND_CODES[kind])
+
+
+def _BuildTacHoldAnimates(animKeys):
+    """hold 通道的枪械条件动画 → animate 条目 [(键, 条件)](Java TacCompatInner.playGunHoldAnimation: 持枪时压过
+    hold_mainhand 通道的其余条件动画; 动画缺席 = 不播, 与 Java setAnimation 找不到动画一致。基岩扩展族(滑铲)
+    缺席 = 不占位, 在场时它让开的族补一条"不在该姿态", 见 _TAC_EXTENSION_HOLD_FAMILIES)"""
+    available = set(animKeys)
+    entries = []
+    for kind in _TAC_KIND_CODES:
+        yields = {}
+        for extension, yielders in _TAC_EXTENSION_HOLD_FAMILIES.items():
+            if "{}{}.{}".format(_TAC_KEY_HEAD, extension, kind) in available:
+                for family in yielders:
+                    yields.setdefault(family, []).append(_Negate(_TAC_HOLD_FAMILIES[extension]))
+        for family, familyTest in _TAC_HOLD_FAMILIES.items():
+            key = "{}{}.{}".format(_TAC_KEY_HEAD, family, kind)
+            if key in available:
+                entries.append((key, "&&".join([_NON_GUI_GUARD, _THIRD_PERSON_GUARD, _TAC_HOLDING,
+                                                _TacKindTest(kind), familyTest] + yields.get(family, []))))
+    return entries
+
+
+def _TacFireMembers(animKeys):
+    """fire 通道状态机成员 [(键, 自身判据)](按类型分组, 组内按 Java 优先级; 缺席的动画不收)"""
+    available = set(animKeys)
+    members = []
+    for kind in _TAC_KIND_CODES:
+        for family, familyTest in _TAC_FIRE_FAMILIES.items():
+            key = "{}{}.{}".format(_TAC_KEY_HEAD, family, kind)
+            if key in available:
+                members.append((key, "{}&&{}".format(_TacKindTest(kind), familyTest)))
+    return members
+
+
+def _TacInsertIndex(entries):
+    """条件动画表里 hold 通道之后的位置(Java: hold_offhand → hold_mainhand → post_hold → fire → swing)"""
+    position = 0
+    for index, (key, _condition) in enumerate(entries):
+        parsed = _SplitConditionKey(_CompanionBaseKey(key))
+        if parsed is not None and parsed[0][0] in ("hold_offhand", "hold_mainhand"):
+            position = index + 1
+    return position
+
+
+def _ApplyTacChannels(namespace, animKeys, conditionalAnimates, ctlEntries, ownershipWeights=None):
+    """Java 模式: 枪械 hold 通道条件动画(连同通道覆盖伴生)与 fire 通道状态机条目插在 hold 通道之后 →
+    (条件动画条目, 控制器条目)。fire 通道状态机是移植/修复工具按包生成的(BuildOneShotControllers), 资源索引里
+    没有(旧产物)就没有 fire 通道"""
+    extra = _AttachOwnershipCompanions(_BuildTacHoldAnimates(animKeys), animKeys, ownershipWeights)
+    index = _GetResourceIndex()
+    fireId = "controller.animation.{}.{}".format(namespace, _ONESHOT_TAC_FIRE_KEY)
+    if index is not None and fireId in set(resId for _key, resId in index.QueryNamespaceControllers(namespace)):
+        ctlEntries = list(ctlEntries) + [(_ONESHOT_TAC_FIRE_KEY, fireId)]
+        extra.append((_ONESHOT_TAC_FIRE_KEY, _CONTROLLER_ANIMATE_GATE))
+    if not extra:
+        return conditionalAnimates, ctlEntries
+    position = _TacInsertIndex(conditionalAnimates)
+    return list(conditionalAnimates[:position]) + extra + list(conditionalAnimates[position:]), ctlEntries
 
 
 _CHANNEL_CONTROLLER_KEY_PATTERN = re.compile(r"^player_(pre_)?parallel_(\d+)$")
@@ -2407,6 +2787,39 @@ def _OrderJavaAnimates(controllerAnimates, conditionalAnimates, stateAnimates, a
 
 _PAPERDOLL_KEY_PREFIX = "paperdoll."
 _PAPERDOLL_CONDITION = "variable.is_paperdoll"
+# Java 2.2.2 选择界面动画(AnimationRegister.HOVER / HOVER_FADEOUT / FOCUS): 名字写死, 模型动画表里有就播
+GUI_CARD_ANIMATION_KEYS = ("hover", "hover_fadeout", "focus")
+
+
+def _BuildGuiCardAnimations(animEntries, warnings):
+    """模型动画表 → 选择卡片的交互动画 {"hover": ID, "hover_fadeout": ID, "hover_fadeout_ms": 毫秒, "focus": ID}; 都没有返回 None。
+
+    Java CatalogModelCardState.applyRenderTarget: 按动画表 containsKey 决定三段各自有没有; hover_fadeout 的播放时长
+    = 它自己的 animationLength(ticks × 50 ms, 缺省 animation_length 时取末关键帧, 都没有 = 无限长)。
+    时长从资源索引取(与动画文件同源); 索引查不到时长的 fadeout 不注册(播多久无从判断)并告警。
+    消费侧: previewRender 注册共享控制器(java_mode/gui_card), client/ui/cardPreviewAnimation 逐帧出状态量。
+    """
+    registered = dict(animEntries)
+    index = _GetResourceIndex()
+    result = OrderedDict()
+    for key in GUI_CARD_ANIMATION_KEYS:
+        animId = registered.get(key)
+        if not animId:
+            continue
+        if index is not None and hasattr(index, "IsAnimationMissing") and index.IsAnimationMissing(animId):
+            continue
+        result[key] = animId
+    if "hover_fadeout" in result:
+        seconds = index.QueryAnimationLength(result["hover_fadeout"]) \
+            if index is not None and hasattr(index, "QueryAnimationLength") else None
+        if seconds is None:
+            warnings.append("选择界面动画 {} 查不到时长(资源索引不可用?), 移出卡片时不播".format(
+                result.pop("hover_fadeout")))
+        else:
+            result["hover_fadeout_ms"] = max(0.0, float(seconds)) * 1000.0
+    return result or None
+
+
 def _OwnershipCompanionIds(animEntries):
     """注册表里的通道覆盖伴生动画 → {原动画 ID: [伴生动画 ID, ...](按伴生序号)}。
 
@@ -2482,27 +2895,60 @@ def _BuildPaperdollParallels(animEntries):
 _JAVA_BASELINE_NS = "java_default"
 
 
-def _JavaDefaultBaseline(packName, foundVars=None):
+def _JavaDefaultBaseline(packName, foundVars=None, geometry=None):
     """java_default 包的 (短键, 动画ID) 基线表(主域 + arm 域条件键, parallel 系除外)。
 
     资源索引不可用或基线包缺席时返回空表并由调用方告警 —— 模型自有动画照常,
     只是缺键不再有官方基线兜底(等价于 Java 删掉内置 default 的降级形态)。
-    基线包自身解析时不回落自己。
+    基线包自身解析时不回落自己。geometry = 本包主几何 ID(按它挑滑铲的写法, 见 SelectPostureVariants)。
     """
     if packName == _JAVA_BASELINE_NS:
         return []
     # 并行族(parallelN / pre_parallelN)两个命名空间都排除: Java 的并行通道只发现模型**自有**的并行动画
     # (ParallelControllerDiscovery 遍历 AnimationStore 的本地键集, 回落不算) —— 默认模型的 pre_parallel1 会
     # 动 LeftEyebrow/RightEyebrow, 并进来就是给没写眨眼的包凭空加一套眨眉。伴生键(<键>__own<N>)只属于基线
-    # 自身的状态机, 同样排除
+    # 自身的状态机, 同样排除; compat.* 是旧写法孪生(滑铲), 由 SelectPostureVariants 按几何顶替正式键, 本身不进表
     entries = []
     for namespace in (_JAVA_BASELINE_NS, _JAVA_BASELINE_NS + "_arm"):
         entries += [
             (shortKey, animId)
             for shortKey, animId in (_QueryIndexAnimations(namespace, foundVars) or [])
             if not _PARALLEL_KEY_PATTERN.match(shortKey) and not _IsOwnershipCompanionKey(shortKey)
+            and not shortKey.startswith(_BASELINE_COMPAT_PREFIX)
         ]
-    return entries
+    return SelectPostureVariants(entries, geometry)
+
+
+def _QueryGeometryYsmBones(geometry):
+    """几何体里本工程生成的 ysm_* 骨骼名(小写); 索引不可用 / 没登记返回空集"""
+    index = _GetResourceIndex()
+    if index is None or not geometry or not hasattr(index, "QueryGeometryYsmBones"):
+        return frozenset()
+    return index.QueryGeometryYsmBones(geometry)
+
+
+# 基线里有两种写法的滑铲键: 正式动画(animation.java_default.<键>)把姿态写在滑铲姿态骨骼上, compat 孪生
+# (animation.java_default.compat.<键>)是旧写法(见 SLIDE_POSTURE_WRAPPERS 注)
+_POSTURE_VARIANT_KEYS = ("slide", _TAC_KEY_HEAD + "slide")
+
+
+def SelectPostureVariants(animations, geometry):
+    """[(短键, 动画 ID)] 里基线滑铲的两种写法按主几何挑一份: 几何带齐滑铲姿态骨骼用正式动画, 否则用 compat 旧写法;
+    别的条目原样。解析期挑基线表, 业务包渲染层按同一规则重挑存档快照(快照是选模型那一刻的: 几何后来才补上姿态骨骼、
+    旧产物配新基线, 都靠这一步对齐, 不用玩家重选模型; 见业务包 dataBridge.CurrentPostureVariants)"""
+    formal = dict((key, "animation.{}.{}".format(_JAVA_BASELINE_NS, key)) for key in _POSTURE_VARIANT_KEYS)
+    compat = dict((key, "animation.{}.{}{}".format(_JAVA_BASELINE_NS, _BASELINE_COMPAT_PREFIX, key))
+                  for key in _POSTURE_VARIANT_KEYS)
+    wrapped = None
+    selected = []
+    for entry in animations:
+        key, animId = entry[0], entry[1]
+        if key in formal and animId in (formal[key], compat[key]):
+            if wrapped is None:
+                wrapped = set(SLIDE_POSTURE_WRAPPERS.values()).issubset(_QueryGeometryYsmBones(geometry))
+            animId = formal[key] if wrapped else compat[key]
+        selected.append((key, animId))
+    return selected
 
 
 # Java 渲染缩放(poseStack.scale) → 网易渲染缩放的换算比: Java 缺省 0.7 ↔ 网易缺省 0.8(内置模型两侧对应)。
@@ -2711,7 +3157,8 @@ def ReplacedResourceSegment(path):
     return str(_REPLACED_SEGMENT_UNSAFE.sub("_", text.lower()).strip("_")) or "entity"
 
 
-def _ReplacedModelDecl(entry):
+def ReplacedModelDecl(entry):
+    """替换目标条目的 model 声明原文(包内路径 / 直写的 geometry.* ID); ysm.json 顶层 passenger_locators 按它作键"""
     model = entry.get("model")
     if isinstance(model, dict):
         model = model.get("uv", "")
@@ -2741,11 +3188,11 @@ def ReplacedTargets(files):
         animation = entry.get("animation")
         if isinstance(animation, _STRING_TYPES) and animation:
             animationsByModel.setdefault(
-                ReplacedResourceSegment(_ReplacedModelDecl(entry)), set()).add(
+                ReplacedResourceSegment(ReplacedModelDecl(entry)), set()).add(
                 ReplacedResourceSegment(animation))
     result = []
     for sectionKey, entityIds, entry in targets:
-        modelSegment = ReplacedResourceSegment(_ReplacedModelDecl(entry))
+        modelSegment = ReplacedResourceSegment(ReplacedModelDecl(entry))
         namespaceSegment = modelSegment
         animation = entry.get("animation")
         if len(animationsByModel.get(modelSegment) or ()) > 1 and isinstance(animation, _STRING_TYPES):
@@ -2758,33 +3205,56 @@ def ReplacedTargets(files):
     return result
 
 
-# 投射物朝向(对齐 Java GeoProjectilesRenderer 的 Y(yRot-90)/Z(xRot) 旋转与写死的宽高缩放 0.7, 按 JAVA_TO_NETEASE_SCALE
-# 换算成 0.8): 移植工具给投射物几何
-# 外包 ysm_projectile_root → ysm_projectile_fix(Y -90°)(port_java_pack.WrapProjectileGeometry), 这里在根骨骼上
-# 播朝向。箭矢: 原版箭矢实体的 pre_animation 算 variable.shake_power(中靶抖动), 朝向里一并叠上;
-# 原版 move 动画写 body 骨骼(旧版内置箭矢几何的根就叫 body) —— 条目键 move 置 "0" 关掉, 免得模型里恰好有 body 骨骼
-# 被转两遍。三叉戟(硬编码渲染实体)按实体朝向查询转。几何里没有这根骨骼(直写 geometry.* 的共享
-# 几何 / 旧产物)时动画空转, 不影响渲染。
+# 投射物朝向(对齐 Java GeoProjectilesRenderer: 所有投射物都是 Y(yRot-90)/Z(xRot) 旋转与写死的宽高缩放 0.7, 按
+# JAVA_TO_NETEASE_SCALE 换算成 0.8; 没有原版箭矢的中靶抖动): 移植工具给投射物几何外包 ysm_projectile_root →
+# ysm_projectile_fix(Y -90°)(port_java_pack.WrapProjectileGeometry), 这里在根骨骼上播朝向。朝向读
+# query.body_x/y_rotation: 投射物不是生物, 这两个查询就是实体朝向(与 Java 投射物 yRot = atan2(dx, dz)、xRot 向上为正
+# 同一口径); 雪球 / 三叉戟这类的 query.target_y_rotation 恒 0(2026-09-25 实机), 只有箭沿用原版箭矢动画的 target 查询。
+# 例外: 鱼钩照 Java FishingHookRendererReplace 把俯仰归零; 原版客户端实体带 scripts.scale 的(火球 2.0 / 小火球 0.5)
+# 缩放照样乘在替换模型上, 根骨骼缩放按它反除, 最终都是 0.8。projectile_orient_trident 与通用那条相同, 只为旧存档
+# 快照里的替换表保留。几何里没有这根骨骼(直写 geometry.* 的共享几何 / 旧产物)时动画空转, 不影响渲染。
 _PROJECTILE_ORIENT_KEY = "ysm_projectile_orient"
+_PROJECTILE_ORIENT_ANIMATION = "animation.ysm.projectile_orient"
 _PROJECTILE_ORIENT_ANIMATIONS = {
     "minecraft:arrow": "animation.ysm.projectile_orient_arrow",
-    "minecraft:thrown_trident": "animation.ysm.projectile_orient_trident",
+    "minecraft:fishing_hook": "animation.ysm.projectile_orient_hook",
+    "minecraft:fireball": "animation.ysm.projectile_orient_x2",
+    "minecraft:dragon_fireball": "animation.ysm.projectile_orient_x2",
+    "minecraft:small_fireball": "animation.ysm.projectile_orient_x0_5",
 }
-_PROJECTILE_VANILLA_MOVE_KEYS = {"minecraft:arrow": "move"}
+# 原版投射物自己的动画按原版几何的骨骼名写(body / head: 箭 / 烟花 / 凋灵骷髅转朝向, 精灵类与火球朝着摄像机转):
+# 模型里恰好有同名骨骼时会被转两遍 —— 条目置 "0" 关掉(键名取原版客户端实体定义, 没有的键不写)
+_PROJECTILE_VANILLA_ANIMATE_KEYS = {
+    "minecraft:arrow": "move",
+    "minecraft:wither_skull": "move",
+    "minecraft:wither_skull_dangerous": "move",
+    "minecraft:shulker_bullet": "move",
+    "minecraft:fireworks_rocket": "move",
+    "minecraft:snowball": "flying",
+    "minecraft:egg": "flying",
+    "minecraft:ender_pearl": "flying",
+    "minecraft:xp_bottle": "flying",
+    "minecraft:splash_potion": "flying",
+    "minecraft:lingering_potion": "flying",
+    "minecraft:fireball": "face_player",
+    "minecraft:small_fireball": "face_player",
+    "minecraft:dragon_fireball": "face_player",
+    "minecraft:llama_spit": "setup",
+    "minecraft:wind_charge_projectile": "rotate",
+    "minecraft:breeze_wind_charge_projectile": "rotate",
+}
 
 
 def _WithProjectileOrientation(entityId, replace):
-    """投射物替换数据 → 带朝向动画的副本(同一目标匹配多个实体时各自一份); 无需朝向的原样返回"""
-    animationId = _PROJECTILE_ORIENT_ANIMATIONS.get(entityId)
-    if animationId is None:
-        return replace
+    """投射物替换数据 → 带朝向动画(并关掉原版投射物动画)的副本; 同一目标匹配多个实体时各自一份"""
     oriented = OrderedDict(replace)
-    oriented["animations"] = [[_PROJECTILE_ORIENT_KEY, animationId]] + [
+    oriented["animations"] = [
+        [_PROJECTILE_ORIENT_KEY, _PROJECTILE_ORIENT_ANIMATIONS.get(entityId, _PROJECTILE_ORIENT_ANIMATION)]] + [
         list(item) for item in (replace.get("animations") or [])]
     animate = [[_PROJECTILE_ORIENT_KEY, "1"]]
-    moveKey = _PROJECTILE_VANILLA_MOVE_KEYS.get(entityId)
-    if moveKey:
-        animate.append([moveKey, "0"])
+    vanillaKey = _PROJECTILE_VANILLA_ANIMATE_KEYS.get(entityId)
+    if vanillaKey:
+        animate.append([vanillaKey, "0"])
     oriented["animate"] = animate + [list(item) for item in (replace.get("animate") or [])]
     return oriented
 
@@ -2810,34 +3280,72 @@ def _WithVehicleRoot(replace, soundEffects):
     return rooted
 
 
+# 载具座位(Java 发行版 2.5 起的定位组, Wiki "骑乘实体动画": 定位骨骼 PassengerLocator / PassengerLocator2 … 8 按乘客
+# 序号对应, "玩家的原点和这个载具的定位点衔接"): RenderUtil.adjustPassengerPosition 把乘客的渲染原点摆到定位骨骼的枢轴上,
+# 抵消原版骑乘的 Y 偏移, 带 YSM 玩家 cap 的乘客再下移 0.5 格; 原版的 x/z 偏移不抵消; 只挪模型, 实体位置与摄像机照旧。
+# 没有对应序号的定位骨骼时乘客保持原版位置。几何里是空骨骼, 移植 / 修复工具按静止姿态算出它们在模型坐标系里的位置
+# (累计祖先骨骼的绑定旋转), 写进 ysm.json 顶层 passenger_locators: {model 声明: [[x, y, z] | null, ...]}, 下标 = 乘客
+# 序号, 单位模型像素(解析期不读载具几何: 01 酒狐的狐狸车几何 1MB)。这里换算成座位: 定位点取它在**画出来的载具模型**上的
+# 位置 —— 乘载具的渲染缩放(Java 0.7, 基岩 JAVA_FIXED_ENTITY_SCALE = 0.8), 官方包的定位组都摆在可见座面上(狐狸车 (8.93, 11.55)
+# 正落在坐垫中心 / 顶面 (9.5, 11), 酒狐船 16 对坐板 15.2); 3.0-dev 源码里这段是 TODO, 按注释里 2.x 的字面写法不乘缩放,
+# 2026-09-24 实机按那个口径骑手偏外 0.19 格、偏高 0.25 格(用户: 往下、往中心靠)。YSM 骑手的下移 0.5 格与其它 Java 写死量
+# 同一换算比 ×8/7。业务包运行层(client/render/vehicleSeatSync)把骑手的渲染原点平移到这里。
+PASSENGER_LOCATOR_KEY = "passenger_locators"
+_PASSENGER_LOCATOR_LIMIT = 8
+_JAVA_YSM_RIDER_DROP = 0.5
+
+
+def _PassengerSeats(locators):
+    """ysm.json passenger_locators 的一项 → 座位表 [[x, y, z] | None, ...](格, 相对载具原点, 载具模型的几何轴向)"""
+    if not isinstance(locators, list):
+        return None
+    seats = []
+    for locator in locators[:_PASSENGER_LOCATOR_LIMIT]:
+        if not isinstance(locator, list) or len(locator) != 3 or not all(
+                isinstance(value, (int, float)) and not isinstance(value, bool) for value in locator):
+            seats.append(None)
+            continue
+        seats.append([round(locator[0] / 16.0 * JAVA_FIXED_ENTITY_SCALE, 4),
+                      round(locator[1] / 16.0 * JAVA_FIXED_ENTITY_SCALE - _JAVA_YSM_RIDER_DROP * JAVA_TO_NETEASE_SCALE, 4),
+                      round(locator[2] / 16.0 * JAVA_FIXED_ENTITY_SCALE, 4)])
+    while seats and seats[-1] is None:
+        seats.pop()
+    return seats or None
+
+
 def _BuildReplaceEntities(jsonDict, packName, readTextFunc, warnings, foundVars=None):
     """Java files.projectiles / files.vehicles / files.arrow → 网易 replace_entities 替换表。
 
     每条: {geometry, texture, (声明文件可读时)animations/animate/animation_controllers}。
     推导约定(与移植工具共用 ReplacedTargets):
-    - 实体 ID: Java↔基岩差异自动映射(JAVA_TO_BEDROCK_ENTITY_IDS), 其余原样; 同一实体被多个
-               目标匹配时取声明序第一个(Java ClientCatalogManager.findRenderTarget);
+    - 实体 ID: Java↔基岩差异自动映射(BedrockEntityIds, 投掷药水 / 凋灵骷髅在基岩拆成两个 ID 的都铺上), 其余原样;
+               同一实体被多个目标匹配时取声明序第一个(Java ClientCatalogManager.findRenderTarget);
+    - 投射物: 根骨骼朝向与缩放动画打头、关掉原版投射物动画(_WithProjectileOrientation);
     - 几何体: geometry.<包名>_<模型段>(模型段 = model 文件基名规整, 见 ReplacedResourceSegment);
-    - 贴图:   textures/entity/<包名>/<texture文件基名>;
+    - 贴图:   textures/entity/<包名>/<texture文件基名>; 载具的 PBR 形态 {uv, normal, specular} 另出 pbr 字段
+              (投射物沿用原版渲染控制器, PBR 告警忽略);
     - 动画:   animation 声明文件(资源包索引按路径定位, BP 副本回落)内的动画全部注册;
               按 Java 通道语义合成 animate(_ReplaceAnimates: 谓词状态键 + 并行键,
               其余动画只注册不直播);
     - 控制器: controller 声明文件可读时自动注册并常开, 按控制器名接管同名通道(移植工具产物在
               animation_controllers/<包>/replace_entities/, 索引按文件名 + 命名空间定位);
     - 变量:   替换实体的动画/控制器文件与玩家侧同样参与 molang 变量扫描
-              (foundVars) —— 变量域全局共享, 漏收会导致替换动画表达式求值失败;
+              (foundVars) —— 变量域全局共享, 漏收会导致替换动画表达式求值失败; 带包动画的替换实体另挂
+              包的变量初始化控制器, 排 animate 表最前(_WithVariableInit);
     - 载具:   根骨骼缩放动画打头(_WithVehicleRoot, Java 硬编码 0.7 换算成 0.8), 有动画时带上包的音效登记
-              (files.player.sound_effect, 移植工具把载具动画的音频关键帧也登记在这里)。
+              (files.player.sound_effect, 移植工具把载具动画的音频关键帧也登记在这里); 座位 passenger_seats 取自
+              ysm.json 顶层 passenger_locators(_PassengerSeats)。
     """
     result = OrderedDict()
     playerFiles = (jsonDict.get("files") or {}).get("player") if isinstance(jsonDict.get("files"), dict) else None
     packSounds = [item for item in ((playerFiles or {}).get("sound_effect") or [])
                   if isinstance(item, (list, tuple)) and len(item) == 2] if isinstance(playerFiles, dict) else []
+    initController = []     # 包的变量初始化控制器 ID(第一次用到时查索引)
     for sectionKey, entityIds, entry, modelSegment, namespaceSegment in ReplacedTargets(
             jsonDict.get("files")):
         # model 直通判据必须用**原始字符串**: _TextureEntryPath 会把
         # "geometry.default_arrow" 的 ".default_arrow" 误当扩展名裁掉
-        rawModel = _ReplacedModelDecl(entry)
+        rawModel = ReplacedModelDecl(entry)
         if rawModel.startswith("geometry."):
             # 直接写资源 ID = 共享几何场景(Java 的包内文件路径不可能是这种形态)
             modelPath = rawModel
@@ -2847,8 +3355,10 @@ def _BuildReplaceEntities(jsonDict, packName, readTextFunc, warnings, foundVars=
             warnings.append("{} 条目缺少 model 声明, 已跳过: {}".format(sectionKey, entityIds))
             continue
         textureDecl = entry.get("texture")
-        if isinstance(textureDecl, dict) and (textureDecl.get("normal") or textureDecl.get("specular")):
-            warnings.append("{}({}) 的 PBR 贴图(normal/specular)不支持, 已忽略".format(
+        # PBR 贴图: 载具走自有渲染控制器 ysm_vehicle(带 PBR 贴图槽); 投射物沿用原版渲染控制器, 接不上
+        pbrMaps = _PbrMapsFromDecl(textureDecl, "textures/entity/{}/".format(packName))
+        if pbrMaps and sectionKey != "vehicles":
+            warnings.append("{}({}) 的 PBR 贴图(normal/specular)不支持(投射物沿用原版渲染控制器), 已忽略".format(
                 sectionKey, modelSegment))
         replace = OrderedDict()
         if modelPath.startswith("geometry."):
@@ -2865,6 +3375,13 @@ def _BuildReplaceEntities(jsonDict, packName, readTextFunc, warnings, foundVars=
             else:
                 replace["texture"] = "textures/entity/{}/{}".format(
                     packName, texturePath.split("/")[-1])
+        if pbrMaps and sectionKey == "vehicles":
+            replace["pbr"] = pbrMaps
+        if sectionKey == "vehicles":
+            locatorTable = jsonDict.get(PASSENGER_LOCATOR_KEY)
+            seats = _PassengerSeats(locatorTable.get(rawModel) if isinstance(locatorTable, dict) else None)
+            if seats:
+                replace["passenger_seats"] = seats
         # 动画声明: 路径解析模式优先(资源包文件精确注册, 与玩家侧同规则),
         # BP 副本回落(历史兼容)
         namespace = "{}_{}".format(packName, namespaceSegment)
@@ -2893,14 +3410,25 @@ def _BuildReplaceEntities(jsonDict, packName, readTextFunc, warnings, foundVars=
                 "显式声明".format(sectionKey, modelSegment))
         if sectionKey == "vehicles" and not modelPath.startswith("geometry."):
             replace = _WithVehicleRoot(replace, packSounds if animEntries else None)
-        for entityId in entityIds:
-            bedrockId = JAVA_TO_BEDROCK_ENTITY_IDS.get(entityId, entityId)
+        # 自定义函数的音效请求槽位表(移植工具写的顶级 java_functions): 替换实体的动画同样会调 fn.* / ysm.play_sound,
+        # 请求计数器落在替换实体自己身上, 业务包音效宿主按这份表轮询它(18 号 GMA_T.50 的引擎声)
+        functionHost = _FunctionHostDeclaration(jsonDict.get("java_functions"))
+        if functionHost and animEntries:
+            replace = OrderedDict(replace)
+            replace["java_functions"] = functionHost
+        for bedrockId in [bedrockId for entityId in entityIds for bedrockId in BedrockEntityIds(entityId)]:
             if bedrockId in result:
                 continue
             if sectionKey == "projectiles" and not modelPath.startswith("geometry."):
-                result[bedrockId] = _WithProjectileOrientation(bedrockId, replace)
+                target = _WithProjectileOrientation(bedrockId, replace)
             else:
-                result[bedrockId] = replace
+                target = replace
+            # 包自己的动画 / 控制器才读包变量(只挂根骨骼缩放 / 朝向的静态替换不需要)
+            if animEntries or ctlEntries:
+                if not initController:
+                    initController.append(_PackVariableInitController(packName))
+                target = _WithVariableInit(target, initController[0])
+            result[bedrockId] = target
     return result
 
 
@@ -3267,7 +3795,7 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
     if javaMode:
         # 基线动画在本包上播放时读的变量(v.qh / v.bv ...)同样要初始化: 并进文件扫描(见移植工具
         # CollectBaselineVariables 注, 两边口径一致)
-        javaBaseline = _JavaDefaultBaseline(packName, fileMolangVars)
+        javaBaseline = _JavaDefaultBaseline(packName, fileMolangVars, geometry)
         if not javaBaseline and packName != _JAVA_BASELINE_NS:
             warnings.append(
                 "Java 格式包但 {} 基线包不可用(未装载或资源索引缺席), "
@@ -3364,6 +3892,10 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
         autoCtlEntries, conditionalAnimates, fpArmAnimates, stateAnimates = \
             _ApplyOneShotControllers(_NamespaceName(animNs), modelOwnKeys, autoCtlEntries,
                                      conditionalAnimates, fpArmAnimates, stateAnimates)
+        # 枪械模组联动: hold 通道条件动画 + fire 通道状态机(见 _TAC_HOLD_GUN 上方注; 主链持枪分支在状态链里)
+        conditionalAnimates, autoCtlEntries = _ApplyTacChannels(
+            _NamespaceName(animNs), mergedAnimKeys, conditionalAnimates, autoCtlEntries,
+            netease.get("channel_ownership"))
         # animate 表按 Java 通道顺序排列(含 parallel/pre_parallel 恒播条目)
         playerAnimates = _OrderJavaAnimates(
             autoAnimateEntries, conditionalAnimates, stateAnimates, mergedAnimKeys,
@@ -3401,6 +3933,9 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
         # 蹲下的渲染偏移(见 _JAVA_SNEAK_OFFSET_KEY 上方注): 直挂, 条件 = 双门 && Java 的 CROUCHING 姿态
         mergedAnimEntries = mergedAnimEntries + [(_JAVA_SNEAK_OFFSET_KEY, _JAVA_SNEAK_OFFSET_ANIMATION)]
         playerAnimates.append((_JAVA_SNEAK_OFFSET_KEY, _CONTROLLER_ANIMATE_GATE + "&&" + _JAVA_CROUCH_POSE))
+        # 载具座位的渲染偏移(见 _JAVA_SEAT_OFFSET_KEY 上方注): 直挂, 骑乘时才播(不骑乘时运行层也把值清零)
+        mergedAnimEntries = mergedAnimEntries + [(_JAVA_SEAT_OFFSET_KEY, _JAVA_SEAT_OFFSET_ANIMATION)]
+        playerAnimates.append((_JAVA_SEAT_OFFSET_KEY, _CONTROLLER_ANIMATE_GATE + "&&query.is_riding"))
         # 原版动画栈整体让位 + Java 代码级头部跟踪的等价物(见常量注)
         mergedAnimEntries = mergedAnimEntries + [(_JAVA_HEAD_LOOK_KEY, _JAVA_HEAD_LOOK_ANIMATION)]
         playerAnimates.append((_VANILLA_ROOT_KEY, _VANILLA_ROOT_CONDITION))
@@ -3417,6 +3952,9 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
         # 使用状态控制器排在输入状态动画之前(锁存同帧读到; 骨骼通道里查物品使用不可靠, 见其常量注)
         autoCtlEntries = autoCtlEntries + [(_JAVA_USE_STATE_KEY, _JAVA_USE_STATE_CONTROLLER)]
         playerAnimates.insert(0, (_JAVA_USE_STATE_KEY, _JAVA_USE_STATE_CONDITION))
+        # 自定义函数逐帧执行体(见 _FUNCTION_EXECUTOR_KEY 注): 紧跟共享状态动画, 早于包自己的全部条目
+        mergedAnimEntries, playerAnimates = _AppendFunctionExecutor(
+            netease.get("java_functions"), mergedAnimEntries, playerAnimates)
     else:
         autoCtlEntries, conditionalAnimates, fpArmAnimates, _unusedStates = \
             _ApplyOneShotControllers(_NamespaceName(animNs), modelOwnKeys, autoCtlEntries,
@@ -3454,9 +3992,9 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
         else:
             playerScale = 0.8
 
-    # 新版(JSON 包)模型渲染: 贴图/几何写入原版 default 键(卸模型由引擎
-    # ResetEntityExtraSkin 整体还原), 第三人称走自有 ysm_main 控制器, 第一
-    # 人称走 arm 控制器("arm" 键)。**两份 arm 控制器按是否声明 model.arm 二选一**:
+    # 新版(JSON 包)模型渲染: 几何与贴图写独占的 ysm 键(default 贴图留给玩家皮肤, 见业务包
+    # playerRender._MODEL_TEXTURE_KEY 注; 卸模型由引擎 ResetEntityExtraSkin 整体还原), 第三人称走自有
+    # ysm_main 控制器, 第一人称走 arm 控制器("arm" 键)。**两份 arm 控制器按是否声明 model.arm 二选一**:
     # 声明了的走 first_person_ysm_arm(part_visibility 全放行 —— 移植工具已把 arm 几何
     # 重建成"原版手臂骨架包装 + 移位后的 Java 子树", 几何里只有手臂, 而 Java 渲染整个
     # RightArm 子树, 按骨骼名前缀过滤会掉件); 未声明的 "arm" 键回落主几何(整个身体),
@@ -3493,7 +4031,8 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
                     lambda key: "controller.{}.{}".format(animNs, key))),
             netease.get("animation_controllers_remove"),
         ),
-        "animate": _RemoveEntries(
+        # 变量初始化控制器排最前: 旧版包的基线条目(BASE_ANIMATE)同样排在它前面, 所以在合并之后挪
+        "animate": _VariableInitFirst(_RemoveEntries(
             BuildEntries(
                 [] if javaMode else BASE_ANIMATE,
                 playerAnimates + fpArmAnimates
@@ -3506,7 +4045,7 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
             # Java 格式包没有基线表, 全部条目由包自身内容合成, 通道接管也已自动推导
             # (见 _DrivenParallelKeys) —— 写它无意义, 一律忽略。
             None if javaMode else netease.get("animate_remove"),
-        ),
+        )),
         "render_controllers": _RemoveEntries(
             BuildEntries(baseRenderControllers,
                          _AsEntryList(playerFiles.get("render_controllers"))
@@ -3546,6 +4085,10 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
         defaultSkin["gui_animation"] = guiAnimation
     if netease.get("material"):
         defaultSkin["material"] = netease.get("material")
+    # PBR 贴图按皮肤(见 _DerivePbrMaps 注); 没显式写 material 的皮肤由运行层换 pbr 材质预设
+    pbrBySkin = _DerivePbrMaps(jsonDict, netease, packName, textureMap)
+    if pbrBySkin.get("default"):
+        defaultSkin["pbr"] = pbrBySkin["default"]
     if isinstance(netease.get("arrow"), dict):
         defaultSkin["arrow"] = _NormalizeReplacePatch(netease.get("arrow"))
     # Java projectiles/vehicles → replace_entities(上方已构建; netease 同名字段逐 ID
@@ -3591,8 +4134,10 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
 
     skinSwitch = {"default": defaultSkin}
     for skinName in skinSort[1:]:
-        # 非 default 皮肤仅声明贴图, 其余资源经 inherit 走与内置模型相同的归一化链路
+        # 非 default 皮肤仅声明贴图(及自己的 PBR 贴图), 其余资源经 inherit 走与内置模型相同的归一化链路
         skinSwitch[skinName] = {"inherit": True, "texture": textureMap[skinName]}
+        if pbrBySkin.get(skinName):
+            skinSwitch[skinName]["pbr"] = pbrBySkin[skinName]
 
     # netease.skins: 皮肤级覆盖/补充({皮肤名: {字段...}}), 浅覆盖到合成结果上;
     # 用于表达推导无法覆盖的皮肤差异(如发光皮肤的 material、非继承的完整皮肤声明)
@@ -3665,6 +4210,9 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
     javaStateDeclaration = _BuildJavaStateDeclaration(netease.get("java_state"), buttonsList, fileMolangVars)
     if javaStateDeclaration:
         config["java_state"] = javaStateDeclaration
+    functionHost = _FunctionHostDeclaration(netease.get("java_functions"))
+    if functionHost:
+        config["java_functions"] = functionHost
     # GUI 预览的并行叠加层: Java 的 ParallelPredicate 恒 LOOP **含 GUI** —— 隐藏/
     # 摆位装饰部件的 parallel/pre_parallel 不叠上去, 预览就是零件摊开的杂乱状态。
     # javaMode 自动取模型自有的并行动画全表(列表形态, previewRender 逐条注册);
@@ -3706,6 +4254,10 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
         previewCompanions = _OwnershipCompanionIds(modelAnimEntries)
         if previewCompanions:
             config["preview_companions"] = previewCompanions
+    # 选择卡片的交互动画(Java 2.2.2: 鼠标悬停 hover / 移出 hover_fadeout / 获得焦点 focus), 见 _BuildGuiCardAnimations
+    guiCardAnimations = _BuildGuiCardAnimations(defaultSkin["animations"], warnings)
+    if guiCardAnimations:
+        config["gui_card_animations"] = guiCardAnimations
     if netease.get("icon"):
         config["icon"] = netease.get("icon")
     else:

@@ -28,7 +28,7 @@
 | 弹射物/载具替换 | 基本零改动(实体 ID 自动映射、状态条件按 Java 通道自动合成、`files.arrow` 照常转换) | ≈0 |
 | 预览实体定义 | **新增**一个模板文件(基岩独有,Java 无此概念) | 低 |
 | 模组联动动画(跑酷/马术/女仆/拔刀剑/奏乐/铁魔法) | **不移植**(基岩无对应模组) | — |
-| 自定义函数 / 多语言 | 函数暂不支持;多语言由移植工具把 `lang/zh_cn.json` 烘进显示文本(见 §2.3) | — |
+| 自定义函数 / 多语言 | 函数是**实验性功能**,转换器缺省不转换(勾选「转换自定义函数(实验性)」才转,见下方 `function_path` 行);多语言由移植工具把 `lang/zh_cn.json` 烘进显示文本(见 §2.3) | — |
 
 > 本仓库 `devtools/port_java_pack.py` 是上述机械转换的自动化工具(动画 ID/转义/molang
 > 批量替换/手臂父链嫁接全自动),本文按**手工移植**讲解——手工过一遍才知道工具在做什么、
@@ -96,7 +96,7 @@ custom/纸板狐模型包/                    你的组件/
 | `icon` | ✅ | 选择界面图标,取文件名 → `textures/entity/<包名>/<文件名>` |
 | `free` | ❌ | 授权体系是 Java 服务,忽略 |
 | `gui_background` / `gui_foreground` | ✅ | 选择界面卡片的背景图(纸娃娃之下)/前景图(纸娃娃之上、名字之下),铺满卡片,与 Java 卡片同序;移植工具拷到 `textures/entity/<包名>/gui_background.png` / `gui_foreground.png`(文件名统一,中文名也行) |
-| `render_layers_first` / `all_cutout` / `gui_no_lighting` | ❌ | 渲染标志,基岩渲染管线不同,忽略。描边/发光类需求改用网易侧 `material` 字段(见 §2.4) |
+| `render_layers_first` / `all_cutout` / `gui_no_lighting` | ❌ | 渲染标志,基岩渲染管线不同,忽略。需要半透明/全亮/剔除背面时改用网易侧 `material` 预设(见 §2.4) |
 | `disable_preview_rotation` | ✅ | 选择界面卡片的取景: 缺省与 Java 一样把模型转过 20° 并略俯视(展示动画就是按这个取景摆的),置 `true` 才正对镜头。旧版写法的包与 py 模型一律正对,不受影响。皮肤卡片与 Java 一样恒带转角、播 idle |
 | `merge_multiline_expr` | ❌ | 属转换环节职责:多行 molang 数组请在移植时手工合并成单串 |
 
@@ -107,10 +107,10 @@ custom/纸板狐模型包/                    你的组件/
 | `player.model.main` / `arm` | ✅ | 路径写法照抄(实际按 `<包名>` 推导几何 ID);写 `geometry.*` 资源 ID 时**直通**(多包共享/改名几何)。`arm` 有**父链红线**,见第 3 步 |
 | `player.animation` | ✅ | **Java 原生 dict 槽位形态原样可用**(`main`/`extra` 进主域,`arm`/`fp_arm` 进第一人称域);另有更灵活的**列表混排**扩展形态(推荐,见第 5 步)。模组联动槽位(`tac`/`carryon`/`parcool`/`swem`/`slashblade`/`tlm`/`immersive_melodies`/`irons_spell_books`)的处置见第 5.6 节 |
 | `player.animation_controllers` | ✅ | 照抄;文件内全部控制器导入并**常开**(对齐 Java"控制器加载即接管") |
-| `player.texture` | ✅ | 字符串与 `{uv}` 形态照抄(皮肤名=文件名去扩展);**PBR(`normal`/`specular`)忽略**;另有 `{"皮肤名": "真实路径"}` 扩展形态(皮肤名与文件名不一致/共享贴图) |
-| `projectiles` / `vehicles` / `arrow` | ✅ | 对象形态(2.5.0)与 `match` 数组形态(2.5.2+)都支持,废弃字段 `files.arrow` 按 `minecraft:arrow` 弹射物转换;实体 ID 自动映射 JE↔BE 差异(`minecraft:trident`→`thrown_trident`、`fishing_bobber`→`fishing_hook`);**`#实体tag` 匹配不支持**,请展开写具体实体 ID;`controller` 字段支持(通道名 `projectile.parallel_0-7`/`projectile.main` 等按名接管同名通道,其余通道照常自动播;箭类的 `ysm.in_ground` 近似为在地判据);播放按 Java 通道语义:只有谓词状态键(弹射物 `water`/`fire`/`ground`/`air`,载具 `water`/`ground`/`fly`/`forward`/`idle`/`has_ride`/`not_ride`)与 `parallel0-7`(载具另有 `pre_parallel0-7`)直接播,其余动画只注册;模型文件名里的大写/点号自动规整(`GMA_T.50` → `gma_t_50`);载具按 Java 硬编码缩放 0.7、与玩家同比换算成 0.8(自动外包根骨骼)、第一乘客写入且下车不撤随实体存档,船/运输船/矿车是引擎硬编码渲染,直接换上后由运行层在根骨骼上补朝向(矿车照 Java 按车底轨道形状定) |
+| `player.texture` | ✅ | 字符串与 `{uv}` 形态照抄(皮肤名=文件名去扩展);**PBR(`normal`/`specular`)按 LabPBR 近似渲染**(法线起伏/日月高光/自发光,Java 要装光影才看得到,基岩恒生效;载具同样支持,投射物忽略),见[格式手册·材质、发光组与 PBR](ysm-json-pack-guide.md);另有 `{"皮肤名": "真实路径"}` 扩展形态(皮肤名与文件名不一致/共享贴图) |
+| `projectiles` / `vehicles` / `arrow` | ✅ | 对象形态(2.5.0)与 `match` 数组形态(2.5.2+)都支持,废弃字段 `files.arrow` 按 `minecraft:arrow` 弹射物转换;实体 ID 自动映射 JE↔BE 差异(`minecraft:trident`→`thrown_trident`、`fishing_bobber`→`fishing_hook`);**`#实体tag` 匹配不支持**,请展开写具体实体 ID;`controller` 字段支持(通道名 `projectile.parallel_0-7`/`projectile.main` 等按名接管同名通道,其余通道照常自动播;箭类的 `ysm.in_ground` 近似为在地判据);播放按 Java 通道语义:只有谓词状态键(弹射物 `water`/`fire`/`ground`/`air`,载具 `water`/`ground`/`fly`/`forward`/`idle`/`has_ride`/`not_ride`)与 `parallel0-7`(载具另有 `pre_parallel0-7`)直接播,其余动画只注册;模型文件名里的大写/点号自动规整(`GMA_T.50` → `gma_t_50`);载具按 Java 硬编码缩放 0.7、与玩家同比换算成 0.8(自动外包根骨骼)、第一乘客写入且下车不撤随实体存档,船/运输船/矿车是引擎硬编码渲染,直接换上后由运行层在根骨骼上补朝向(矿车照 Java 按车底轨道形状定);载具模型的定位组 `PassengerLocator*` 照 Java 摆骑手(只取静止位置,见第 8 步) |
 | `sound_path` | ✅ | 音效自动移植(2026-09-16):`sounds/`(或 `files.sound_path`/`files.player.sound_path` 指定的目录)里的 ogg 随动画音频关键帧一起搬到 `ysm_rp/sounds/ysm/<包>/`,定义与注册由工具生成;原版音效 ID(含 `:`)两边命名不同,需人工对照 |
-| `function_path` | ❌ | 自定义函数(`functions/*.molang`)暂不支持:过程式脚本,无表达式等价物(见映射文档§三) |
+| `function_path` | 🔶 | 自定义函数(`functions/*.molang`)**实验性,缺省不转换**:不勾时 `fn.*`、音效、`ysm.sync`、键鼠调用按 0 处理,`@player_init` / `@player_update` / `@sync` 不执行;勾选「转换自定义函数(实验性)」(命令行 `--java-functions`)后调用处内联、音效与同步交给主组件宿主、事件体编进逐帧执行体。与 Java 的出入(音效不随动画停止、函数里 `??` 算错等)见 [自定义函数转换设计](ysm-java-functions.md) 文首 |
 | `language_path` | 🔶 | 移植工具读 `lang/zh_cn.json`(或 `files.language_path`)把中文显示文本**烘进 ysm.json**:模型名/简介/作者、轮盘条目名(值为 `#按钮` 时顶替按钮名)、配置表单标题/说明/单选项名。`.desc` 悬浮说明与皮肤显示名(`files.player.texture.<名>`)不烘;主包运行期不读语言文件,手写包请直接写中文 |
 
 ### 2.4 网易独有扩展(Java 没有的能力)
@@ -122,7 +122,7 @@ custom/纸板狐模型包/                    你的组件/
 |---|---|
 | `animation_namespace` | 动画 ID 前缀不想用默认 `animation.<包名>` 时声明(比如沿用你已有的命名) |
 | `skins` | **多皮肤差异化**:逐皮肤覆盖几何/材质/缩放(Java 的皮肤只能换贴图,网易可以整套换) |
-| `material` | 发光(`bloom`)/描边/无剔除(`nocull`)等材质,可逐渲染键指定 |
+| `material` | 材质预设(`cutout`/`cutout_cull`/`translucent`/`emissive`/`pbr`,玩家开描边时自动换描边变体),可逐皮肤(`skins.<名>.material`)、逐材质键(`ysm_glow` = 发光组)指定;通常不用写(缺省即 Java 的 `entityCutoutNoCull`) |
 | `files.player.animate` | `{"注册键": "molang 条件"}` 给动画/控制器挂播放条件——**基岩动画系统的核心机制**,Java 硬编码状态机在基岩就是靠这些条件+控制器复刻的(想深改看[机制对照](ysm-java-animation-mechanism.md)) |
 | `extra_stop_expression` | 轮盘动画停止条件(缺省"移动/跳跃/潜行即停",对齐 Java 的移动打断;置 `""` 相当于 Java 的"锁定"常开) |
 | `initialize` | molang 变量显式初始化(通常不用写——动画文件里的变量会被自动扫描初始化) |
@@ -189,6 +189,8 @@ Java YSM 的模型本来就是基岩几何格式(BlockBench 基岩导出),转换
    会自动改名 `<原名>_ysmfp`,`fp_arm` 动画里的引用同步改写。
 4. 没有 arm 模型也没关系:不声明 `model.arm` 时第一人称自动回落主几何(等效 Java 旧版
    剔除法,父链天然完整),先跑通再精修——主包内置的 4 个模型走的都是这条路。
+5. **发光组照搬**:名字以 `ysmGlow` 开头(区分大小写)的骨骼自动走发光材质(不受光照 + 泛光),第三人称、
+   第一人称手臂与载具都生效;与 Java 一样只作用于这根骨骼本身,子骨骼要各自以 `ysmGlow` 开头。
 
 缩放:`properties.height_scale` 会自动换算;几何 description 里的
 `ysm_height_scale`/`ysm_width_scale` 声明也照 Java 语义读取。
@@ -199,7 +201,8 @@ Java YSM 的模型本来就是基岩几何格式(BlockBench 基岩导出),转换
    里的包内路径(`textures/skin.png`)会自动按"文件名+约定目录"拼装,声明零改动;
 2. 想放别的目录:顶级 `texture_path_prefix` 换前缀,或用
    `{"皮肤名": "完整路径"}` 直通形态逐张写死;
-3. PBR 附属贴图(`normal`/`specular`)不会被使用,可以不搬;
+3. PBR 附属贴图(`normal`/`specular`)同样放进这个目录(移植工具一并拷贝,`textures/pbr/` 之类的子目录拍平):
+   玩家与载具按 LabPBR 近似渲染,平法线 + 无高光的像素与普通材质一样;投射物的 PBR 图用不上,可以不搬;
 4. 作者头像、`properties.icon` 的图也放进资源包,引用路径**不带扩展名**。
 
 ### 第 5 步:动画文件(移植大头)
@@ -309,7 +312,7 @@ FAQ 的说明一致)。`death`/`ladder_up`/`ladder_stillness`/`ladder_down` 在�
 | Java 槽位 | 处置 |
 |---|---|
 | `carryon`(Carry On) | **原样移植即可**:`carryon:block`/`entity`/`player`/`princess` 四条按条件动画转义为 `carryon.cls.*`,主包按搬运状态(`ysm_carryon` 1=实体 2=方块 3=玩家,princess=被玩家抱起)自动合成播放条件——网易版自带搬运玩法,语义同 Java。旧通道(旧版 list 声明形态的包)也可沿用改下划线(`carryon_block` 等)覆盖主包基线搬运动画的做法 |
-| `tac`(枪械) | 网易走 TACZ 联动的 `tac_*` 基线键位体系(见格式手册),Java `tac:` 系条件名会被跳过并汇总告警;想做枪械动画请按网易键位重排,属高级内容 |
+| `tac`(枪械) | **原样移植即可**(移植工具默认就带):主链持枪版 `tac:idle`/`walk`/`run` 等、手持 `tac:<climb\|climbing\|aim\|run\|hold>:<pistol\|rifle\|rpg>`、开火通道 `tac:reload:`/`tac:melee:`/`tac:<climbing\|aim\|hold>:fire:` 转义成 `tac.cls.*`,主包按 Java TACZCompat 三通道播放,数据来自基岩枪械模组(Eplus军械库等)写的 `v.tac.*`(字段与动作 → 动画对照见 `ysm-tac-protocol.md`)。包里没写的枪械动画按名字逐个回落 Java 默认模型的那一套。基岩另有滑铲扩展:主链 `slide`/`tac:slide`、手持 `tac:slide:<类型>`,想自定义就在 `tac` 槽位里加同名动画(Java 版不认这几个名字,不影响 Java 端);整身姿态写在 `Root` 或转换器补的滑铲姿态骨骼 `ysm_body_root`/`ysm_torso_root` 上,别写在 `AllBody`/`UpperBody` 上(持枪、开火、近战动画会整根覆盖它们,见 `ysm-tac-protocol.md` 第 5 节),也别给自己的骨骼起这两个名字。逐枪条件动画(`tac:hold$tacz:ak47`)、`minigun` 这类 Java 不播的类型后缀与手雷动画基岩驱动不了,转换时跳过并留痕 |
 | `parcool` / `swem` / `slashblade` / `tlm` / `immersive_melodies` / `irons_spell_books` | 基岩无对应模组,**不移植**(文件不搬即可) |
 
 ### 第 6 步:动画控制器
@@ -320,7 +323,8 @@ Java 2.3.0 起支持的基岩版动画控制器格式,网易**原生就是它**,
 > 移植工具把"条件块套条件块、叶子上 set_animation + return"的决策树自动展开成控制器(`devtools/script_controller.py`,
 > 官方酒狐 15 号的主链姿态就在 `@player_ctrl_pre_main` 里)。只转内置谓词为空的 `pre_*` / `post_*` 通道;
 > `main` / `use` / `swing` / `parallel_N` 的脚本(放行要交回内置动画)和带计数器、随机数、逐帧积分的脚本会跳过并在报告里标
-> `[!]`,这类逻辑请手写成普通控制器。
+> `[!]`,这类逻辑请手写成普通控制器。勾选「转换自定义函数(实验性)」后,空白通道与 `parallel_N` / `pre_parallel_N` 的这类脚本
+> 会连同 Java 动画播放器状态机编进逐帧执行体(`main` / `use` / `swing` 仍不支持)。
 
 1. 控制器 ID 改 `controller.animation.<包名>.<名称>`,文件放
    `animation_controllers/<包名>/`(移植工具已自动:Java 的控制器名就是**通道名**
@@ -371,10 +375,12 @@ Java 2.3.0 起支持的基岩版动画控制器格式,网易**原生就是它**,
 ### 第 8 步:弹射物 / 载具
 
 `files.projectiles` / `files.vehicles` 两种形态(对象 / `match` 数组)照抄。弹射物模型按 Java 约定建(前方朝 +X),
-移植工具会外包一层 `ysm_projectile_root` 朝向根骨骼,箭矢/三叉戟在游戏里自动跟随射击方向与下坠并按 Java 的 0.7 缩放
-(对齐 Java `GeoProjectilesRenderer`;与玩家同比换算,基岩里是 0.8),模型里不必自己写朝向动画:
+移植工具会外包一层 `ysm_projectile_root` 朝向根骨骼,所有弹射物在游戏里自动跟随飞行方向与下坠并按 Java 的 0.7 缩放
+(对齐 Java `GeoProjectilesRenderer`;与玩家同比换算,基岩里是 0.8;鱼钩同 Java 只转水平朝向,火球类抵消原版自带的放大),
+模型里不必自己写朝向动画,原版弹射物自己的转向 / 朝向摄像机动画也会关掉:
 
-- 实体 ID 自动映射 JE↔BE 差异;`match` 里的 `#实体tag` 展开成具体 ID;
+- 实体 ID 自动映射 JE↔BE 差异(`potion` → 喷溅与滞留药水、`experience_bottle` → `xp_bottle`、`firework_rocket` →
+  `fireworks_rocket`、`trident` → `thrown_trident`、`fishing_bobber` → `fishing_hook` 等);`match` 里的 `#实体tag` 展开成具体 ID;
 - 模型/贴图按 `<包名>` 推导;多模型共用一套箭矢时,`model` 直接写 `geometry.*` ID、
   `texture` 写无扩展名路径即**直通**;
 - 动画的状态键(`water`/`fire`/`ground`/`air`;载具 `water`/`ground`/`fly`/`forward`/`idle`/`has_ride`/`not_ride`)
@@ -389,6 +395,10 @@ Java 2.3.0 起支持的基岩版动画控制器格式,网易**原生就是它**,
   (播 `not_ride`),直到下一个第一乘客上车覆盖 —— 与 Java 一致;
 - 载具动画里的 `sound_effects` 关键帧照常登记(ogg + `sound_definitions` + `files.player.sound_effect`,
   与玩家侧同一套),运行层给载具注册音效表;
+- 载具模型里的定位组 `PassengerLocator`、`PassengerLocator2` … `PassengerLocator8`(空骨骼,按顺序对应第 1~8 个乘客)
+  照 Java 摆骑手:YSM 骑手的渲染原点落在定位点上(再下移 0.5 格,与 Java 相同),只挪模型,摄像机与实体位置不变;
+  没有对应定位组的乘客保持原版位置。工具把定位组的位置写进 ysm.json 顶级 `passenger_locators`,改了模型里的定位组
+  要重新移植或跑修复工具。定位骨骼链上的动画位移/旋转/缩放不带给骑手(只取静止位置),骑手朝向也不跟定位骨骼转;
 - 船/运输船/矿车在基岩是**引擎硬编码渲染**,模型照样直接换在载具身上,但引擎不再按朝向转它,运行层在载具
   根骨骼上补转角,作者侧无需额外配置:船朝行驶方向;矿车照 Java 按**车底轨道形状**定朝向(轨道两个出口的连线,
   与行驶方向无关,弯道取两出口连线),和 Java 一样不做上坡俯仰。
@@ -477,7 +487,7 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
 | **鞘翅滑翔的实体层旋转** | 渲染器继承 `LivingEntityRenderer`(不是 `PlayerRenderer`),实体层**一点不转**(死亡翻转与激流旋转也被显式清掉)——滑翔姿态全靠模型自己的 `elytra_fly` 动画摆(官方包普遍把根骨骼转 90° 让身体躺平) | 引擎在 `query.is_gliding` 时给**整个模型**额外加 `90 + pitch` 度俯仰(`ActorRenderData::getDamageOrGlidingXYRotation`;2026-09-18 实机定量:绕脚底的**纯旋转、不带平移**,骨骼矩阵里查不到) | ⚠️ 两者叠加 = 水平飞行时模型头朝下。移植/修复工具给主几何外包 `ysm_glide_root`(枢轴 0、无变换),主包 `animation.ysm.java_glide_fix` 在它上面反向转 `-(90+pitch)*clamp(4t²)`(Java 的渐入系数),由共享控制器 `controller.animation.ysm.java_glide_state` 进滑翔态时播。**手写包不用管**,但别给骨骼起 `ysm_glide_root` 这个名字 |
 | **蹲下的渲染偏移** | 原版 `PlayerRenderer.getRenderOffset` 在 `isCrouching()`(姿态 CROUCHING:潜行且不在游泳/爬行/滑翔/睡觉/创造飞行)时把整个玩家**下移 0.125 格**,`EntityRenderDispatcher` 在抛 `RenderPlayerEvent.Pre` 之前就平移好了,YSM 在事件里接管渲染照样吃到 —— 模型自己的 `sneak`/`sneaking` 动画之外还叠这 0.125 格,作者是按这个总量把脚底调到地面的 | 引擎不给模型本体加这一步(原版靠 `animation.player.sneaking` 把 `body` 骨骼降 2 单位,只有附件渲染 `HumanoidAdditionalRendering` 补了 -0.125),移植模型蹲下时脚离地 0.125 格 | 主包 `animation.ysm.java_sneak_offset`(键 `ysm_java_sneak_offset`)在 `ysm_glide_root` 上补位移 `-(0.125 格 × 8/7) ÷ 实体缩放`(与其余 Java 写死量同一换算比,实体缩放 0.8 时 2.857 单位),条件照 Java 的 CROUCHING 姿态合成。**手写包不用管**;没有 `ysm_glide_root` 的旧产物跑一次修复工具补包装骨骼即可 |
 | `riptide`(激流) | ✅ | ❌ 引擎无对应查询 | 激流姿态缺失 |
-| GUI `hover`/`hover_fadeout`/`focus` | ✅ | ❌ 网易 UI 不驱动模型 hover;预览走 `preview_animation` + 预览动作表 + `preview_parallel` | 选择界面交互动画不同 |
+| GUI `hover`/`hover_fadeout`/`focus` | ✅ | ✅ 动画表里有这三个名字就生效:键鼠悬停选择卡片播 `hover`,移出播 `hover_fadeout`(播满它自己的时长),点击的卡片播 `focus`;循环语义按 Java(转换器自动规整) | 触屏模式不悬停;卡片上动画自带的音效/粒子不发;点击卡片以外的按钮不会移走焦点 |
 | 挥动/使用互斥 | `PAUSE`(暂停不清骨骼) | molang 条件门 | 极端时序下过渡细节略不同 |
 | 动画帧率 | 60fps 上限 | 引擎渲染帧率 | 无感 |
 | 结尾过渡 | 固定 3 tick | 控制器 `blend_transition` 兼任 | 自定义控制器时自己给过渡值 |
@@ -493,9 +503,11 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
 | **动画 `sound_effects` 关键帧** | 写 `sounds/` 下文件名或原版 ID(wiki《添加音频》) | 效果键必须经 `AddPlayerSoundEffect` 注册且 `sound_definitions.json` 有定义,缺一无声 | 工具三件套自动生成;`validate_rp_animations.py` 核对注册与定义 |
 | **控制器状态里没写循环的动画**(PLAY_ONCE,如萨赫梅特的 `Sword_Attack_1`) | 播到长度即"播完",随后 3 tick 尾过渡把姿态淡到 0、不再写通道 —— 状态没切走也会收回(连段中切换物品,出口都要求持剑,攻击姿态照样收回) | ❌ `loop:false` 播完即撤(出态前闪一帧底层姿态);补成 `hold_on_last_frame` 又会在状态停留时一直定格 | 工具补 `hold_on_last_frame` 防闪帧,同时给作者状态里的这类条目乘 0.15s 淡出权重,淡出结束后早层通道收回,与 Java 一致。**想让姿态停在末帧就显式写 `"loop": "hold_on_last_frame"`**(凋灵娘的攻击 A/B/C 就是这么写的,Java 与基岩都会定格) |
 | **状态机里不播动画的中转状态**(如凋灵娘的 `cache`:落地后 `jump_down → cache → idle`) | 切换时从当前姿态快照插值,经过空状态只多花 1 tick,姿态连续 | ❌ 交叉淡化是"出态权重 1→0 + 入态 0→1",入空状态时没有入态动画,姿态先淡到**绑定姿态**再淡进下一状态——落地一瞬间直立 | 工具给每条 `X→空状态` 前置 `X→Y` 旁路转移(条件相与,目标限有动画的状态,矛盾/自环/含 `all_animations_finished` 的不插),一步到位只做一次动画间淡化 |
-| **手持物品的挂点** | 渲染在 `RightHandLocator` / `LeftHandLocator` 骨骼上(`PlayerLocator` 注册表 + `CustomPlayerItemInHandLayer`),定位组可有多个成员(`RightHandLocator2/3` → 渲染多份) | 只认**固定骨骼名 `rightItem` / `leftItem`**(原版 `geometry.humanoid.custom` 里 `rightItem` 是 `rightArm` 的空子骨骼,pivot 在掌心并把 z 前推 1;骨骼内的 `lead_hold` locator 只是拴绳点) | ⚠️ Java 包没有这两根骨骼,直接转换过来**手持物品不在手上**。移植/修复工具自动补:挂到 `<Left\|Right>HandLocator` 下(缺则回落 `<L\|R>Hand`→`<L\|R>Arm`),主几何 pivot = 父骨骼 pivot(与作者自制的基岩版凋灵娘一致;早先是 z+1,拉弓动画把定位骨骼放大 2 倍时弓会被甩出去,修复工具会把形状完全等于生成物的旧骨骼挪过来),带 `lead_hold`/`lead_hold2`;第三人称的持物差由主包按物品类别叠修正动画(工具类 `[0,2,1]`、其余非挂载物 `[0,1,2]`、主手弓/弩另叠)。定位组有多成员时取基名那个(基岩只能一根)。**自己写了 `rightItem`/`leftItem` 的包原样保留**,想微调位置就手写(修正动画照样叠加)。父子关系选定位骨骼是有讲究的:三个参考包的 `carryon.cls.*` 都把手部定位骨骼缩放到 0 来隐藏手持物,挂在它下面才能跟着隐藏(与 Java 同语义)。**`models/arm.json`(第一人称)工具同样补上**,但第一人称的手持物已不经它绑定:主包在第一人称把 `default` 几何键换成原版体型 `geometry.default_steve` 作附着物锚点,原版第一人称动画原样驱动它(网易原版 `empty_hand` 自带 `q.get_default_bone_pivot` 归一),弓/弩/盾/三叉戟与普通物品都落在原版位置;模型手臂的额外摆位与设置里的 `empty_hand_x/y/z` 只在主手空手时生效,不会挪动物品 |
+| **手持物品的挂点** | 渲染在 `RightHandLocator` / `LeftHandLocator` 骨骼上(`PlayerLocator` 注册表 + `CustomPlayerItemInHandLayer`),定位组可有多个成员(`RightHandLocator2/3` → 渲染多份) | 只认**固定骨骼名 `rightItem` / `leftItem`**(原版 `geometry.humanoid.custom` 里 `rightItem` 是 `rightArm` 的空子骨骼,pivot 在掌心并把 z 前推 1;骨骼内的 `lead_hold` locator 只是拴绳点) | ⚠️ Java 包没有这两根骨骼,直接转换过来**手持物品不在手上**。移植/修复工具自动补:挂到 `<Left\|Right>HandLocator` 下(缺则回落 `<L\|R>Hand`→`<L\|R>Arm`),主几何 pivot = 父骨骼 pivot(与作者自制的基岩版凋灵娘一致;早先是 z+1,拉弓动画把定位骨骼放大 2 倍时弓会被甩出去,修复工具会把形状完全等于生成物的旧骨骼挪过来),**不带**拴绳 locator(玩家身上的锚点几何 `default_steve` 已有原版 `lead_hold`,几何之间同名不同位置引擎报错丢弃;Java 的拴绳挂点本就是原版固定偏移、与模型无关,修复工具会去掉旧生成物上的);第三人称的持物差由主包按物品类别叠修正动画(工具类 `[0,2,1]`、其余非挂载物 `[0,1,2]`、主手弓/弩另叠)。定位组有多成员时取基名那个(基岩只能一根)。**自己写了 `rightItem`/`leftItem` 的包原样保留**,想微调位置就手写(修正动画照样叠加)。父子关系选定位骨骼是有讲究的:三个参考包的 `carryon.cls.*` 都把手部定位骨骼缩放到 0 来隐藏手持物,挂在它下面才能跟着隐藏(与 Java 同语义)。**`models/arm.json`(第一人称)工具同样补上**,但第一人称的手持物已不经它绑定:主包在第一人称把 `default` 几何键换成原版体型 `geometry.default_steve` 作附着物锚点,原版第一人称动画原样驱动它(网易原版 `empty_hand` 自带 `q.get_default_bone_pivot` 归一),弓/弩/盾/三叉戟与普通物品都落在原版位置;模型手臂的额外摆位与设置里的 `empty_hand_x/y/z` 只在主手空手时生效,不会挪动物品 |
 | **纯中文名的动画** | 名字随便起,`头颅张开（左）`/`右勾拳` 都行 | 资源 ID 必须 ASCII,移植工具转拼音(全角括号等非汉字非 ASCII 转 `uXXXX`) | ⚠️ 移植工具早期把"名字里没有 ASCII 字母数字"当分组标题条目丢弃,**误杀纯中文名的真动画**(2026-09-04 实机:凋灵娘 16 条含两个骷髅头的张开/闭合/待机、持剑奔跑、头发飘动;warden 13 条整套拳击/肘击/防御。名字里恰好带 ASCII 的 `火焰动画A`/`语音13` 侥幸存活)。后果:控制器引用被当死引用剪掉 → 状态变空 → 部件停在绑定姿态、动作全无。现判据 = 名字无字母数字**且**动画体无内容(`bones`/`timeline`/粒子/音效都没有) |
-| **模型渲染的背面剔除** | `RenderType.entityCutoutNoCull`,**不剔除背面**,作者据此建模(火焰/飘带/裙摆的单面片两侧都可见) | 基岩 `entity` 材质默认剔除背面 → 这些部件只有从正面看才显示,侧背面透明 | JSON 包(Java 模式)未显式声明 `material` 时自动回退 `bloom_nocull`/`bloom_plus_nocull`(`entity_nocull` 系),预览实体的 `default` 材质同步;显式声明 `material` 的包不受影响 |
+| **模型渲染的背面剔除** | `RenderType.entityCutoutNoCull`,**不剔除背面**,作者据此建模(火焰/飘带/裙摆的单面片两侧都可见) | 基岩 `entity` 材质默认剔除背面 → 这些部件只有从正面看才显示,侧背面透明 | JSON 包(Java 模式)未显式声明 `material` 时自动回退 `cutout` 预设(不剔除背面、裁切阈值 0.1 同 Java;原版基岩丢 alpha < 0.5,会吃掉半透明发丝),预览实体的 `default` 材质同步;显式声明 `material` 的包不受影响。早先回退的 `bloom_nocull` 会把 alpha < 0.3 的像素当发光 |
+| **发光组 `ysmGlow*`** | 骨骼名前缀约定,多数光影下发光,只作用于当前组 | 基岩没有这个约定,早先移植后发光部件(萨赫梅特的眼睛)不亮 | 主包渲染控制器按骨骼名通配给它们挂 `ysm_glow` 材质键,缺省 `emissive`(不受光照 + 泛光,夜里也亮);可在 `material` 里改 |
+| **PBR 贴图** | 只交给 Oculus/Iris 光影包(LabPBR),没装光影不起作用 | 网易没有光影包接口 | 主包 `pbr` 预设按前向光照近似(法线图调制原版明暗、日月方向高光、高光图 alpha 自发光),**恒生效**;洞里火把旁也会有日月高光(引擎不区分天空光与方块光);选择界面卡片不显示 PBR |
 | **"隐藏基线 + 条件显示"的装饰件**(火焰/表情/嘴型:pre 通道 `scale 0` 隐藏,变体动画设回 1) | parallel 通道对 position/scale 是覆盖 → 当前变体可见 | ❌ 两条动画共写同一通道时**缩放相乘**,0×1 **不可见**(凋灵娘骷髅头的火焰是几何骨骼 `Fires_*`/`ysmGlowFire_*`,不是粒子) | 常量变体:工具 `ReconcileConditionalVariants` 折叠为单一所有者(`scale: ["(v.Emotions==3)?1:0", …]`);关键帧变体(攻击特效逐帧缩放):`ApplyChannelOwnership` 让 pre 那份在攻击状态活跃时让出。**手写包请直接用一条 molang 表达式控制显隐**,不要两条动画共写同一 scale |
 | **`ctrl.jump` 与"在地"判据** | `!onGround && !inWater`,onGround 稳定 | 走路时 `query.is_on_ground` 每秒翻转数次;带最高点死区的判据又会在最高点判"在地" | 主包共享的 `animation.ysm.java_input_state`(animate 表首位)逐帧维护闩锁 `variable.ysm_airborne`,`ctrl.jump/idle/walk/run` 全部改用它(见映射表) |
 | 控制器引用缺失的动画 | 静默容忍(查无即跳过) | 引擎每次渲染重建逐条刷 `can't find animation`,且**转移目标状态未定义/条件为空**有连坐整个控制器失效的风险 | 移植工具自动剪掉死引用与非法转移(`fix_ported_controllers.py` 可对已移植包补跑) |
@@ -538,7 +550,8 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
 ### 4.4 网易独有增强(Java 做不到的)
 
 - **多皮肤整套差异化**(`skins`:逐皮肤换几何/材质/缩放,Java 只能换贴图);
-- **发光/描边/无剔除材质**(`material`,含 bloom 后处理);
+- **材质预设**(`material`:裁切/半透明/全亮发光/PBR,逐皮肤、逐材质键,描边与泛光后处理自动适配);
+- **不装光影也有 PBR**(LabPBR 法线/高光/自发光按前向光照近似);
 - 动画原生 `particle_effects` 关键帧(Java 完全不解析;`sound_effects` Java 侧按 wiki 可用,工具自动搬运);
 - 预览动作表(选择界面可切换多段展示动画,Java 只有单条 `preview_animation`);
 - 轮盘停止条件可编程(`extra_stop_expression`);
