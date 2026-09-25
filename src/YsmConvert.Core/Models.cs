@@ -68,6 +68,11 @@ public sealed class ConvertOptions
 {
     /// <summary>携带第三方模组联动动画(slashblade/parcool/...), 缺省不带; 枪械 tacz 动画缺省就带。</summary>
     public bool WithMods { get; set; }
+    /// <summary>
+    /// 转换 Java 自定义函数(functions/*.molang: fn.* 内联、音效 / ysm.sync / 键鼠改写、事件体与脚本控制器编进逐帧执行体)。
+    /// **实验性, 缺省关**: 关着时与支持它之前一样, fn.* 与音效调用置零、@player_init / @player_update / @sync 不转换。
+    /// </summary>
+    public bool JavaFunctions { get; set; }
     /// <summary>转换后跑资源包红线体检。</summary>
     public bool Validate { get; set; } = true;
     /// <summary>
@@ -124,6 +129,7 @@ public sealed class JobSpec
             ["options"] = new JsonObject
             {
                 ["withMods"] = Options.WithMods,
+                ["javaFunctions"] = Options.JavaFunctions,
                 ["validate"] = Options.Validate,
                 ["compactJson"] = Options.CompactJson,
                 ["writeCollections"] = Options.WriteCollections,

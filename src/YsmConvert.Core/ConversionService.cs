@@ -128,6 +128,7 @@ public sealed class ConversionService
                     Options = new ConvertOptions
                     {
                         WithMods = request.Options.WithMods,
+                        JavaFunctions = request.Options.JavaFunctions,
                         Validate = false,
                         CompactJson = request.Options.CompactJson,
                         WriteCollections = false,

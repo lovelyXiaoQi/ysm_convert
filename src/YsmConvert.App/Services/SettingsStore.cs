@@ -10,6 +10,8 @@ public sealed class AppSettings
     public bool IsComponentMode { get; set; } = true;
     public string ComponentName { get; set; } = "my_ysm_models";
     public bool WithMods { get; set; }
+    /// <summary>转换 Java 自定义函数(实验性, 缺省关)。</summary>
+    public bool JavaFunctions { get; set; }
     public bool ValidateAfter { get; set; } = true;
     public bool UseCollection { get; set; }
     public string CollectionDir { get; set; } = "";

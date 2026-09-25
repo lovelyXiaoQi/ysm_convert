@@ -220,6 +220,7 @@ internal sealed class McpServer
                    ("prefix", "string", "包名统一前缀(缺省用内核建议名: 拼音化 + 合集前缀)", false),
                    ("renames", "object", "逐包指定包名: {\"<Java 文件夹名>\": \"<包名>\"}", false),
                    ("withMods", "boolean", "携带第三方模组联动动画, 缺省 false", false),
+                   ("javaFunctions", "boolean", "转换 Java 自定义函数(实验性, 缺省 false: fn.* 与音效调用按 0 处理)", false),
                    ("validate", "boolean", "转换后跑资源包体检, 缺省 true", false),
                    ("pretty", "boolean", "产物 JSON 按 2 空格缩进(缺省 false = 压成一行, 体积约省 70%; 要逐行读产物、手工改 bug 时设 true)", false),
                    ("jobs", "integer", "同时转换的包数(缺省自动; 多个包总是每包一个内核进程)", false),
@@ -382,6 +383,7 @@ internal sealed class McpServer
             Options = new ConvertOptions
             {
                 WithMods = Bool(args["withMods"]) ?? false,
+                JavaFunctions = Bool(args["javaFunctions"]) ?? false,
                 Validate = Bool(args["validate"]) ?? true,
                 CompactJson = !(Bool(args["pretty"]) ?? false),
                 MaxParallel = Int(args["jobs"]) ?? 0,

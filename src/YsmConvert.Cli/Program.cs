@@ -28,6 +28,7 @@ internal static class Program
           --prefix <前缀>           包名统一加前缀(缺省用内核建议名: 拼音化 + 合集前缀)
           --rename <文件夹>=<包名>  逐包指定包名(可多次)
           --with-mods               携带第三方模组联动动画(slashblade/parcool/...; 枪械 tacz 动画缺省就带)
+          --java-functions          转换 Java 自定义函数(实验性, 缺省不转: fn.* 与音效调用按 0 处理)
           --no-validate             转换后不跑资源包体检
           --pretty                  产物 JSON 按 2 空格缩进(缺省压成一行: 体积约省 70%, 转换也更快)
           --jobs <N>                同时转换的包数(缺省自动: 逻辑核数的一半、最多 8, 再按可用内存封顶);
@@ -188,7 +189,7 @@ internal static class Program
     // ---------------------------------------------------------------- convert
     private static async Task<int> ConvertAsync(string[] args)
     {
-        var a = ParsedArgs.Parse(args, "json", "with-mods", "no-validate", "details", "pretty");
+        var a = ParsedArgs.Parse(args, "json", "with-mods", "java-functions", "no-validate", "details", "pretty");
         if (a.Positional.Count == 0) throw new ArgumentException("convert 需要至少一个 Java 包目录");
         var jobs = 0;
         if (a.Get("jobs") is { } jobsText && (!int.TryParse(jobsText, out jobs) || jobs < 1))
@@ -231,6 +232,7 @@ internal static class Program
             Options = new ConvertOptions
             {
                 WithMods = a.Has("with-mods"),
+                JavaFunctions = a.Has("java-functions"),
                 Validate = !a.Has("no-validate"),
                 CompactJson = !a.Has("pretty"),
                 MaxParallel = jobs,

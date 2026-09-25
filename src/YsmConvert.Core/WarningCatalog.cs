@@ -15,6 +15,7 @@ public static class WarningCatalog
     public const string PortTutorialDoc = "ysm-java-port-tutorial.md";
     public const string PackGuideDoc = "ysm-json-pack-guide.md";
     public const string AnimationMechanismDoc = "ysm-java-animation-mechanism.md";
+    public const string FunctionsDoc = "ysm-java-functions.md";
 
     /// <summary>molang 留痕类别(与 port_cli 的 molang.kind 一致)。</summary>
     public static readonly IReadOnlyList<string> MolangKinds =
@@ -51,6 +52,16 @@ public static class WarningCatalog
             case "norm":
                 return new("按 Java 语义规范化", "动画/控制器字段按 Java 的运行语义换算成基岩写法(循环长度、catmullrom 分段、过渡归属等), 无需处理。", AnimationMechanismDoc);
             case "skip":
+                if (Has(label, "不在脚本控制器里"))
+                    return new("脚本控制器函数用在别处", "ctrl.set_animation / set_beginning_transition_length / reset / indicate_reload 只在 @player_ctrl_ 脚本里有效, 别处调用 Java 同样什么都不做, 已删除, 无需处理。", FunctionsDoc);
+                if (Has(label, "debug_output"))
+                    return new("调试输出已删除", "query.debug_output 是 Java 的调试打印, 基岩没有对应, 已删除, 不影响动画。", FunctionsDoc);
+                if (Has(label, "Java 不发出"))
+                    return new("值位置的发出类调用", "音效 / ysm.sync 写在骨骼通道、转移条件或动画权重里时 Java 同样不发出(allowEmitting 为假), 已删除, 表现与 Java 一致; 要触发请写进 timeline 指令帧、控制器 on_entry 或事件函数。", FunctionsDoc);
+                if (label.StartsWith("ysm.defer", StringComparison.Ordinal))
+                    return new("defer 未支持", "ysm.defer 延迟事件尚未支持, 调用已删除, 对应的 @defer 处理函数在基岩不会执行。", FunctionsDoc);
+                if (Has(label, "事件尚未支持"))
+                    return new("函数事件未编译", "@defer 等事件处理函数尚未支持, 基岩侧不会执行这段函数; 依赖它的效果不会出现。", FunctionsDoc);
                 return new("Java 同样不挂载", "这个控制器在 Java 里也不会动作(非通道名或初始状态不存在), 转换时一并跳过, 与 Java 表现一致。", AnimationMechanismDoc);
             case "tick":
                 return new("每 tick 脚本动画", "Java 显式 0 长度的循环动画是\"每 tick 执行一次\"的脚本, 已换成 0.05 秒循环, 无需处理。", AnimationMechanismDoc);
@@ -73,7 +84,9 @@ public static class WarningCatalog
     private static bool IsRuntimeMapping(string label) =>
         Has(label, "主包运行层") || Has(label, "骨骼旋转回读") || Has(label, "query.mod.ysm_")
         || Has(label, "variable.ysm_env_") || Has(label, "variable.ysm_pb_") || Has(label, "variable.ysm_elytra_rot_")
-        || Has(label, "v.roaming");
+        || Has(label, "v.roaming")
+        // 自定义函数: 音效由主包宿主播放, 事件体 / 脚本控制器编进的逐帧执行体与初始化控制器由主包挂载
+        || Has(label, "主包音效宿主") || Has(label, "主包同步宿主") || Has(label, "逐帧执行体") || Has(label, "变量初始化控制器");
 
     private static Explanation ExplainConstant(string label)
     {
@@ -86,7 +99,9 @@ public static class WarningCatalog
         if (Has(label, "particle"))
             return new("molang 中性常量", "通道表达式里的 ysm.particle 基岩没有对应, 按 0 处理; 只有 timeline 里的 particle 调用会转成基岩 particle_effects 关键帧。", MolangMappingDoc);
         if (Has(label, "sound"))
-            return new("molang 中性常量", "play_sound/stop_sound 族在基岩表达式里没有对应, 按 0 处理; 动画音效请用 sound_effects 关键帧(转换时自动拷 ogg 并登记)。", MolangMappingDoc);
+            return new("自定义函数音效置零", "ysm.play_sound / stop_sound / stop_all_sounds 属于自定义函数(实验性功能, 缺省不转换), 按 0 处理; 需要时勾选「转换自定义函数(实验性)」重新转换, 由主组件音效宿主播放。动画 sound_effects 关键帧的音效不受影响(总会转换)。", FunctionsDoc);
+        if (Has(label, "ysm.sync") || Has(label, "ysm.keyboard") || Has(label, "ysm.mouse"))
+            return new("自定义函数调用置零", "ysm.sync / keyboard / mouse 属于自定义函数(实验性功能, 缺省不转换), 按 0 处理; 需要时勾选「转换自定义函数(实验性)」重新转换。", FunctionsDoc);
         if (Has(label, "ysm.bone_"))
             return new("molang 中性常量", "bone_pos/bone_scale/bone_pivot_abs/bone_color 等骨骼函数基岩没有对应, 按 0 处理; 只有 ysm.bone_rot('骨骼').x/y/z(骨骼名是字面量)能转成骨骼旋转回读。", MolangMappingDoc);
         if (Has(label, "effect_level") || Has(label, "enchantment_level") || Has(label, "relative_block_name"))
@@ -103,7 +118,7 @@ public static class WarningCatalog
         if (Has(label, "结构体成员"))
             return new("molang 置零", "返回结构体(Vec3)的函数再取成员 .x/.y/.z 基岩没有对应, 连同调用一起置 0; 其中 ysm.bone_rot('骨骼').x/y/z(骨骼名是字面量)已转成骨骼旋转回读, 剩下的是 bone_pos/bone_scale 或参数不是字面量的调用, 需要时重写动画。", MolangMappingDoc);
         if (label.StartsWith("fn.", StringComparison.Ordinal))
-            return new("自定义函数置零", "functions/*.molang 自定义函数(过程式脚本)基岩表达式里没有对应, 已置 0; 若动画依赖函数的返回值, 需要把函数逻辑手写成 molang 语句。", MolangMappingDoc);
+            return new("自定义函数置零", "自定义函数(functions/*.molang)是实验性功能, 缺省不转换, 调用按 0 处理; 依赖它的效果需要时勾选「转换自定义函数(实验性)」重新转换(命令行 --java-functions)。已开启仍出现这一条, 说明这个调用没能内联(函数不存在 / 函数文件解析失败 —— Java 同样得 null, 或递归 / 调用链超过 32 层)。", FunctionsDoc);
         if (label.StartsWith("tlm.", StringComparison.Ordinal))
             return new("车万女仆联动置零", "tlm.* 是车万女仆联动变量, 玩家模型上本来就取不到值, 置 0 与 Java 玩家侧一致, 一般无需处理。", MolangMappingDoc);
         if (Has(label, "引擎二进制无此名"))
@@ -144,7 +159,9 @@ public static class WarningCatalog
     {
         var t = text.TrimStart();
         if (t.Contains("脚本控制器", StringComparison.Ordinal) && t.Contains("未转换", StringComparison.Ordinal))
-            return new("脚本控制器未转换", "Java 每帧脚本控制器含计数器/随机数/非常量赋值或属于 main/use/swing/parallel 通道, 内核放弃自动展开; 该通道姿态需手工写成基岩动画控制器。", AnimationMechanismDoc);
+            return new("脚本控制器未转换", "Java 每帧脚本控制器属于 main/use/swing 等带内置状态机的通道(尚未支持), 或 set_animation 的动画名 / 循环类型不是常量, 内核放弃转换; 该通道姿态需手工写成基岩动画控制器。纯决策树的脚本总会展开成基岩控制器; 其余空白通道与并行通道的脚本要勾选「转换自定义函数(实验性)」才会编进逐帧执行体。", FunctionsDoc);
+        if (t.Contains("自定义函数", StringComparison.Ordinal) && t.Contains("实验性", StringComparison.Ordinal))
+            return new("自定义函数未转换(实验性)", "包里带 functions/*.molang 自定义函数, 这是实验性功能、缺省不转换: fn.* / 音效 / ysm.sync 调用按 0 处理, @player_init / @player_update / @sync 事件不执行。依赖它的效果(函数驱动的音效、计数器、脚本控制器等)需要时勾选「转换自定义函数(实验性)」重新转换(命令行 --java-functions)。", FunctionsDoc);
         if (t.Contains("缺失", StringComparison.Ordinal) && (t.Contains("动画", StringComparison.Ordinal) || t.Contains("几何", StringComparison.Ordinal) || t.Contains("贴图", StringComparison.Ordinal) || t.Contains("控制器", StringComparison.Ordinal) || t.Contains("图片", StringComparison.Ordinal)))
             return new("Java 包声明的文件不存在", "ysm.json 声明的文件在 Java 包里找不到(Java 同样加载失败), 已跳过; 补上文件后重新转换, 或从 ysm.json 删掉声明。", PortTutorialDoc);
         if (t.Contains("音频", StringComparison.Ordinal) || t.Contains("ogg", StringComparison.OrdinalIgnoreCase))

@@ -240,6 +240,21 @@ public class JobSpecTests
         Assert.False(node["options"]!["validate"]!.GetValue<bool>());
         Assert.True(node["options"]!["compactJson"]!.GetValue<bool>());       // 缺省压一行
         Assert.True(node["options"]!["writeCollections"]!.GetValue<bool>());  // 只有按包拆出的子任务才关
+        Assert.False(node["options"]!["javaFunctions"]!.GetValue<bool>());    // 自定义函数是实验性功能, 缺省不转
+    }
+
+    [Fact]
+    public void JavaFunctionsOptionReachesKernel()
+    {
+        var job = new JobSpec
+        {
+            Layout = new OutputLayout(@"C:\out", @"C:\out\x_bp", @"C:\out\x_rp"),
+            Packs = { new PackSpec { JavaDir = @"C:\java\p", Name = "p" } },
+            Options = new ConvertOptions { JavaFunctions = true },
+        };
+        var node = JsonNode.Parse(job.ToJson())!;
+        Assert.True(node["options"]!["javaFunctions"]!.GetValue<bool>());
+        Assert.False(new ConvertOptions().JavaFunctions);
     }
 
     [Fact]
@@ -494,6 +509,9 @@ public class WarningCatalogTests
         Assert.Equal("未知函数置零", WarningCatalog.ExplainMolang("func", "fn.foo(未知函数置零)").Category);
         Assert.Equal("脚本控制器未转换", WarningCatalog.ExplainLog("notice", "[!] 脚本控制器 a@player_ctrl_main.molang 未转换: 含计数器").Category);
         Assert.Equal("Java 包声明的文件不存在", WarningCatalog.ExplainLog("warn", "[WARN] 动画缺失: animations/x.json").Category);
+        // 内核 port_java_pack 的原话: 自定义函数(实验性)没开 / PBR 贴图缺失
+        Assert.Equal("自定义函数未转换(实验性)", WarningCatalog.ExplainLog("notice",
+            "[!] 自定义函数 3 个文件没有转换(实验性功能, 缺省关): fn.* / ysm.play_sound 等调用置零, @player_init / @player_update / @sync 不转换; 需要时开启转换自定义函数(转换器勾选, 命令行 --java-functions)").Category);
         Assert.Equal("音频未登记", WarningCatalog.ExplainValidation("warn", "x: 效果键 y 的定义 z 不在 sounds/sound_definitions.json").Category);
         Assert.NotNull(WarningCatalog.ExplainMolang("zero", "anything").Doc);
     }
@@ -504,7 +522,9 @@ public class WarningCatalogTests
     [InlineData("map", "ctrl.tac_hold_gun -> (query.mod.ysm_tac_hold_gun>0.5)", "主组件运行层提供")]
     [InlineData("const", "ctrl.parcool_state -> ''", "模组联动按未安装处理")]
     [InlineData("const", "ysm.perlin_noise(置常量)", "molang 中性常量")]
-    [InlineData("func", "ysm.stop_sound(置常量)", "molang 中性常量")]           // 旧内核的原始类别
+    [InlineData("func", "ysm.stop_sound(置常量)", "自定义函数音效置零")]         // 自定义函数(实验性)没开时的原始类别
+    [InlineData("func", "ysm.sync(置常量)", "自定义函数调用置零")]
+    [InlineData("func", "ysm.keyboard(置常量)", "自定义函数调用置零")]
     [InlineData("map", "entity_type -> 'player'", "molang 中性常量")]             // 手工传入的原始标签
     [InlineData("map", "weather -> query.mod.ysm_weather", "主组件运行层提供")]
     [InlineData("map", "ysm.bone_rot('HairB1').x -> 骨骼旋转回读变量", "主组件运行层提供")]
@@ -514,6 +534,17 @@ public class WarningCatalogTests
     [InlineData("func", "ysm.second_order(物理 → molang 状态积分)", "物理函数改写")]
     [InlineData("norm", "catmullrom 分段语义 Java(任一端) -> 基岩(出边)换算", "按 Java 语义规范化")]
     [InlineData("skip", "控制器 player.parallel_5(initial_state default 不存在, Java 侧永不动作)", "Java 同样不挂载")]
+    [InlineData("skip", "ctrl.set_animation(不在脚本控制器里, Java 同样什么都不做)", "脚本控制器函数用在别处")]
+    [InlineData("skip", "query.debug_output(调试输出, 基岩无对应)", "调试输出已删除")]
+    [InlineData("skip", "@defer on_defer@defer(事件尚未支持, Java 侧照常触发)", "函数事件未编译")]
+    [InlineData("skip", "ysm.play_sound(骨骼通道 / 条件里 Java 不发出)", "值位置的发出类调用")]
+    [InlineData("skip", "ysm.defer(延迟事件尚未支持, 本次调用删除)", "defer 未支持")]
+    [InlineData("map", "ysm.sync -> 主包同步宿主(请求计数器, 经服务端转发)", "主组件运行层提供")]
+    [InlineData("map", "ysm.keyboard -> 主包运行层按键状态 query.mod(本机玩家)", "主组件运行层提供")]
+    [InlineData("map", "ysm.play_sound(horn) -> 主包音效宿主(请求计数器)", "主组件运行层提供")]
+    [InlineData("map", "@player_ctrl_parallel_5 碰墙抬手@player_ctrl_parallel_5 -> 逐帧执行体 ysm_fx_frame(脚本 + 动画播放器状态机) + 控制器", "主组件运行层提供")]
+    [InlineData("map", "@player_init init@player_init -> 变量初始化控制器 on_entry", "主组件运行层提供")]
+    [InlineData("map", "fn.halo_battery_indicator -> 调用处内联(纯表达式)", "molang 映射")]
     [InlineData("tick", "每 tick 脚本动画(loop+显式 0 长度+timeline) -> 0.05s 循环", "每 tick 脚本动画")]
     public void ExplainsMolangByKernelWording(string kind, string label, string category) =>
         Assert.Equal(category, WarningCatalog.ExplainMolang(kind, label).Category);
@@ -521,6 +552,7 @@ public class WarningCatalogTests
     [Theory]
     [InlineData("基岩解析不了的表达式按 Java 口径置 0 / 删除(Java 同样解析失败): parallel0 timeline/0.0/1: 此处需要操作数, 遇到 ';' <- [;", "作者原文解析失败")]
     [InlineData("fn.move(自定义函数脚本, 基岩无对应)", "自定义函数置零")]
+    [InlineData("fn.missing(函数不存在, Java 同样返回 null)", "自定义函数置零")]
     [InlineData("tlm.is_sitting(无映射)", "车万女仆联动置零")]
     [InlineData("ysm.bone_pos(...).成员(结构体成员访问, 基岩无对应, 连同调用一起置零)", "molang 置零")]
     [InlineData("query.foo(引擎二进制无此名)", "基岩没有的查询")]

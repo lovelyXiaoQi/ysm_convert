@@ -193,8 +193,12 @@
                         <CheckBox IsChecked="{Binding ValidateAfter}" Margin="0,0,0,4">
                             <TextBlock Style="{StaticResource OptionText}" Text="转换后运行资源包红线体检 (推荐)" />
                         </CheckBox>
-                        <CheckBox IsChecked="{Binding WithMods}">
+                        <CheckBox IsChecked="{Binding WithMods}" Margin="0,0,0,4">
                             <TextBlock Style="{StaticResource OptionText}" Text="携带第三方模组联动动画 (slashblade / parcool …, 基岩无对应物品, 一般不勾; 枪械动画总会带上)" />
+                        </CheckBox>
+                        <CheckBox IsChecked="{Binding JavaFunctions}"
+                                  ToolTip="functions/*.molang 里的 fn.* 调用内联, ysm.play_sound / ysm.sync / 键鼠改成主组件宿主请求, @player_init / @player_update / @sync 与脚本控制器编进逐帧执行体。仍在完善(音效随动画停止等与 Java 有出入), 不勾时与之前一样把这些调用置零。">
+                            <TextBlock Style="{StaticResource OptionText}" Text="转换自定义函数 (实验性: functions/*.molang 的 fn.* / 音效 / 事件脚本; 不勾则按 0 处理)" />
                         </CheckBox>
                     </StackPanel>
                 </ScrollViewer>

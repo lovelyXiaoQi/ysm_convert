@@ -79,6 +79,7 @@ public sealed class MainViewModel : ObservableObject
     public bool IsProjectMode { get => !IsComponentMode; set => IsComponentMode = !value; }
     public string ComponentName { get => _settings.ComponentName; set { if (_settings.ComponentName != value) { _settings.ComponentName = value; OnPropertyChanged(); } } }
     public bool WithMods { get => _settings.WithMods; set { if (_settings.WithMods != value) { _settings.WithMods = value; OnPropertyChanged(); } } }
+    public bool JavaFunctions { get => _settings.JavaFunctions; set { if (_settings.JavaFunctions != value) { _settings.JavaFunctions = value; OnPropertyChanged(); } } }
     public bool ValidateAfter { get => _settings.ValidateAfter; set { if (_settings.ValidateAfter != value) { _settings.ValidateAfter = value; OnPropertyChanged(); } } }
     public bool UseCollection { get => _settings.UseCollection; set { if (_settings.UseCollection != value) { _settings.UseCollection = value; OnPropertyChanged(); } } }
     public string CollectionDir { get => _settings.CollectionDir; set { if (_settings.CollectionDir != value) { _settings.CollectionDir = value; OnPropertyChanged(); } } }
@@ -327,7 +328,7 @@ public sealed class MainViewModel : ObservableObject
             Layout = layout,
             Packs = packs,
             Collections = collections,
-            Options = new ConvertOptions { WithMods = WithMods, Validate = ValidateAfter, CompactJson = CompactJson },
+            Options = new ConvertOptions { WithMods = WithMods, JavaFunctions = JavaFunctions, Validate = ValidateAfter, CompactJson = CompactJson },
         };
         var byName = enabled.ToDictionary(p => p.Name.Trim());
         foreach (var p in enabled)
