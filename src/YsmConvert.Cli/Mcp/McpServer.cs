@@ -235,7 +235,7 @@ internal sealed class McpServer
             Schema(("javaDefaultDir", "string", "Java 版 assets/ysm/builtin/default 目录", true), ("out", "string", "YSM 主组件工程根目录", false), ("withMods", "boolean", "携带模组联动动画", false))),
         Tool("ysm_explain", "解释一条内核告警/体检文本或 molang 留痕标签: 它意味着什么、要不要处理、该查哪份文档。",
             Schema(("text", "string", "告警文本或 molang 标签", true), ("kind", "string", "molang 类别(map/const/zero/func/warn/lower/norm/skip/tick)或 log/validation, 缺省自动", false))),
-        Tool("ysm_docs", "随附的 YSM 移植文档(格式速查/移植教程/molang 映射清单/动画机制对照)。不带参数列出文档; name 读整篇; name+section 读某个标题下的章节; query 全文检索。",
+        Tool("ysm_docs", "随附的 YSM 移植文档(格式速查/移植教程/molang 映射清单/动画机制对照/自定义函数/枪械联动协议)。不带参数列出文档; name 读整篇; name+section 读某个标题下的章节; query 全文检索。",
             Schema(("name", "string", "文档文件名(如 ysm-java-molang-mapping.md)", false), ("section", "string", "标题包含的文字", false), ("query", "string", "关键字检索", false))),
         Tool("ysm_last_report", "上一次 convert/validate/fix 的完整报告(文本 + JSON)。",
             Schema(("details", "boolean", "带全部日志行", false))),
