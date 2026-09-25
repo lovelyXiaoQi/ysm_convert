@@ -91,7 +91,7 @@ public static class WarningCatalog
     private static Explanation ExplainConstant(string label)
     {
         if (Has(label, "ctrl.tac_"))
-            return new("TACZ 枪 ID 未接入", "ctrl.tac_gun_id / ctrl.tac_fire_mode 按空串处理: 基岩枪械模组(Eplus军械库等)的联动协议里没有枪 ID 与射击模式, 依赖它们的判定在基岩不会成立。其余 ctrl.tac_*(持枪/枪种/开火/瞄准/换弹/近战/拔枪)由主组件运行层提供。", MolangMappingDoc);
+            return new("TACZ 枪 ID 未接入", "ctrl.tac_gun_id / ctrl.tac_fire_mode 按空串处理: YSM 主组件暂未读取枪械联动协议里预留的枪 ID(gun_id), 射击模式协议里没有, 依赖它们的判定(含逐枪动画)在基岩不会成立。其余 ctrl.tac_*(持枪/枪种/开火/瞄准/换弹/近战/拔枪)由主组件运行层提供。", MolangMappingDoc);
         if (Has(label, "riptide"))
             return new("molang 中性常量", "基岩没有激流(三叉戟冲刺)查询, ctrl.riptide / ysm.is_riptide 按 0 处理, 激流姿态在基岩不会出现。", MolangMappingDoc);
         if (Has(label, "ctrl."))
@@ -162,6 +162,10 @@ public static class WarningCatalog
             return new("脚本控制器未转换", "Java 每帧脚本控制器属于 main/use/swing 等带内置状态机的通道(尚未支持), 或 set_animation 的动画名 / 循环类型不是常量, 内核放弃转换; 该通道姿态需手工写成基岩动画控制器。纯决策树的脚本总会展开成基岩控制器; 其余空白通道与并行通道的脚本要勾选「转换自定义函数(实验性)」才会编进逐帧执行体。", FunctionsDoc);
         if (t.Contains("自定义函数", StringComparison.Ordinal) && t.Contains("实验性", StringComparison.Ordinal))
             return new("自定义函数未转换(实验性)", "包里带 functions/*.molang 自定义函数, 这是实验性功能、缺省不转换: fn.* / 音效 / ysm.sync 调用按 0 处理, @player_init / @player_update / @sync 事件不执行。依赖它的效果(函数驱动的音效、计数器、脚本控制器等)需要时勾选「转换自定义函数(实验性)」重新转换(命令行 --java-functions)。", FunctionsDoc);
+        if (t.Contains("PBR", StringComparison.Ordinal) && t.Contains("缺失", StringComparison.Ordinal))
+            return new("PBR 贴图缺失", "ysm.json 声明的 PBR 法线/高光贴图在 Java 包里找不到(Java 光影包同样拿不到), 这项声明已从产物 ysm.json 去掉, 按没有这张图处理; 补上文件后重新转换。", PackGuideDoc);
+        if (t.Contains("滑铲动画缺失", StringComparison.Ordinal))
+            return new("基线滑铲动画缺失", "生成 java_default 基线时找不到旧版枪械兼容的滑铲动画(YSM 工程的 ysm_rp/animations/compat/ysm_tacz), 滑铲这个基岩扩展状态没有默认动画; 只在 YSM 主组件工程里跑 baseline 时出现, 转换普通模型包不受影响。", AnimationMechanismDoc);
         if (t.Contains("缺失", StringComparison.Ordinal) && (t.Contains("动画", StringComparison.Ordinal) || t.Contains("几何", StringComparison.Ordinal) || t.Contains("贴图", StringComparison.Ordinal) || t.Contains("控制器", StringComparison.Ordinal) || t.Contains("图片", StringComparison.Ordinal)))
             return new("Java 包声明的文件不存在", "ysm.json 声明的文件在 Java 包里找不到(Java 同样加载失败), 已跳过; 补上文件后重新转换, 或从 ysm.json 删掉声明。", PortTutorialDoc);
         if (t.Contains("音频", StringComparison.Ordinal) || t.Contains("ogg", StringComparison.OrdinalIgnoreCase))

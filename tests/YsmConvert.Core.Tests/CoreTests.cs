@@ -512,6 +512,9 @@ public class WarningCatalogTests
         // 内核 port_java_pack 的原话: 自定义函数(实验性)没开 / PBR 贴图缺失
         Assert.Equal("自定义函数未转换(实验性)", WarningCatalog.ExplainLog("notice",
             "[!] 自定义函数 3 个文件没有转换(实验性功能, 缺省关): fn.* / ysm.play_sound 等调用置零, @player_init / @player_update / @sync 不转换; 需要时开启转换自定义函数(转换器勾选, 命令行 --java-functions)").Category);
+        Assert.Equal("PBR 贴图缺失", WarningCatalog.ExplainLog("warn", "[WARN] 贴图 textures/skin.png 的 PBR specular 贴图缺失, 已从 ysm.json 去掉这项声明: textures/pbr/skin_s.png").Category);
+        // 基线(baseline)里的滑铲默认动画缺失不是"Java 包声明的文件不存在"
+        Assert.Equal("基线滑铲动画缺失", WarningCatalog.ExplainLog("warn", "[WARN] 旧版枪械兼容的滑铲动画缺失, 没有生成基岩扩展状态的默认动画").Category);
         Assert.Equal("音频未登记", WarningCatalog.ExplainValidation("warn", "x: 效果键 y 的定义 z 不在 sounds/sound_definitions.json").Category);
         Assert.NotNull(WarningCatalog.ExplainMolang("zero", "anything").Doc);
     }
