@@ -46,6 +46,8 @@ public static class WarningCatalog
             case "map":
                 if (IsConstantReplacement(label))
                     return ExplainConstant(label);
+                if (IsMaidRuntimeMapping(label))
+                    return new("车万女仆运行层提供", "女仆身份(ysm.is_maid / is_player / entity_type)与女仆坐下(tlm.is_sitting)由网易版车万女仆写在套着这个模型的女仆身上; 玩家身上恒为缺省值(不是女仆、没坐下), 与 Java 玩家侧一致, 无需处理。", MolangMappingDoc);
                 if (IsRuntimeMapping(label))
                     return new("主组件运行层提供", "这个 Java 量由 YSM 主组件运行时逐帧/逐 tick 提供真值(视角/运动量/天气/血量/露天/roaming 存档同步/药水附魔探针/骨骼旋转回读等), 无需处理; 产物要与同期或更新的 YSM 主组件一起使用。", MolangMappingDoc);
                 return new("molang 映射", "按映射表完成的等价替换, 无需处理。", MolangMappingDoc);
@@ -81,6 +83,9 @@ public static class WarningCatalog
         return System.Text.RegularExpressions.Regex.IsMatch(replacement, @"^-?[0-9]+(?:\.[0-9]+)?$");
     }
 
+    private static bool IsMaidRuntimeMapping(string label) =>
+        Has(label, "query.mod.ysm_is_maid") || Has(label, "query.mod.ysm_tlm_");
+
     private static bool IsRuntimeMapping(string label) =>
         Has(label, "主包运行层") || Has(label, "骨骼旋转回读") || Has(label, "query.mod.ysm_")
         || Has(label, "variable.ysm_env_") || Has(label, "variable.ysm_pb_") || Has(label, "variable.ysm_elytra_rot_")
@@ -96,6 +101,8 @@ public static class WarningCatalog
             return new("molang 中性常量", "基岩没有激流(三叉戟冲刺)查询, ctrl.riptide / ysm.is_riptide 按 0 处理, 激流姿态在基岩不会出现。", MolangMappingDoc);
         if (Has(label, "ctrl."))
             return new("模组联动按未安装处理", "这是 Java 端某个模组(跑酷/拔刀剑/背包/乐器等)的联动变量, 按\"该模组没装\"的缺省值处理(字符串 ''、数值 0); 基岩没有这个模组, 对应动画不会触发。", MolangMappingDoc);
+        if (label.StartsWith("tlm.", StringComparison.Ordinal))
+            return new("车万女仆联动按未安装处理", "tlm.* 里网易版车万女仆没有对应数据的量(好感度、任务、日程、背包、棋局等)按 Java 没装女仆模组时的缺省值处理(is_entity 为真、gomoku_rank 为 1、字符串 ''、其余 0); 女仆坐下 tlm.is_sitting 另由女仆运行层提供。", MolangMappingDoc);
         if (Has(label, "particle"))
             return new("molang 中性常量", "通道表达式里的 ysm.particle 基岩没有对应, 按 0 处理; 只有 timeline 里的 particle 调用会转成基岩 particle_effects 关键帧。", MolangMappingDoc);
         if (Has(label, "sound"))
@@ -106,7 +113,7 @@ public static class WarningCatalog
             return new("molang 中性常量", "bone_pos/bone_scale/bone_pivot_abs/bone_color 等骨骼函数基岩没有对应, 按 0 处理; 只有 ysm.bone_rot('骨骼').x/y/z(骨骼名是字面量)能转成骨骼旋转回读。", MolangMappingDoc);
         if (Has(label, "effect_level") || Has(label, "enchantment_level") || Has(label, "relative_block_name"))
             return new("molang 中性常量", "药水/附魔/相对方块查询的参数不是常量, 登记不成主组件运行层探针, 按旧策略置常量(等级 0 / 方块名 ''); 改成字面量参数后重新转换。", MolangMappingDoc);
-        return new("molang 中性常量", "Java 专有量在基岩没有对应, 已按语义中性常量处理(如 is_maid = 0、attack_speed 取原版玩家默认值 4); 动画里依赖它变化的效果在基岩不会出现, 一般无需处理。完整清单见映射文档第五节。", MolangMappingDoc);
+        return new("molang 中性常量", "Java 专有量在基岩没有对应, 已按语义中性常量处理(如 biome_category 为空串、attack_speed 取原版玩家默认值 4); 动画里依赖它变化的效果在基岩不会出现, 一般无需处理。完整清单见映射文档第五节。", MolangMappingDoc);
     }
 
     private static Explanation ExplainZero(string label)
@@ -120,7 +127,7 @@ public static class WarningCatalog
         if (label.StartsWith("fn.", StringComparison.Ordinal))
             return new("自定义函数置零", "自定义函数(functions/*.molang)是实验性功能, 缺省不转换, 调用按 0 处理; 依赖它的效果需要时勾选「转换自定义函数(实验性)」重新转换(命令行 --java-functions)。已开启仍出现这一条, 说明这个调用没能内联(函数不存在 / 函数文件解析失败 —— Java 同样得 null, 或递归 / 调用链超过 32 层)。", FunctionsDoc);
         if (label.StartsWith("tlm.", StringComparison.Ordinal))
-            return new("车万女仆联动置零", "tlm.* 是车万女仆联动变量, 玩家模型上本来就取不到值, 置 0 与 Java 玩家侧一致, 一般无需处理。", MolangMappingDoc);
+            return new("车万女仆联动置零", "这个 tlm.* 不在车万女仆联动的已知绑定里(可能是新版 Java 女仆模组新增的名字或作者笔误), 已置 0; 玩家模型上本来就取不到女仆的值, 一般无需处理。", MolangMappingDoc);
         if (Has(label, "引擎二进制无此名"))
             return new("基岩没有的查询", "网易基岩引擎没有这个查询(引用它会让整份文件被拒载), 已置 0; 对照映射文档改写成基岩有的查询。", MolangMappingDoc);
         if (Has(label, "残缺前缀"))
