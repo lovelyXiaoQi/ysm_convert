@@ -173,6 +173,8 @@ public static class WarningCatalog
             return new("PBR 贴图缺失", "ysm.json 声明的 PBR 法线/高光贴图在 Java 包里找不到(Java 光影包同样拿不到), 这项声明已从产物 ysm.json 去掉, 按没有这张图处理; 补上文件后重新转换。", PackGuideDoc);
         if (t.Contains("滑铲动画缺失", StringComparison.Ordinal))
             return new("基线滑铲动画缺失", "生成 java_default 基线时找不到旧版枪械兼容的滑铲动画(YSM 工程的 ysm_rp/animations/compat/ysm_tacz), 滑铲这个基岩扩展状态没有默认动画; 只在 YSM 主组件工程里跑 baseline 时出现, 转换普通模型包不受影响。", AnimationMechanismDoc);
+        if (t.Contains("源音频缺失", StringComparison.Ordinal))
+            return new("Java 包缺音频文件", "动画 sound_effects 关键帧引用的音频在 Java 包的音频目录里找不到(Java 同样不出声, 多见于从别的包整份拷来的动画), 这些关键帧已删掉、不登记, 表现与 Java 一致; 要出声就把 ogg 补进 Java 包的 sounds 目录后重新转换。", PackGuideDoc);
         if (t.Contains("缺失", StringComparison.Ordinal) && (t.Contains("动画", StringComparison.Ordinal) || t.Contains("几何", StringComparison.Ordinal) || t.Contains("贴图", StringComparison.Ordinal) || t.Contains("控制器", StringComparison.Ordinal) || t.Contains("图片", StringComparison.Ordinal)))
             return new("Java 包声明的文件不存在", "ysm.json 声明的文件在 Java 包里找不到(Java 同样加载失败), 已跳过; 补上文件后重新转换, 或从 ysm.json 删掉声明。", PortTutorialDoc);
         if (t.Contains("音频", StringComparison.Ordinal) || t.Contains("ogg", StringComparison.OrdinalIgnoreCase))
@@ -199,6 +201,8 @@ public static class WarningCatalog
     {
         if (text.Contains("缺 entities 文件夹", StringComparison.Ordinal))
             return new("行为包不会被挂载", "网易按 entities 文件夹识别行为包, 缺它时 MC Studio 测试与正式游戏只挂资源包, 模型不会出现在选择界面(MCDK 调试测不出来); 点「修复产物」或重新转换会补上 entities/.gitkeep。", PackGuideDoc);
+        if (text.Contains("同类项合并", StringComparison.Ordinal))
+            return new("引擎同类项合并", "网易引擎会把加法里只差比较常量的两项(如 (v.a==1?x:0) + (v.a==2?x:0))当成同一项合并: 第一项翻倍、其余归零, 动作幅度翻倍或整段消失; 用 ysm_fix 重跑修复规则(自动改写成等价的 (v.a-1)==0), 只差在字符串比较上的需手工改结构。", MolangMappingDoc);
         if (text.Contains("sound_definitions", StringComparison.Ordinal) || text.Contains("sound_effect", StringComparison.Ordinal))
             return new("音频未登记", "效果键的定义不在 sounds/sound_definitions.json 或没在 ysm.json 的 files.player.sound_effect 登记, 该音效无声; 检查 ogg 是否随 Java 包一起提供。", PackGuideDoc);
         if (text.Contains("catmullrom", StringComparison.OrdinalIgnoreCase))

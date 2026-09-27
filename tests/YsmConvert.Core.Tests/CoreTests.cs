@@ -515,6 +515,8 @@ public class WarningCatalogTests
         Assert.Equal("PBR 贴图缺失", WarningCatalog.ExplainLog("warn", "[WARN] 贴图 textures/skin.png 的 PBR specular 贴图缺失, 已从 ysm.json 去掉这项声明: textures/pbr/skin_s.png").Category);
         // 基线(baseline)里的滑铲默认动画缺失不是"Java 包声明的文件不存在"
         Assert.Equal("基线滑铲动画缺失", WarningCatalog.ExplainLog("warn", "[WARN] 旧版枪械兼容的滑铲动画缺失, 没有生成基岩扩展状态的默认动画").Category);
+        // 动画引用的音频 Java 包里没有(从别的包拷来的动画): 不是"音频三件套"缺一项
+        Assert.Equal("Java 包缺音频文件", WarningCatalog.ExplainLog("notice", "[!] 源音频缺失 1 个(Java 同样不出声), 引用它们的 sound_effects 关键帧 2 条已删掉、不登记: otoko_wa_tsurai_yo").Category);
         Assert.Equal("音频未登记", WarningCatalog.ExplainValidation("warn", "x: 效果键 y 的定义 z 不在 sounds/sound_definitions.json").Category);
         Assert.NotNull(WarningCatalog.ExplainMolang("zero", "anything").Doc);
     }
@@ -602,6 +604,7 @@ public class WarningCatalogTests
     [InlineData("pack: sound_effects 效果键 ysm_snd_x 未在 ysm.json 的 files.player.sound_effect 登记(无声)", "音频未登记")]
     [InlineData("a/b.json animations/x: 未转换的 Java 专有 token: ysm.foo", "Java 写法残留")]
     [InlineData("a/b.json animations/x: 基岩解析不了的 molang(整份文件拒载): x", "molang 语法红线")]
+    [InlineData("a/b.json [animation.x] bones/RightArm/rotation/1.0/post/0: 引擎会把加法里只差比较常量的项当同类项合并(第一项翻倍、其余归零), 应改写成 (x-常量)==0: (v.qh==1?(10) : 0) + (v.qh==2?(10) : 0) -> ((v.qh-1)==0?(10) : 0) + ((v.qh-2)==0?(10) : 0)", "引擎同类项合并")]
     [InlineData("行为包 my_models_bp: 缺 entities 文件夹, 网易按它识别行为包 —— 没有它 MC Studio 测试与正式游戏都不挂载这个行为包, 模型不会出现在选择界面(MCDK 按 manifest 建联接, 测不出来); 修复(fix)或重新转换会补上 entities/.gitkeep(D:\\out\\my_models_bp)", "行为包不会被挂载")]
     public void ExplainsValidationByKernelWording(string text, string category) =>
         Assert.Equal(category, WarningCatalog.ExplainValidation("error", text).Category);
