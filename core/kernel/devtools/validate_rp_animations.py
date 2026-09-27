@@ -254,6 +254,23 @@ def _CheckMolangPrecedence(slots, where, path, errors, warnings):
                 where, molang_syntax.FormatSlotPath(slotPath), text[:80], newText[:90]))
 
 
+def _CheckMolangLikeTerms(slots, where, path, errors, warnings):
+    """引擎的同类项合并缺陷(见 molang_syntax.SeparateLikeTermComparisons 注): 加法里同一变量跟不同常量比较的项会被当成
+    同一项(第一项翻倍、其余归零)。移植/自有产物按错误拦(移植与修复工具已改写, 残留即回归), 兼容资源只提示;
+    字符串比较没法改写, 查出来一律报"""
+    sink = warnings if (os.sep + "compat" + os.sep) in path else errors
+    for slotPath, container, key, _mode in slots:
+        text = molang_syntax.SlotText(container, key, slotPath)
+        newText, count = molang_syntax.SeparateLikeTermComparisons(text)
+        if count:
+            sink.append(u"{} {}: 引擎会把加法里只差比较常量的项当同类项合并(第一项翻倍、其余归零), 应改写成 (x-常量)==0: "
+                        u"{} -> {}".format(where, molang_syntax.FormatSlotPath(slotPath), text[:80], newText[:90]))
+            continue
+        for left, right in molang_syntax.LikeTermCollisions(text):
+            sink.append(u"{} {}: 引擎会把加法里只差比较字面量的两项当同类项合并(字符串比较改写不了, 需手工改结构): "
+                        u"{} + {}".format(where, molang_syntax.FormatSlotPath(slotPath), left[:60], right[:60]))
+
+
 def ValidateAnimationFile(path, errors, warnings):
     try:
         data = _LoadJson(path)
@@ -329,6 +346,7 @@ def ValidateAnimationFile(path, errors, warnings):
         _CheckMolangStrings(body, where, errors, warnings)
         _CheckMolangSyntax(molang_syntax.AnimationMolangSlots(body), where, errors)
         _CheckMolangPrecedence(molang_syntax.AnimationMolangSlots(body), where, path, errors, warnings)
+        _CheckMolangLikeTerms(molang_syntax.AnimationMolangSlots(body), where, path, errors, warnings)
 
 
 def ValidateControllerFile(path, errors, warnings):
@@ -383,6 +401,7 @@ def ValidateControllerFile(path, errors, warnings):
         _CheckMolangStrings(body, where, errors, warnings)
         _CheckMolangSyntax(molang_syntax.ControllerMolangSlots(body), where, errors)
         _CheckMolangPrecedence(molang_syntax.ControllerMolangSlots(body), where, path, errors, warnings)
+        _CheckMolangLikeTerms(molang_syntax.ControllerMolangSlots(body), where, path, errors, warnings)
 
 
 def _CollectFiles(subDir, packs):

@@ -245,9 +245,12 @@ Java 的 `#minecraft:swords` 这类原版 tag **在基岩不存在**(基岩是�
 > 2026-09-18 起,`weather` `is_open_air` `dimension_name` `air_supply` `block_light`/`sky_light` `hit_target_id/type`
 > `is_fishing` `ladder_facing` `frozen_ticks` `texture_name` `shoot_item_id` `elytra_rot_x/y/z` `fps`
 > `first_person_mod_hide` 以及函数 `effect_level` `equipped_enchantment_level` `relative_block_name(_any)` **不再是常量**,
-> 由主包运行层给真值(第七节)。下面是仍然置常量的:
+> 由主包运行层给真值(第七节)。2026-09-26 起 `is_maid` / `is_player` / `entity_type` 同样不再是常量:网易版车万女仆给女仆套
+> YSM 模型时在女仆身上写 `query.mod.ysm_is_maid = 1`(主包注册缺省 0),三者分别映射成 `query.mod.ysm_is_maid`、
+> `(query.mod.ysm_is_maid>0.5?0.0:1.0)`、`(query.mod.ysm_is_maid>0.5?'maid':'player')`(Java 对女仆返回 `'maid'`)。
+> 下面是仍然置常量的:
 
-`biome_category`('') `is_player`(1) `is_maid`(0) `entity_type`('player')
+`biome_category`('')
 `is_riptide`/`ctrl.riptide`(0,基岩无激流查询) `has_any_curios`(0)
 `arrow_count`/`stinger_count`(0,基岩玩家身上不插箭) `yya`(0) `is_spectral_arrow`(0,基岩没有光灵箭)
 `in_shield_block_cooldown`(0) `swinging_arm`(0=主手) 鹦鹉四件(0)
@@ -282,7 +285,7 @@ Java 的 `#minecraft:swords` 这类原版 tag **在基岩不存在**(基岩是�
 
 | Java 写法 | 处理 |
 |------|------|
-| `tlm.*`(车万女仆联动值) / `args.*`(自定义函数参数) | Java CustomMolangParser 注册 `ysm/ctrl/fn/tlm/args` 五个前缀,全部拦截:`tlm.x`/`args.x` 置零,`tlm.f()` 同 `fn.*` 置零告警(builtin 13_matured 48 处 `tlm.is_sitting`,漏一处整份文件作废) |
+| `tlm.*`(车万女仆联动值) / `args.*`(自定义函数参数) | Java CustomMolangParser 注册 `ysm/ctrl/fn/tlm/args` 五个前缀,全部拦截(漏一处整份文件作废):`tlm.is_sitting`(builtin 13_matured 48 处)→ `query.mod.ysm_tlm_is_sitting`(网易版车万女仆的运行层写在坐下的女仆身上,玩家恒 0);其余 `tlm.x` 取 Java 没装女仆模组时的缺省绑定(`is_entity` 1、`gomoku_rank` 1、`task_id`/`schedule`/`activity`/`game_statue`/`backpack_type`/`show_item` 为 `''`,其余 0,`port_java_pack._TLM_NAME_MAP`);表外的 `tlm.x`、`args.x` 置零,`tlm.f()` 同 `fn.*` 置零告警 |
 | `true` / `false` 关键字 | Java 词法分析器当关键字(=1/0);基岩是否认无证据(原版资源零使用)→ `1.0`/`0.0`(只改 JSON 字符串内、molang 单引号串外) |
 | `(a)(b)` / `2(b)` | Java 解析器 LPAREN 分支 = **隐式乘法**;基岩当非法调用 → 补显式 `*` |
 | `{表达式}` 当值用 | Java 解析器 LBRACE 分支 = **执行域**(`ExecutionScopeExpression`),求值返回最后一条表达式的值 —— 作者拿它当括号用(末影龙娘拉弓控制器的松弦转移 `{A}&&{B}&&v.bow_charge==1`);基岩的块只收以 `;` 结尾的语句,整条拒载(早先被守卫落成 0,松弦动画永远不播)→ 块里(连同嵌套块)既无 `;` 也无赋值时换成圆括号(`port_java_pack.RewriteValueScopes`),带语句的块(`q.x ? {v.a = 1;}`、循环体)原样 |
@@ -316,6 +319,17 @@ direct-variable reference`):按 Java 优先级、剥掉括号后,左侧是变量
 `EvalMolangExpression` 在带分号的语句里放行 `return (1 ? a : b) ?? 5;`,但资源包文件(旧版语义)连语句形式也拒载
 (语义探针文件因这一条整份作废),`molang_syntax` 按资源包口径一律判非法。移植产物里的 `??` 只有工具生成的
 "变量 ?? 常量"形态(作者原文的 `??` 移植期已降级)。
+
+**加法里的"同类项合并"**(2026-09-27 实机,酒狐 01 收刀时右臂甩到背后):引擎编译时把同一个 `+` 的两个直接操作数
+当同类项合并(`A + A` → 2 倍的 A),而它判"相同"时**忽略比较运算(`== != < <= > >=`)里的字面量**(数字、字符串,
+在哪一侧都一样):`(v.q==1?(15):0) + (v.q==2?(15):0)` 在 q=1 得 30、q=2 得 0(Java 都得 15)。`EvalMolangExpression`
+与动画骨骼通道同样中招;变量(`v.`/`t.`、带 `??` 的)中招,查询(`q.`)不中;`A + 0 + B`、`A + (B + 0)`、乘 1、
+`A - (0 - B)` 先被规约成 `A + B` 再合并;只看同一个 `+` 的两侧(`1 + A + B` 正常,`1 + (A + B)`、`math.max(A + B, 0)`、
+`A + B + C` 里的 A、B 中招);分支值不同、else 不同、`||` / `&&` / `*` / `-` 连接的不中。Java 默认模型 `swing:sword`
+这类连段动画(`(v.qh==1?(a)) + (v.qh==2?(a)) + (v.jump?(a))`)在两段同值的关键帧上第一段翻倍、第二段归零。
+比较常量挪进减法后判得开:移植 / 基线 / 修复工具收尾跑 `molang_syntax.SeparateLikeTermComparisons`,把会被合并的
+两项里跟非零数字的比较改写成等价的 `(x-常量)==0`(常量在左侧时 `(常量-x)==0`),体检对残留报错;只差在字符串比较上
+的改写不了,体检报出来手工改结构。
 
 **已实机定标(2026-08, 2026-09-18 更正)**:网易 `query.yaw_speed` 0~290 间歇归零(平均跳变 21.7),替换为 `query.mod.ysm_yaw_speed`(主包差分+EMA 0.35 平滑,度/秒)。当时同样判"不可用"的 `query.ground_speed`(走路中帧间 0↔60
 乱跳)是 SetMotion(3.0) 驱动采样的假象(服务端纠偏把客户端拉回),原生值实测正是 20×每 tick 水平位移;Java 运动量现由主包按 Java

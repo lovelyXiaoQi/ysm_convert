@@ -855,6 +855,270 @@ def ExplicitControllerPrecedence(body):
     return ExplicitPrecedenceInSlots(ControllerMolangSlots(body))
 
 
+# ---- 引擎"合并同类项"缺陷(2026-09-27 实机, EvalMolangExpression 与动画骨骼通道同一个编译器) ----
+# 网易引擎编译 molang 时把同一个 `+` 的左右操作数当同类项合并(`A + A` → 2 倍的 A), 可它判"相同"的口径**忽略比较运算
+# (== != < <= > >=)里的字面量**(数字、字符串, 在左在右都一样): `(v.q==1?(15) : 0) + (v.q==2?(15) : 0)` 被算成 2 倍的
+# 第一项 —— q=1 得 30、q=2 得 0(Java 都得 15)。实测边界: 只合并同一个 `+` 的两个直接操作数(`1 + A + B` 正常、
+# `1 + (A + B)` / `math.max(A + B, 0)` / `A + B + C` 的 A、B 中招); `A + 0 + B`、`A - (0 - B)`、乘 1 先被规约成 `A + B`
+# 再合并; 变量(v./t.、带 ?? 的)中招, 查询(q.)不中; 分支值不同、else 不同、嵌套三元、`||` / `&&` / `*` / `-` 不中;
+# 比较常量挪进减法(`(v.q-1)==0`)后判得开。实例: Java 默认模型 swing:sword 的连段写法
+# `(v.qh==1?(a)) + (v.qh==2?(a)) + (v.jump?(a))`, 两段同值的关键帧第一刀翻倍、第二刀归零 —— 收刀时右臂转 -170°
+# 甩到背后(酒狐 01 实机报告)。
+# 对策(SeparateLikeTermComparisons): 找出引擎口径下会被合并的操作数对(同一个 `+` 的左右两边, 按引擎的规约先剥掉
+# `+0` / `*1` 包装、`A-(0-B)` / `A-(-B)` 当 `A+B`; 屏蔽比较字面量后相同而实际不同), 这两项里跟非零数字比较的项改写成
+# 常量进减法的等价形式 `(X-C) op 0`(字面量在左侧时 `(C-X) op 0`)—— 有限浮点数上逐值等价。查询实测不中, 但改写等价,
+# 不单独区分; 不是同一个 `+` 两侧的项(`&&` / `||` 连接、`1 + A + B`、分支值不同)不动。字符串没法相减, 由
+# LikeTermCollisions 查出来交给体检脚本报(现有内容里没有)。
+_COMPARISON_OPS = frozenset(("==", "!=", "<", "<=", ">", ">="))
+_NAMESPACE_ALIASES = {"variable": "v", "query": "q", "temp": "t", "context": "c"}
+
+
+def _StripGroups(node):
+    while node.kind == "group" and len(node.children) == 1:
+        node = node.children[0]
+    return node
+
+
+def _LiteralKind(node, text):
+    """字面量节点 → "number" / "string"(负数是一元负号套数字); 不是字面量 → None"""
+    node = _StripGroups(node)
+    if node.kind == "unary" and node.op == "-":
+        inner = _StripGroups(node.children[0])
+        if inner.kind == "atom" and _TOKEN.match(text, inner.start).lastgroup == "number":
+            return "number"
+        return None
+    if node.kind == "atom":
+        kind = _TOKEN.match(text, node.start).lastgroup
+        if kind in ("number", "string"):
+            return kind
+    return None
+
+
+def _CanonicalText(node, text):
+    """子树源码的比对形态: 去空白、小写、命名空间别名归一(variable.x 与 v.x 是同一个变量)"""
+    pieces = []
+    for kind, value, _start, _end in _PositionedTokens(text[node.start:node.end]):
+        if kind == "name":
+            head, dot, rest = value.lower().partition(".")
+            value = _NAMESPACE_ALIASES.get(head, head) + dot + rest
+        pieces.append(value)
+    return u" ".join(pieces)
+
+
+def _WalkNodes(node, out):
+    out.append(node)
+    for child in node.children:
+        _WalkNodes(child, out)
+
+
+def _ParseNodes(text):
+    """表达式 → (语句节点列表, 全部节点); 解析不了返回 None"""
+    try:
+        tokens = _PositionedTokens(text)
+        if not tokens:
+            return None
+        statements = _PrecedenceParser(tokens).ParseRoot()
+    except (_MolangSyntaxError, IndexError, RuntimeError):
+        return None
+    nodes = []
+    for statement in statements:
+        _WalkNodes(statement, nodes)
+    return statements, nodes
+
+
+def _LiteralComparisons(nodes, text):
+    """[(比较节点, 字面量一侧下标, 字面量类型, 另一侧的比对形态)]: 恰好一侧是字面量的比较运算"""
+    found = []
+    for node in nodes:
+        if node.kind != "binary" or node.op not in _COMPARISON_OPS:
+            continue
+        kinds = [_LiteralKind(child, text) for child in node.children]
+        if (kinds[0] is None) == (kinds[1] is None):
+            continue
+        side = 0 if kinds[0] else 1
+        other = node.children[1 - side]
+        found.append((node, side, kinds[side], _CanonicalText(other, text)))
+    return found
+
+
+def _NeedsOperandParens(node):
+    node = _StripGroups(node)
+    return node.kind not in ("atom", "call", "group")
+
+
+def _SubtractionForm(node, side, text):
+    """`X op C` → `(X-C) op 0`; `C op X` → `(C-X) op 0`(负常量写成加法, 引擎不认 `--1`)"""
+    literal = _StripGroups(node.children[side])
+    other = node.children[1 - side]
+    otherText = text[other.start:other.end].strip()
+    if _NeedsOperandParens(other):
+        otherText = u"(" + otherText + u")"
+    negative = literal.kind == "unary"
+    core = _StripGroups(literal.children[0]) if negative else literal
+    magnitude = text[core.start:core.end].strip()
+    if side == 1:
+        body = otherText + (u"+" if negative else u"-") + magnitude
+    else:
+        body = (u"-" + magnitude if negative else magnitude) + u"-" + otherText
+    return u"(" + body + u")" + node.op + u"0"
+
+
+def SeparateLikeTermComparisons(text):
+    """规避引擎的同类项合并缺陷(见上方长注); 返回 (新文本, 改写的比较数)。幂等: 改写后比较的字面量都是 0、另一侧
+    带着各自的常量, 屏蔽字面量后不再相同。
+
+    只动会被合并的操作数对(_CollidingOperandPairs)里跟非零数字比较的项; 字符串比较不动(差别只在字符串上的对子改完仍会
+    合并, 留给 LikeTermCollisions 报)。非字符串 / 解析不了的原样返回。
+    """
+    if not isinstance(text, _STRING_TYPES) or not text or ("+" not in text and "-" not in text):
+        return text, 0
+    parsed = _ParseNodes(text)
+    if parsed is None:
+        return text, 0
+    targets = {}
+    for pair in _CollidingOperandPairs(parsed[1], text):
+        for operand in pair:
+            inner = []
+            _WalkNodes(operand, inner)
+            for node, side, kind, _key in _LiteralComparisons(inner, text):
+                if kind == "number" and _SignedNumber(node.children[side], text) != 0.0:
+                    targets[(node.start, node.end)] = (node, side)
+    if not targets:
+        return text, 0
+    targets = sorted(targets.values(), key=lambda item: (item[0].start, -item[0].end))
+    chosen = []
+    for node, side in targets:            # 比较里套比较(罕见): 只改外层
+        if chosen and node.start < chosen[-1][0].end:
+            continue
+        chosen.append((node, side))
+    pieces = []
+    cursor = 0
+    for node, side in chosen:
+        pieces.append(text[cursor:node.start])
+        pieces.append(_SubtractionForm(node, side, text))
+        cursor = node.end
+    pieces.append(text[cursor:])
+    return u"".join(pieces), len(chosen)
+
+
+def _NumberValue(node, text):
+    """纯数字字面量节点 → 数值; 其余 → None"""
+    node = _StripGroups(node)
+    if node.kind != "atom" or _TOKEN.match(text, node.start).lastgroup != "number":
+        return None
+    try:
+        return float(text[node.start:node.end].strip().rstrip("fF"))
+    except ValueError:
+        return None
+
+
+def _SignedNumber(node, text):
+    """数字字面量(含一元负号) → 数值; 其余 → None"""
+    node = _StripGroups(node)
+    if node.kind == "unary" and node.op == "-":
+        value = _NumberValue(node.children[0], text)
+        return None if value is None else -value
+    return _NumberValue(node, text)
+
+
+def _FoldedOperand(node, text):
+    """同类项比对前按引擎的规约剥掉 `x+0` / `0+x` / `x-0` / `x*1` / `1*x` 这类恒等包装"""
+    node = _StripGroups(node)
+    while node.kind == "binary" and node.op in ("+", "-", "*"):
+        left, right = node.children
+        identity = 0.0 if node.op in ("+", "-") else 1.0
+        if _NumberValue(right, text) == identity:
+            node = _StripGroups(left)
+        elif node.op != "-" and _NumberValue(left, text) == identity:
+            node = _StripGroups(right)
+        else:
+            break
+    return node
+
+
+def _MaskedKey(node, text, mask):
+    """子树的结构键(两种口径都先按引擎的规约剥恒等包装); mask=True 时比较运算里的字面量记成 ?、两侧不分先后
+    (引擎判同类项的口径)"""
+    node = _FoldedOperand(node, text)
+    if node.kind == "binary" and node.op in _COMPARISON_OPS and mask:
+        parts = [u"?" if _LiteralKind(child, text) else _MaskedKey(child, text, mask) for child in node.children]
+        return u"(%s %s)" % (node.op, u" ".join(sorted(parts)))
+    if node.kind in ("atom",):
+        return _CanonicalText(node, text)
+    parts = u" ".join(_MaskedKey(child, text, mask) for child in node.children)
+    return u"(%s:%s %s)" % (node.kind, node.op or (_CanonicalText(node, text).split(u"(")[0] if node.kind == "call" else u""),
+                            parts)
+
+
+def _NegatedOperand(node, text):
+    """`0 - y` / `-y` → y(引擎把 `A - (0 - B)` 规约成 `A + B`); 不是取负 → None"""
+    node = _StripGroups(node)
+    if node.kind == "unary" and node.op == "-":
+        return _StripGroups(node.children[0])
+    if node.kind == "binary" and node.op == "-" and _NumberValue(node.children[0], text) == 0.0:
+        return _StripGroups(node.children[1])
+    return None
+
+
+def _CollidingOperandPairs(nodes, text):
+    """引擎口径下会被当同类项合并的操作数对 [(左, 右)]: 同一个 `+`(或规约成 `+` 的 `A - (0 - B)` / `A - (-B)`)的
+    两个操作数, 屏蔽比较字面量后相同而实际不同"""
+    pairs = []
+    for node in nodes:
+        if node.kind != "binary" or node.op not in ("+", "-"):
+            continue
+        left, right = node.children
+        if node.op == "-":
+            right = _NegatedOperand(right, text)
+            if right is None:
+                continue
+        if _MaskedKey(left, text, True) == _MaskedKey(right, text, True) \
+                and _MaskedKey(left, text, False) != _MaskedKey(right, text, False):
+            pairs.append((left, right))
+    return pairs
+
+
+def LikeTermCollisions(text):
+    """引擎口径下会被当同类项合并的操作数对 → [(左, 右)] 源码片段(见 _CollidingOperandPairs)"""
+    if not isinstance(text, _STRING_TYPES) or ("+" not in text and "-" not in text):
+        return []
+    parsed = _ParseNodes(text)
+    if parsed is None:
+        return []
+    return [(text[left.start:left.end].strip(), text[right.start:right.end].strip())
+            for left, right in _CollidingOperandPairs(parsed[1], text)]
+
+
+def SeparateLikeTermsInSlots(slots):
+    """槽位列表里的表达式逐个规避同类项合并(就地改写); 返回 [(路径, 原文, 新文)]"""
+    changes = []
+    for path, container, key, _mode in slots:
+        value = container[key]
+        if isinstance(value, dict):          # 控制器状态动画条目 {动画: 条件}
+            animKey = path[-1]
+            text = value.get(animKey)
+            newText, count = SeparateLikeTermComparisons(text)
+            if count:
+                value[animKey] = newText
+                changes.append((path, text, newText))
+            continue
+        newText, count = SeparateLikeTermComparisons(value)
+        if count:
+            container[key] = newText
+            changes.append((path, value, newText))
+    return changes
+
+
+def SeparateAnimationLikeTerms(body):
+    """动画体全部表达式槽位规避同类项合并; 返回改动列表"""
+    return SeparateLikeTermsInSlots(AnimationMolangSlots(body))
+
+
+def SeparateControllerLikeTerms(body):
+    """控制器体全部表达式槽位规避同类项合并; 返回改动列表"""
+    return SeparateLikeTermsInSlots(ControllerMolangSlots(body))
+
+
 def ParseStatementTree(text):
     """molang 文本 → 语句节点列表(带源码区间; return / keyword / 表达式节点), 解析不了抛 ValueError。
 

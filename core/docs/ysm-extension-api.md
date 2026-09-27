@@ -180,10 +180,11 @@ def OnYsmReady(self, args):
 | `model_registry_query` | | ✅ | `GetModelIds` / `HasModel` / `GetYsmModelDetails` | §8 |
 | `player_model_rebuild` | | ✅ | `RebuildRenderPlayerModel` | §8 |
 | `tac_protocol` | ✅ | ✅ | 玩家实体上的 `v.tac.*` 枪械联动协议（[ysm-tac-protocol.md](ysm-tac-protocol.md)） | — |
+| `vehicle_model` | ✅ | | `SetVehicleModel`：非玩家实体（女仆等）当第一乘客时按它的模型换载具 | §7.5 |
 
 ### 4.3 返回值约定
 
-`SetPlayerModel`、`ResetPlayerModel`、服务端与客户端的 `OpenModelSelectScreen` 返回 `{"ok": bool, "error": str | None, ...}`：参数不对返回错误码，不抛业务异常。
+`SetPlayerModel`、`ResetPlayerModel`、`SetVehicleModel`、服务端与客户端的 `OpenModelSelectScreen` 返回 `{"ok": bool, "error": str | None, ...}`：参数不对返回错误码，不抛业务异常。
 其余查询与实体渲染方法的返回值见各小节。
 
 ---
@@ -393,6 +394,22 @@ allowed, reason = perms.CheckModelPermission(playerId, "ysm_pack:wine_fox_01_tai
 
 只放行公开名字，访问内部实现会得到 `AttributeError`。
 
+### 7.5 非玩家乘客的载具模型（capability: `vehicle_model`）
+
+给自己渲染 YSM 模型的实体（女仆等）用：它以**第一乘客**身份骑上船、矿车、马这类载具时，照玩家的规则把载具换成它的模型声明的载具模型。
+
+```python
+result = ext.SetVehicleModel(vehicleId, riderId, {
+    "entityIdentifier": modelId,          # 乘客的模型 ID
+    "replace_entities": replaceEntities,  # 模型配置里皮肤的 replace_entities(客户端 GetYsmModelDetails 取得)
+})
+```
+
+- 规则与玩家一致：模型声明了这种载具就换上，没声明就恢复原版；下车不撤，随载具存档，直到下一个第一乘客覆盖。
+- "是不是第一乘客"由调用方判断；载具上的模型会同步给所有客户端，由 YSM 渲染。
+- 乘客身上的座位偏移（模型的 `PassengerLocator` 定位组）YSM 只处理玩家骑手，别的实体由调用方自己的渲染处理。
+- 返回 `{"ok": bool, "error": str | None}`，`error` 取值 `invalid_vehicle`（载具不存在或是玩家）/ `invalid_owner`（乘客为空或是玩家：玩家的载具由 YSM 自己按玩家模型写）/ `invalid_model_data`。
+
 ---
 
 ## 8. 客户端接口
@@ -466,6 +483,7 @@ def OnRoundEnd(self):
 ### 9.4 读模型表的模组（女仆等实体渲染）
 
 ready 时用 `GetModelIds()` / `GetYsmModelDetails()` 取全量，再监听 §6.3 补上迟到装载的模型；给实体套模型用 §7.2。
+自己渲染模型的实体骑上载具时，用 §7.5 让载具跟着换。
 
 ---
 

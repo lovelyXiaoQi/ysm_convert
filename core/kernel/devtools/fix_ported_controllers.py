@@ -1304,6 +1304,10 @@ def FixPack(packName):
     _WrapGlideRoot(packName, report)
     _WrapSlidePosture(packName, report)
     _RebuildFirstPersonArm(packName, report)
+    # 收尾: 引擎把"同一变量跟不同常量比较"的加法项当同类项合并(见 molang_syntax.SeparateLikeTermComparisons 注)
+    likeTerms = port.SeparatePackLikeTerms(packName)
+    if likeTerms:
+        report.append(u"  " + port.LIKE_TERM_REPORT.format(likeTerms))
     # 收尾: 资源包按旧版 Molang 语义解析, 两种语义可能分叉处补括号(见 molang_syntax.ExplicitPrecedence 注)
     precedence = port.ExplicitPackPrecedence(packName)
     if precedence:

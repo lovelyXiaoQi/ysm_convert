@@ -155,7 +155,8 @@ SWEM 马术 → chair$(女仆坐垫) → vehicle$/#(条件动画) → Pig→ride
 
 | 差异 | 说明 |
 |---|---|
-| `chair$` | ⚠️ 未实现(车万女仆坐垫) |
+| `chair$` | ⚠️ 未实现(车万女仆坐垫;网易版车万女仆没有坐垫实体) |
+| 女仆兼容 | ✅ 骑乘链在 `carryon:princess` 之后、`sit` 兜底之前按女仆座位的娱乐类型播 `gomoku`/`bookshelf`/`computer`/`keyboard`/`picnic`(`query.mod.ysm_tlm_seat`,网易版车万女仆写);女仆坐下(Java `YsmMaidMainPredicate` 的 `sit`,HIGH 级)是主链 ladder 之后的一组(`query.mod.ysm_tlm_is_sitting`),与骑乘兜底并成同一个 `sit` 状态 |
 | `vehicle#`(tag) | ⚠️ 未实现 —— 基岩实体无 forge tag 体系,需按包声明枚举展开 |
 | Saddleable 泛化 | 基岩枚举 horse/donkey/mule=1;骆驼/炽足兽等 Java 走 ride,基岩 riding=0 无姿态 |
 | `sit` 兜底 | ⚠️ Java 骑**任意**未知实体都有 sit;基岩仅矿车=4 → sit,未知实体停 default(只有 third_person.is_riding 冻结移动) |

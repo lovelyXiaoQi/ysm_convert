@@ -27,7 +27,7 @@
 | 动画控制器 | 多数机械转换,少数 Java 扩展需降级 | 中 |
 | 弹射物/载具替换 | 基本零改动(实体 ID 自动映射、状态条件按 Java 通道自动合成、`files.arrow` 照常转换) | ≈0 |
 | 预览实体定义 | **新增**一个模板文件(基岩独有,Java 无此概念) | 低 |
-| 模组联动动画(跑酷/马术/女仆/拔刀剑/奏乐/铁魔法) | **不移植**(基岩无对应模组) | — |
+| 模组联动动画(跑酷/马术/拔刀剑/奏乐/铁魔法) | **不移植**(基岩无对应模组);女仆槽位 `tlm` 只移植座位动画(网易版车万女仆用) | — |
 | 自定义函数 / 多语言 | 函数是**实验性功能**,转换器缺省不转换(勾选「转换自定义函数(实验性)」才转,见下方 `function_path` 行);多语言由移植工具把 `lang/zh_cn.json` 烘进显示文本(见 §2.3) | — |
 
 > 本仓库 `devtools/port_java_pack.py` 是上述机械转换的自动化工具(动画 ID/转义/molang
@@ -313,7 +313,8 @@ FAQ 的说明一致)。`death`/`ladder_up`/`ladder_stillness`/`ladder_down` 在�
 |---|---|
 | `carryon`(Carry On) | **原样移植即可**:`carryon:block`/`entity`/`player`/`princess` 四条按条件动画转义为 `carryon.cls.*`,主包按搬运状态(`ysm_carryon` 1=实体 2=方块 3=玩家,princess=被玩家抱起)自动合成播放条件——网易版自带搬运玩法,语义同 Java。旧通道(旧版 list 声明形态的包)也可沿用改下划线(`carryon_block` 等)覆盖主包基线搬运动画的做法 |
 | `tac`(枪械) | **原样移植即可**(移植工具默认就带):主链持枪版 `tac:idle`/`walk`/`run` 等、手持 `tac:<climb\|climbing\|aim\|run\|hold>:<pistol\|rifle\|rpg>`、开火通道 `tac:reload:`/`tac:melee:`/`tac:<climbing\|aim\|hold>:fire:` 转义成 `tac.cls.*`,主包按 Java TACZCompat 三通道播放,数据来自基岩枪械模组(Eplus军械库等)写的 `v.tac.*`(字段与动作 → 动画对照见 `ysm-tac-protocol.md`)。包里没写的枪械动画按名字逐个回落 Java 默认模型的那一套。基岩另有滑铲扩展:主链 `slide`/`tac:slide`、手持 `tac:slide:<类型>`,想自定义就在 `tac` 槽位里加同名动画(Java 版不认这几个名字,不影响 Java 端);整身姿态写在 `Root` 或转换器补的滑铲姿态骨骼 `ysm_body_root`/`ysm_torso_root` 上,别写在 `AllBody`/`UpperBody` 上(持枪、开火、近战动画会整根覆盖它们,见 `ysm-tac-protocol.md` 第 5 节),也别给自己的骨骼起这两个名字。逐枪条件动画(`tac:hold$tacz:ak47`)、`minigun` 这类 Java 不播的类型后缀与手雷动画基岩驱动不了,转换时跳过并留痕 |
-| `parcool` / `swem` / `slashblade` / `tlm` / `immersive_melodies` / `irons_spell_books` | 基岩无对应模组,**不移植**(文件不搬即可) |
+| `tlm`(车万女仆) | **只移植座位动画**:网易版车万女仆给女仆套 YSM 模型,女仆骑在娱乐座位上时按类型播 `gomoku`/`bookshelf`/`computer`/`keyboard`/`picnic`(包里没有就回落 Java 默认模型的那一套),女仆坐下播主链的 `sit`。雕像 / 手办 / 棋局输赢 / 讨食 / 扫帚 / 椅子与女仆物品的条件动画基岩驱动不了,转换时跳过并留痕。动画里的 `tlm.is_sitting` 读女仆的坐下状态,其余 `tlm.*` 取 Java 没装女仆模组时的缺省值 |
+| `parcool` / `swem` / `slashblade` / `immersive_melodies` / `irons_spell_books` | 基岩无对应模组,**不移植**(文件不搬即可) |
 
 ### 第 6 步:动画控制器
 

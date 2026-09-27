@@ -64,7 +64,7 @@ from ysmModelScripts.packLoader.packParser import (  # noqa: E402
     AnimationChannelPairs, BuildOneShotControllers, BuildStateChainController,
     EscapeConditionKey, IsSupportedTacAnimationName, JAVA_CRAWL_POSE, JAVA_SNEAK_POSE, JAVA_TO_BEDROCK_ENTITY_IDS,
     JavaStateLoopType, SLIDE_POSTURE_WRAPPERS, _BASELINE_COMPAT_PREFIX,
-    PASSENGER_LOCATOR_KEY, ReplacedModelDecl,
+    PASSENGER_LOCATOR_KEY, ReplacedModelDecl, QUERY_IS_MAID, QUERY_TLM_IS_SITTING, TLM_SEAT_CODES,
     ReplacedTargets, TacAnimationRole, _ONESHOT_TAC_FIRE_KEY, _TacFireMembers, _BuildTacHoldAnimates,
     StripJsonComments, _BuildConditionalAnimates, _BuildJavaStateAnimates, _CLASSIFY_TESTS,
     _ClassifySelfTest,
@@ -77,7 +77,8 @@ from ysmModelScripts.packLoader.packParser import (  # noqa: E402
 # 基岩 molang 语法判定与 Java 口径守卫(体检脚本共用同一判定, 见 molang_syntax.py 注)
 from molang_syntax import (  # noqa: E402
     AnimationMolangSlots, ExplicitAnimationPrecedence, ExplicitControllerPrecedence, ExplicitPrecedence,
-    FormatSlotPath, GuardAnimationMolang, GuardControllerMolang, MolangSyntaxProblem)
+    FormatSlotPath, GuardAnimationMolang, GuardControllerMolang, MolangSyntaxProblem, SeparateAnimationLikeTerms,
+    SeparateControllerLikeTerms)
 # Java 脚本控制器(functions/*@player_ctrl_<通道>.molang)能展开成决策树的转换, 见 script_controller.py 注
 from script_controller import ConvertScript, ScriptNotConvertible  # noqa: E402
 # Java 专有的环境/状态量、探针函数、骨骼旋转回读、roaming 声明 → 主包运行层(见 java_runtime_bindings.py 注)
@@ -135,24 +136,36 @@ ARM_ANIMATION_KEYS = ("fp_arm", "arm")
 # (slashblade/superbwarfare 等), 基岩既无对应物品也无对应判定 —— 移植过来
 # 只会堆无效注册与分类告警。要带上时传 --with-mods。
 # 枪械槽位 tac 例外, 默认移植: 基岩的枪械模组(Eplus军械库等)按旧版协议写 v.tac.*, 主包运行层归一成 Java 口径,
-# 解析器按 Java 三通道合成播放(packParser._TAC_HOLD_GUN 上方注); 只带基岩驱动得了的那些(TacSlotSkipNames)
+# 解析器按 Java 三通道合成播放(packParser._TAC_HOLD_GUN 上方注); 只带基岩驱动得了的那些(SlotSkipNames)。
+# 车万女仆槽位 tlm 同样默认移植: 网易版车万女仆给女仆套 YSM 模型, 骑女仆座位时按娱乐类型播这些动画(packParser 骑乘链的
+# 女仆座位成员, TLM_SEAT_CODES); 只带座位动画, 雕像 / 手办 / 棋局输赢 / 讨食 / 扫帚 / 椅子与女仆物品的条件动画基岩驱动不了
 MOD_ANIMATION_KEYS = (
-    "parcool", "swem", "slashblade", "tlm",
+    "parcool", "swem", "slashblade",
     "immersive_melodies", "irons_spell_books",
 )
 TAC_ANIMATION_KEY = "tac"
+TLM_ANIMATION_KEY = "tlm"
 
 
-def TacSlotSkipNames(slotKey, srcPath):
-    """枪械槽位里基岩驱动不了的 Java 动画原名(逐枪条件动画 —— 协议里没有枪 ID; Java 不播的类型后缀如 minigun;
-    手雷; 别的模组的动画)→ 集合; 其他槽位 → 空集"""
-    if slotKey != TAC_ANIMATION_KEY:
+def SlotSkipNames(slotKey, srcPath):
+    """槽位里基岩驱动不了的 Java 动画原名 → 集合; 其他槽位 → 空集:
+    - 枪械槽位 tac: 逐枪条件动画(协议里没有枪 ID)、Java 不播的类型后缀如 minigun、手雷、别的模组的动画;
+    - 车万女仆槽位 tlm: 女仆座位动画(TLM_SEAT_CODES)以外的全部"""
+    if slotKey == TAC_ANIMATION_KEY:
+        supported = IsSupportedTacAnimationName
+    elif slotKey == TLM_ANIMATION_KEY:
+        supported = lambda name: name in TLM_SEAT_CODES  # noqa: E731
+    else:
         return set()
     try:
         animations = LoadJson(srcPath).get("animations") or {}
     except (IOError, OSError, ValueError):
         return set()
-    return set(name for name in animations if not IsSupportedTacAnimationName(name))
+    return set(name for name in animations if not supported(name))
+
+
+# 旧名(转换器等外部调用方仍在用)
+TacSlotSkipNames = SlotSkipNames
 
 
 def LoadJson(path):
@@ -813,9 +826,11 @@ _JAVA_NAME_MAP = [
     # (yaw_speed/math.exp 曾按"原版零使用"误判缺失 —— 经引擎二进制证实存在, 已保留原样)
     ("fps", "60.0"),             # 常见用法 60/fps 帧率补偿, 置零会除零
     ("air_supply", "300.0"),     # 满值=永不触发窒息表情; 置零=恒溺水中
-    ("is_player", "1.0"),        # 玩家渲染链路上恒真
-    ("is_maid", "0.0"),
-    ("entity_type", "'player'"),
+    # 实体身份: 网易版车万女仆给女仆套 YSM 模型时, 女仆运行层在女仆身上写 query.mod.ysm_is_maid = 1(玩家恒为主包注册的缺省 0);
+    # Java YSMBinding.getEntityType 对女仆返回 'maid'
+    ("is_player", "(" + QUERY_IS_MAID + ">0.5?0.0:1.0)"),
+    ("is_maid", QUERY_IS_MAID),
+    ("entity_type", "(" + QUERY_IS_MAID + ">0.5?'maid':'player')"),
     ("block_light", "15.0"),     # 满亮度=不触发"暗处"特效
     ("sky_light", "15.0"),
     ("elytra_rot_z", "0.0"),
@@ -969,6 +984,28 @@ _CTRL_NAME_MAP = [
 ]
 # 网易侧有对应数据的联动量(TACZ 的 variable.tac.*、CarryOn 类型), 见 java_runtime_bindings.RUNTIME_CTRL_ROWS
 _CTRL_NAME_MAP = runtime_bindings.MergeNameRows(_CTRL_NAME_MAP, runtime_bindings.RUNTIME_CTRL_ROWS)
+
+# tlm.*(车万女仆联动值, Java TLMBindingInner): 坐下由网易版车万女仆的运行层写在女仆身上(玩家恒为主包注册的缺省 0,
+# 与 Java 对非女仆实体返回 0 一致); 其余基岩女仆没有对应数据, 取 Java 没装女仆模组时的缺省绑定
+# (TlmClientCompat.addEmptyBinding: is_entity 真、gomoku_rank 1、字符串量空串, 其余 0)
+_TLM_NAME_MAP = [
+    ("is_sitting", QUERY_TLM_IS_SITTING),
+    ("is_begging", "0.0"),
+    ("has_backpack", "0.0"),
+    ("favorability_point", "0.0"),
+    ("favorability_level", "0.0"),
+    ("task_id", "''"),
+    ("schedule", "''"),
+    ("activity", "''"),
+    ("gomoku_win_count", "0.0"),
+    ("gomoku_rank", "1.0"),
+    ("game_statue", "''"),
+    ("backpack_type", "''"),
+    ("is_entity", "1.0"),
+    ("is_statue", "0.0"),
+    ("is_garage_kit", "0.0"),
+    ("show_item", "''"),
+]
 
 # Java 专有函数(带括号调用)的剥离策略: int=取第 N 个参数(0 基), str=整体替换。
 # second_order/first_order 正常由 PhysicsRewriter 改写成 molang 状态积分(见其注),
@@ -1798,6 +1835,7 @@ def RewriteValueScopes(text):
 #    集合; 原正则两端的 \b 保证替换体不会与两侧原文拼出新名字, 所以只看替换体就够, 逐条替换的原语义不变。
 _JAVA_PREFIXED_NAME = re.compile(r"\b(?:query|q|ysm)\.([A-Za-z_][A-Za-z0-9_]*)")
 _CTRL_PREFIXED_NAME = re.compile(r"\bctrl\.([A-Za-z_][A-Za-z0-9_]*)")
+_TLM_PREFIXED_NAME = re.compile(r"\btlm\.([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def _MapJavaNames(text, report):
@@ -1822,6 +1860,15 @@ def _MapJavaNames(text, report):
         if count:
             report["map:ctrl.{} -> {}".format(name, replacement)] += count
             present.update(_CTRL_PREFIXED_NAME.findall(replacement))
+    present = set(_TLM_PREFIXED_NAME.findall(text))
+    for name, replacement in _TLM_NAME_MAP:
+        if name not in present:
+            continue
+        # 函数调用形态 tlm.x(...) 留给 _ReplaceFunctionCalls(女仆绑定全是值, 调用照旧置零)
+        pattern = re.compile(r"\btlm\.{}\b(?!\s*\()".format(re.escape(name)))
+        text, count = pattern.subn(replacement, text)
+        if count:
+            report["map:tlm.{} -> {}".format(name, replacement)] += count
     return text
 
 
@@ -2996,6 +3043,15 @@ class SoundSink(object):
     def registrations(self):
         return [[key, definition] for _name, (key, definition, _vanilla) in self.entries.items()]
 
+    def Discard(self, names):
+        """源音频缺失的名字移出汇(不登记); 返回它们的效果键"""
+        keys = set()
+        for name in names:
+            entry = self.entries.pop(name, None)
+            if entry is not None:
+                keys.add(entry[0])
+        return keys
+
 
 def ConvertSoundKeyframes(body, sink):
     """动画体 sound_effects 关键帧的 effect(Java 源音频名) → 注册效果键; 返回改写数(幂等)。"""
@@ -3023,6 +3079,48 @@ def ConvertSoundKeyframes(body, sink):
     if not sounds:
         del body["sound_effects"]
     return converted
+
+
+def DropSoundKeyframes(folder, keys):
+    """目录下动画文件里效果键属于 keys 的 sound_effects 关键帧删掉; 返回删除条数(幂等)。
+    用于源音频缺失的音效: Java 在包的音频目录里找不到文件就不出声(常见于作者从别的包整份拷来的动画), 留着就是
+    指向未定义声音的效果键"""
+    if not keys or not os.path.isdir(folder):
+        return 0
+    removed = 0
+    for base, _dirs, names in os.walk(folder):
+        for fileName in names:
+            if not fileName.endswith(".json"):
+                continue
+            path = os.path.join(base, fileName)
+            try:
+                data = LoadJson(path)
+            except ValueError:
+                continue
+            animations = data.get("animations") if isinstance(data, dict) else None
+            count = 0
+            for body in (animations.values() if isinstance(animations, dict) else ()):
+                sounds = body.get("sound_effects") if isinstance(body, dict) else None
+                if not isinstance(sounds, dict):
+                    continue
+                for stamp in list(sounds.keys()):
+                    value = sounds[stamp]
+                    entries = value if isinstance(value, list) else [value]
+                    kept = [entry for entry in entries
+                            if not (isinstance(entry, dict) and entry.get("effect") in keys)]
+                    if len(kept) == len(entries):
+                        continue
+                    count += len(entries) - len(kept)
+                    if kept:
+                        sounds[stamp] = kept if len(kept) > 1 else kept[0]
+                    else:
+                        del sounds[stamp]
+                if not sounds:
+                    del body["sound_effects"]
+            if count:
+                DumpJson(path, data)
+                removed += count
+    return removed
 
 
 def _SoundSourceDir(manifest):
@@ -7032,9 +7130,25 @@ def ExplicitPackPrecedence(packName):
     移植期各步骤(逐通道覆盖/淡出/播完判据改写 ...)都在 RewriteAnimations/RewriteControllers 之后改文件,
     收尾再整体过一遍; 幂等(括号本身就是分组, 第二遍零改动)。
     """
+    return _RewritePackMolang(packName, ExplicitAnimationPrecedence, ExplicitControllerPrecedence)
+
+
+# 同类项合并缺陷的留痕(转换器 WarningCatalog 按"引擎同类项合并"前缀认)
+LIKE_TERM_REPORT = (u"引擎同类项合并缺陷规避 {} 条表达式: 同一个变量跟不同常量比较的项在加法里会被引擎当成同一项合并"
+                    u"(连段写法 (v.qh==1?(a)) + (v.qh==2?(a)) 第一段翻倍、第二段归零), 比较改写成等价的 (x-常量)==0")
+
+
+def SeparatePackLikeTerms(packName):
+    """包的 RP 动画/控制器文件全部表达式规避引擎的同类项合并缺陷(见 molang_syntax.SeparateLikeTermComparisons 注);
+    返回改写的表达式条数。幂等。移植收尾、基线生成、修复工具各跑一遍"""
+    return _RewritePackMolang(packName, SeparateAnimationLikeTerms, SeparateControllerLikeTerms)
+
+
+def _RewritePackMolang(packName, animationFunc, controllerFunc):
+    """包的 RP 动画/控制器文件逐份套改写函数(返回改动列表), 有改动才落盘; 返回改动总数"""
     total = 0
-    for sub, func in (("animations", ExplicitAnimationPrecedence),
-                      ("animation_controllers", ExplicitControllerPrecedence)):
+    for sub, func in (("animations", animationFunc),
+                      ("animation_controllers", controllerFunc)):
         folder = os.path.join(RP, sub, packName)
         if not os.path.isdir(folder):
             continue
@@ -7092,7 +7206,7 @@ def PortBaselinePack(javaDir, packName=JAVA_BASELINE_PACK, withMods=False):
             src, os.path.join(rpAnims, "{}.animation.json".format(key)), namespace,
             molangDefaults, molangReport, nameMapper, packVars, set(),
             physics=physics, forceStateLoops=True, preKeys=set(), previewGate=True,
-            skipNames=TacSlotSkipNames(key, src))
+            skipNames=SlotSkipNames(key, src))
         report.append("基线动画 {} → animation.{}.* ({} 条)".format(key, namespace, count))
     extensions = WriteBaselineExtensions(packName)
     if extensions:
@@ -7106,6 +7220,9 @@ def PortBaselinePack(javaDir, packName=JAVA_BASELINE_PACK, withMods=False):
     epsilonized = EpsilonizeOverrideIdentities(packName)
     if epsilonized:
         report.append(u"override 动画的恒等常量通道换成微小值 {} 处".format(epsilonized))
+    likeTerms = SeparatePackLikeTerms(packName)
+    if likeTerms:
+        report.append(LIKE_TERM_REPORT.format(likeTerms))
     precedence = ExplicitPackPrecedence(packName)
     if precedence:
         report.append(u"运算符优先级显式化 {} 处".format(precedence))
@@ -7528,9 +7645,12 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
             report.append(u"[WARN] 动画缺失: {}".format(relPath))
             continue
         namespace = "{}_arm".format(packName) if key in ARM_ANIMATION_KEYS else packName
-        tacSkipped = TacSlotSkipNames(key, src)
+        tacSkipped = SlotSkipNames(key, src)
         if tacSkipped:
-            report.append(u"枪械动画: 跳过基岩驱动不了的 {} 条(逐枪条件动画 / 非 pistol·rifle·rpg 类型 / 手雷等): {}{}".format(
+            reason = (u"枪械动画: 跳过基岩驱动不了的 {} 条(逐枪条件动画 / 非 pistol·rifle·rpg 类型 / 手雷等): {}{}"
+                      if key == TAC_ANIMATION_KEY else
+                      u"车万女仆动画: 跳过基岩驱动不了的 {} 条(只带女仆座位动画): {}{}")
+            report.append(reason.format(
                 len(tacSkipped), u", ".join(sorted(tacSkipped)[:6]), u" ..." if len(tacSkipped) > 6 else u""))
         count, dropped, (vectorFixes, stmtFixes, loopFixes, physicsFixes, sanitizeFixes,
                          lerpFixes), \
@@ -7876,15 +7996,20 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                           len(set(item[2].lower() for item in wrappedWriters))))
 
     # ---- 音频三件套(玩家侧与替换实体动画的 sound_effects 关键帧都已进音频汇) ----
+    # 源音频缺失的音效(Java 同样不出声)不登记、关键帧删掉 —— 登记了就是指向未定义声音的效果键
     if soundSink.entries:
         copied, missing = WriteSoundResources(packName, javaDir, _SoundSourceDir(manifest), soundSink)
+        droppedFrames = DropSoundKeyframes(rpAnims, soundSink.Discard(missing))
+        if missing:
+            report.append(u"[!] 源音频缺失 {} 个(Java 同样不出声), 引用它们的 sound_effects 关键帧 {} 条已删掉、不登记: {}".format(
+                len(missing), droppedFrames, u", ".join(missing)))
+        molangReport.update(soundSink.report)
+    if soundSink.entries:
         playerDeclNode["sound_effect"] = soundSink.registrations
         legacyNetease.pop("sound_effect", None)
         report.append(u"音频: sound_effects 关键帧 {} 种 → ogg {} 个拷到 sounds/ysm/{}/ + "
-                      u"sound_definitions 登记, files.player.sound_effect 注册 {} 条{}".format(
-                          len(soundSink.entries), copied, packName, len(soundSink.registrations),
-                          (u"; [!] 源音频缺失: " + u", ".join(missing)) if missing else u""))
-        molangReport.update(soundSink.report)
+                      u"sound_definitions 登记, files.player.sound_effect 注册 {} 条".format(
+                          len(soundSink.entries), copied, packName, len(soundSink.registrations)))
     else:
         WriteSoundResources(packName, javaDir, "sounds", soundSink)    # 清掉上次移植遗留的音频
         stale = playerDeclNode.get("sound_effect")
@@ -8171,7 +8296,10 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     elif os.path.isfile(stateChainPath):
         os.remove(stateChainPath)
 
-    # ---- 运算符优先级显式化(收尾整体过一遍, 覆盖上面各步骤新写入的表达式) ----
+    # ---- 引擎同类项合并缺陷规避 + 运算符优先级显式化(收尾整体过一遍, 覆盖上面各步骤新写入的表达式) ----
+    likeTermFixes = SeparatePackLikeTerms(packName)
+    if likeTermFixes:
+        report.append(LIKE_TERM_REPORT.format(likeTermFixes))
     precedenceFixes = ExplicitPackPrecedence(packName)
     if precedenceFixes:
         report.append(u"运算符优先级显式化(收尾) {} 处: 资源包按 min_engine_version 1.18.0 走旧版 Molang 语义"

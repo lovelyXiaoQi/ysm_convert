@@ -2461,6 +2461,18 @@ _RIDE_SADDLE_TEST = ("query.is_riding_any_entity_of_type('minecraft:horse',"
                      "'minecraft:donkey','minecraft:mule','minecraft:skeleton_horse',"
                      "'minecraft:zombie_horse')")
 _JAVA_RIDING_GROUP_TEST = "query.is_riding"
+# ---- 车万女仆(Java compat/touhoulittlemaid)----
+# 女仆套 YSM 模型时复用玩家的整套模型资源, 主链只多两处女仆专属(MaidControllerCollection):
+# ① 坐下(YsmMaidMainPredicate: sit, HIGH 级 —— 排在 ladder 三态之后、飞行之前; 与骑乘链兜底的 sit 是同一条动画,
+#    合成时两条进入路径并成一个成员, 见 _MergeRepeatedMembers);
+# ② 骑着女仆座位时按娱乐类型播动画(MaidVehiclePredicate: EntitySit 的 joy type), 在 carryon:princess 之后、sit 兜底之前。
+# 判据量由女仆模组的运行层写在女仆实体上(玩家身上恒为主包注册的缺省值 0): 坐下 = Java tlm.is_sitting、座位类型码
+# (TLM_SEAT_CODES)、女仆身份 = Java ysm.is_maid(移植工具把这两个 Java molang 映射到同名 query)。
+QUERY_TLM_IS_SITTING = "query.mod.ysm_tlm_is_sitting"
+QUERY_TLM_SEAT = "query.mod.ysm_tlm_seat"
+QUERY_IS_MAID = "query.mod.ysm_is_maid"
+TLM_SEAT_CODES = OrderedDict([("gomoku", 1), ("bookshelf", 2), ("computer", 3), ("keyboard", 4), ("picnic", 5)])
+_TLM_SITTING_TEST = QUERY_TLM_IS_SITTING + ">0.5"
 _JAVA_STATE_GROUPS = [
     ("query.death_ticks>0", [("death", None)]),
     # 骑乘链(Java VehiclePredicate): vehicle$ 条件动画(动态成员, 见
@@ -2473,6 +2485,7 @@ _JAVA_STATE_GROUPS = [
         ("boat", "query.is_riding_any_entity_of_type('minecraft:boat',"
                  "'minecraft:chest_boat')"),
         ("carryon:princess", "query.mod.ysm_riding==5"),
+    ] + [(name, "{}=={}".format(QUERY_TLM_SEAT, code)) for name, code in TLM_SEAT_CODES.items()] + [
         ("sit", None),
     ]),
     ("query.is_sleeping", [("sleep", None)]),
@@ -2488,6 +2501,8 @@ _JAVA_STATE_GROUPS = [
         ("ladder_stillness", "query.mod.ysm_climbing_vector==0"),
         ("ladder_down", None),
     ]),
+    # 女仆坐下(Java YsmMaidMainPredicate 的 sit, HIGH 级; 玩家身上判据恒假)
+    (_TLM_SITTING_TEST, [("sit", None)]),
     ("query.mod.ysm_is_flying>0.5", [("fly", None)]),
     ("query.is_gliding", [("elytra_fly", None)]),
     ("query.is_in_water&&!query.is_on_ground", [("swim_stand", None)]),
@@ -2570,7 +2585,7 @@ def _BuildJavaStateAnimates(animKeys, keyPrefix="", extraGate=None, premiseOverr
             if escaped in available or tacKey:
                 present.append((escaped, test, tacKey))
         if present:
-            parts = [_NON_GUI_GUARD, "!variable.is_first_person", "!query.is_spectator"]
+            parts = [_STATE_MEMBER_GUARDS]
             if groupTest:
                 parts.append(groupTest)
             parts.extend(_Negate(prior) for prior in priorGroupTests)
@@ -2599,7 +2614,42 @@ def _BuildJavaStateAnimates(animKeys, keyPrefix="", extraGate=None, premiseOverr
         # 基岩扩展组(滑铲)例外: 一条动画都没有(连主包默认也缺)就不占位, 照常落到后面的组
         if groupTest and (present or not extension):
             priorGroupTests.append(groupTest)
-    return entries
+    return _MergeRepeatedMembers(entries, extraGate)
+
+
+_STATE_MEMBER_GUARDS = "&&".join([_NON_GUI_GUARD, "!variable.is_first_person", "!query.is_spectator"])
+
+
+def _MergeRepeatedMembers(entries, extraGate=None):
+    """同一个动画键出现在多个组里(sit: 骑乘链兜底 + 女仆坐下) → 并成一个成员: 条件取或, 位置取第一次出现。
+
+    每个组的条件都已带齐更高优先级组的否定链, 两条进入路径本身互斥, 并起来仍是互斥表 —— 状态机按键名一键一个状态
+    (BuildStateChainController), 直挂 animate 同键后写覆盖, 都要求键唯一。公共门(纸娃娃/第一人称/旁观)与 extraGate 只留一份。
+    """
+    order = []
+    conditions = {}
+    for key, condition in entries:
+        if key not in conditions:
+            order.append(key)
+            conditions[key] = []
+        conditions[key].append(condition)
+    if len(order) == len(entries):
+        return entries
+    suffix = "&&" + extraGate if extraGate else ""
+    head = _STATE_MEMBER_GUARDS + "&&"
+    merged = []
+    for key in order:
+        paths = conditions[key]
+        if len(paths) == 1:
+            merged.append((key, paths[0]))
+            continue
+        cores = []
+        for condition in paths:
+            core = condition[:-len(suffix)] if suffix and condition.endswith(suffix) else condition
+            core = core[len(head):] if core.startswith(head) else core
+            cores.append("({})".format(core))
+        merged.append((key, "{}&&({}){}".format(_STATE_MEMBER_GUARDS, "||".join(cores), suffix)))
+    return merged
 
 
 # 有持枪版(tac:<状态名>)的主链状态: 骑乘链以外的固定成员(Java 骑乘时 main 通道整体让位 vehicle 通道, 那里不换枪械动画)
