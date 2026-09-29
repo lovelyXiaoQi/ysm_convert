@@ -463,7 +463,7 @@ Java 解析:java:format/parser/pojo/animation/Animation.java;运行:内嵌魔改
 | 动画更新 | 渲染帧驱动 + seekTime 单调时间轴;上限 60fps(2.2.2);远处实体降频 | 引擎渲染帧驱动 |
 | `anim_time` | 秒;**LOOP 每轮回绕**(`animTicks %= len`,AnimationPlayer.java:209-218 源码实证);⚠️ wiki《molang参考表》对 anim_time/life_time 的描述疑似互换,**以源码为准** | `query.anim_time` 引擎语义 |
 | `all/any_animations_finished` | 硬编码通道下**两者恒相等**(单动画);基岩格式控制器(BedrockAnimationController.updateState):状态里**每条动画无论 apply 条件真假都在走时钟**,all = "条件为真的都播完"、any = "有条件为真的播完",**没有条件为真的动画时两者都为真** | **权重 0 的动画暂停计时、且算没播完**(2026-09-17 实机:状态里挂一条权重 0 的 3 秒动画,原动画 0.46 秒播完后 5 秒不出态;权重改 1 后从头播满 3 秒才出态;直挂条目同样暂停、恢复后从暂停处接着播)→ 状态里只要有权重 0 的条目,`all_animations_finished` 永不成立。实例:凋灵娘 `player_pre_parallel_1.jump_up` 挂 `{jump_up_hover: 悬浮}`/`{jump_up_ground: 落地}` 两条互斥条件动画,跳跃中永远进不了 `jump_down`;萨赫梅特推进器展开/收纳态同理(`v.Boost` 1/2)。原版网易同类状态用 `any_animation_finished` 旁证。移植工具 `RewriteFinishedQueries`:有带条件的作者条目(或精确 0 的 override 伴生)的状态,判据改成按进入时刻 `variable.ysm_t0_<控制器>` 计时的显式式子(Java 口径,计时从状态进入起算,不计 Java 起始过渡的推迟);生成的挥击成员状态用 any(原动画权重恒 1) |
-| 实测噪声(网易引擎) | — | `query.ground_speed` 帧间 0↔60 跳变不可用;`query.yaw_speed` 0~290 噪声不可用 → 主包 EMA 平滑 `query.mod.ysm_yaw_speed`(系数 0.35,client/molangSystem.py:338-353);`is_on_ground` 走路翻转 → jump 需垂直速度门;`modified_move_speed` 平滑可用。详见 molang 映射文档 |
+| 实测噪声(网易引擎) | — | `query.ground_speed` 帧间 0↔60 跳变不可用;`query.yaw_speed` 0~290 噪声不可用 → 主包 EMA 平滑 `query.mod.ysm_yaw_speed`(视线偏航的变化率,系数 0.35,client/molangSystem.py);`is_on_ground` 走路翻转 → jump 需垂直速度门;`modified_move_speed` 平滑可用。详见 molang 映射文档 |
 
 ---
 

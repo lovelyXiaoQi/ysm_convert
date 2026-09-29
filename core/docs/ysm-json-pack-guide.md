@@ -43,8 +43,10 @@ Java 版字段参考：本仓库 `.ref/ysm-java-wiki/docs/notes/wiki/`（项目�
 │   ├── manifest.json
 │   ├── entities/.gitkeep              ← 必须有(可以是空文件夹): 网易按它识别行为包
 │   └── ysm_models/
-│       └── <包名>/
-│           └── ysm.json               ← 只有声明文件(Java 版原样 + 可选 netease 段)
+│       ├── <包名>/
+│       │   └── ysm.json               ← 只有声明文件(Java 版原样 + 可选 netease 段)
+│       └── _rp_index/
+│           └── <资源包 uuid>.json      ← 预编资源索引(转换器自动写; 手机 / 正式服必须有, 见下)
 └── resource_pack/
     ├── models/entity/<包名>/*.json    ← geometry.<包名> / geometry.<包名>_arm
     ├── animations/<包名>/*.json       ← animation.<包名>.* (资源只此一份)
@@ -53,10 +55,16 @@ Java 版字段参考：本仓库 `.ref/ysm-java-wiki/docs/notes/wiki/`（项目�
     └── entity/<包名>.entity.json      ← 预览实体定义
 ```
 
-> **资源只放资源包一份**：主包在启动时扫描资源包磁盘目录，按命名空间取得该模型的
-> 全部动画 ID、控制器 ID、molang 变量引用与几何缩放声明——因此改了资源包不存在
-> "忘了同步另一份"的问题。（历史版本要求在行为包放一份动画副本，现已不需要；
-> 旧包里已有的副本仍可用，作为资源索引不可用时的回落。）
+> **资源只放资源包一份**：主包从资源包取得该模型的全部动画 ID、控制器 ID、molang 变量引用
+> 与几何缩放声明——改了资源包不存在"忘了同步另一份"的问题。（历史版本要求在行为包放一份
+> 动画副本，现已不需要；旧包里已有的副本仍可用，作为资源索引查不到时的回落。）
+>
+> **发布到手机 / 正式服必须带预编资源索引** `ysm_models/_rp_index/<资源包 uuid>.json`：正式服与手机上
+> 组件的文件（除 `manifest.json`）都是加密存放的，游戏运行时读不了资源包，这些信息只能来自打包时预先
+> 写好的索引（由服务端读到后连同模型包一起下发）。**转换器转换 / 修复时自动写**；手写或改过资源包的包，
+> 发布前在 YSM 工程里跑 `python devtools/build_rp_index.py <你的资源包目录> <你的行为包目录>` 重新生成
+> （`--check` 可核对是否过期）。缺了它：开发测试（MC Studio 直接挂源码，文件是明文）照常，手机上按文件
+> 路径声明的动画会注册不上。
 
 **行为包必须带 `entities/` 文件夹**：网易按有没有它判定一个目录是不是行为包，没有就不挂载 ——
 MC Studio 开发测试和正式游戏都只启用这个组件的资源包，`ysm.json` 根本扫不到，模型不会出现在选择界面。
@@ -66,12 +74,13 @@ MC Studio 开发测试和正式游戏都只启用这个组件的资源包，`ysm
 一个组件可放任意多个 `<包名>/`，**无需清单文件**——主包直接枚举目录发现。Java
 合集包形态（`ysm_models/<合集>/<子包>/ysm.json`）同样自动命中，包名取直接父目录名。
 
-**为什么声明文件在行为包**：客户端脚本能拿到引擎给出的"已挂载行为包磁盘路径"
-（`addonPaths`）并用标准文件接口枚举读取，而资源包侧没有任何可用的客户端读取
-能力（详见文末实现说明）。声明只是一张资源 ID 清单，真正的动画/贴图/几何体仍在
-资源包里由引擎按 ID 加载。放行为包还有个好处：玩家**未启用**的组件不会被误扫描。
+**为什么声明文件在行为包**：服务端能经引擎资源接口读全部已加载行为包的文件（发布态加密的也由
+引擎解密），而资源包侧运行期没有可用的读取能力（详见文末实现说明）。声明只是一张资源 ID 清单，
+真正的动画/贴图/几何体仍在资源包里由引擎按 ID 加载。放行为包还有个好处：玩家**未启用**的组件
+不会被误扫描。
 
-模型注册在客户端脚本 import 期即完成（早于一切消费），无服务端参与、无网络同步。
+模型包由服务端读取后下发给每个客户端注册（联机时各客户端拿到的是房主那份，与引擎下发的资源包
+同源），比客户端脚本加载稍晚 —— 进世界的加载画面期间就会到达，模型选择界面、存档模型的应用都在它之后。
 
 ## 自动推导规则（netease 段全部可选）
 
@@ -424,8 +433,10 @@ print(comp.AddPlayerAnimation("probe", "animation.<包名>.walk"))
   不加载，文件内所有控制器的 `AddPlayerAnimationController` 全返回 `false`，
   且不打任何日志。移植工具剪枝后会把空列表删键，已移植的包补跑
   `python devtools/fix_ported_controllers.py <包名>` 即可。
-- 日志搜 `[YSM-PackLoader]`：`扫描完成: 行为包 N 个, 发现声明 M 份, 注册模型 K 个`，
-  以及逐包解析错误/警告。
+- 日志搜 `[YSM-PackServer]`（服务端读到几个包、几份预编索引、下发几段）与 `[YSM-PackLoader]`：
+  `模型包装载完成(服务端下发, 预编资源索引 N 份): 声明 M 份, 新注册模型 K 个`，以及逐包解析错误/警告；
+  出现"其中 X 个包靠本地扫描"= 这些包没有预编资源索引（手机上会缺动画，见上文"发布到手机必须带预编资源索引"）。
+  手机上看不到日志时，模型包数据没到会在左上角提示"模型包数据加载失败"。
 - 引擎刷 `Error: can't find animation <键>`：模型引用了不存在的动画/控制器资源。
   主包维护一份磁盘资源索引，**JSON 模型包自己命名空间**（`animation.<包名>.*` /
   `controller.animation.<包名>.*`）下确认缺失的引用会被自动跳过注册并汇总告警
@@ -458,22 +469,38 @@ print(comp.AddPlayerAnimation("probe", "animation.<包名>.walk"))
 
 ## 实现位置（维护者）
 
-`ysmModelScripts/packLoader/`：`resourceIO`（文件读取唯一封装点：经
-`common.minecraftMod.instance().addonPaths` 取已挂载行为包磁盘路径后枚举读取。
-**`os` / `open` 是网易审核违规模块，模块内经 `__builtins__["__import__"]` 绕过取得，
-文件系统操作必须全部收敛在此文件，不要在别处直接 import**）→ `clientScanner`
-（幂等 `EnsureScanned`，注册表构造期即执行，
-`LoadClientAddonScriptsAfter` 与 `UiInitFinished` 为后备触发）→ `modelInstaller`
-（解析 + 按 priority 经 `RegisterModelSorted` 原地插入，与旧版 py 副包通道稳定共存）→
-`packParser`（合成）。纯客户端单侧完成，无服务端参与、无下发通道。
+**发布态约束（链路为什么长这样）**：正式服 / 手机上组件的文件除 `manifest.json` 外都加密落盘（魔数
+`90 1D 30 01` + AES 密文，key 只在引擎原生层）。客户端 os/open 读到的是密文；开发测试（MC Studio / ModPC /
+MCDK）直接挂源码目录、文件是明文，测不出来。所以运行期不直读组件文件：行为包由服务端经引擎资源接口读取，
+资源包的信息在打包期预编。
+
+`ysmModelScripts/`：
+
+- 服务端 `packServerSystem`：`LoadServerAddonScriptsAfter` 经 `packLoader/serverCollector` 收集全部已加载行为包的
+  `ysm_models/**`（`resourceIO.ServerListDir` / `ServerReadBytes` = `server_resource.list_server_directory` /
+  `load_server_file`，引擎原生解密；列目录只返回一层、子目录也当条目），`packLoader/packTransfer` 编码（JSON →
+  zlib → base64，纯 ASCII，与专用服务器的 ascii 默认编码无关）并分段（16000 字符 / 段，每 tick 最多 8 段），
+  `ClientLoadAddonsFinishServerEvent` 给该玩家排队下发；读到 0 个包时载荷标记不可信。
+- 客户端 `compatClientSystem`：收段、校验和核对、解码 → `ModelRegistry.InstallPayload` →
+  `clientScanner.InstallPayload`（装预编索引 → 没被覆盖的包兜底扫描本地资源包 → `modelInstaller` 解析注册 →
+  `MarkModelDataReady(可信?)`）。10 秒没收到可信数据就向服务端重新要（`YsmPackRequest`，最多 3 次），仍没有才退回
+  客户端直读 `clientScanner.EnsureScanned`（开发测试兜底；认出密文魔数按不可读跳过，结果标记不可信）。
+- `resourceIO`：文件读取唯一封装点。**`os` / `open` 是网易审核违规模块，模块内经 `__builtins__["__import__"]`
+  绕过取得（用到时才取，导入期不碰），文件系统操作必须全部收敛在此文件，不要在别处直接 import**。
+- `resourceIndex`：主包托管（查询不隐式扫描）；预编索引 = `BuildPackIndex` 对资源包源文件的扫描结果序列化，
+  与运行期扫描同一套读法。打包脚本 `scripts/pack_scripts.py`（`RP_INDEX_CONFIGS`）与转换器 `port_cli` 经
+  `devtools/build_rp_index.py` 写进行为包 `ysm_models/_rp_index/<资源包 uuid>.json`；本工程源码行为包里不放。
+
+业务包 `ysmModelCoreScripts/client/modelSystem`：模型包晚于客户端脚本加载到达 —— 存档模型等 `IsModelDataReady`
+再应用，"存档模型已卸载"的重置只在数据可信时做，ready 之后装载的模型逐个补发 `ModelRegisteredClientEvent`。
 
 2026-08 游戏内实测排除的其他途径（勿再尝试）：隐藏接口 `resource.load_file` /
 `load_all_file` 在客户端 mod 上下文对任意路径恒返回空（含原版 `entity/player.entity.json`
 与引擎自用的 `extra_info.json`）；官方 `GetModConfigJson` 只能读 `/modconfigs` 下的
-已知路径且无目录枚举；`server_resource` 仅服务端可用（客户端全 `None`），走它必须
-引入下发通道。引擎自身的图鉴插件（`illustratedBook`）用的正是 `addonPaths` + `os` 这条路。
+已知路径且无目录枚举；`server_resource` 仅服务端可用（客户端全 `None`），只能看行为包。
 
 离线测试（改动 packLoader 后全跑一遍）：`devtools/test_pack_parser.py`（含 Java 2.6.5
 真实主包文件用例）、`devtools/test_legacy_subsidiary.py`（旧版 py 副包注册链路）、
-`devtools/test_resource_index.py`（坏引用过滤判定域）、`devtools/diff_new_vs_old.py`
-（JSON 全链路等价性，`engine_stub` 用真实 `ysm_bp` 目录模拟 `addonPaths`）。
+`devtools/test_resource_index.py`（坏引用过滤判定域）、`devtools/test_pack_transfer.py`（发布态链路：服务端收集 /
+分段下发 / 预编索引与运行期扫描逐表相等 / 密文不崩 / 三条装载链路对拍）、`devtools/diff_new_vs_old.py`
+（JSON 全链路等价性，按发布态主路径装载，`engine_stub` 以真实 `ysm_bp` 模拟 `server_resource`）。

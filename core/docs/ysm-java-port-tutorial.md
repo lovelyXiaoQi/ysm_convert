@@ -453,8 +453,9 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
 
 1. **资源包改动必须完整重启游戏**——热重载(R 键)不重扫资源包,新增/改动的动画、
    几何用的还是旧索引;
-2. 日志搜 `[YSM-PackLoader]`:`扫描完成: … 注册模型 K 个` + 逐包解析警告;
-   `模型 X 引用了 N 个不存在的资源` 按列出的键补资源;
+2. 日志搜 `[YSM-PackLoader]`:`模型包装载完成(服务端下发, …): … 新注册模型 K 个` + 逐包解析警告;
+   `模型 X 引用了 N 个不存在的资源` 按列出的键补资源;发布到手机前确认行为包带
+   `ysm_models/_rp_index/<资源包 uuid>.json`(转换器自动写,手改资源包后用 `devtools/build_rp_index.py` 重新生成);
 3. **模型全身僵直、无任何报错** = 某份动画文件整份作废(基岩解析是整文件粒度,
    一处非法全文废),用探针定位:
    ```python
@@ -539,7 +540,26 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
   `head_x/y_rotation` 轴向陷阱、`ground_speed`/`input_*` 运动量口径、`yaw_speed` 噪声替换最容易踩;
 - **物理**:`ysm.second_order`/`first_order` 由移植工具改写成 molang 状态积分
   (调用处变成 `v.ysm_so_<键拼音>_y`,积分语句提到表达式前面),头发/尾巴/胸部的
-  "Q 弹"随动手感与 Java 一致;键必须是字符串字面量(表达式键退化为取输入并告警);
+  "Q 弹"随动手感与 Java 一致;键必须是字符串字面量(表达式键退化为取输入并告警)。
+  转换后的样子(官方酒狐 03 的 `second_order('头发角速度', math.clamp(0.02*q.yaw_speed,-60,60), 2, 0.6, 0)`):
+
+  ```
+  v.ysm_so_dt=math.clamp(q.life_time-v.ysm_so_toufajiaosudu_t,0,0.1);   ← 距上次积分过了多少秒(同一帧里第二次求值为 0, 卡顿最多按 0.1 秒算)
+  v.ysm_so_toufajiaosudu_t=q.life_time;
+  v.ysm_so_in=(math.clamp(0.02*query.mod.ysm_yaw_speed,-60,60));          ← 你写的输入(第 2 个参数), Java 专有量已换成基岩写法
+  v.ysm_so_xd=...; v.ysm_so_toufajiaosudu_x=v.ysm_so_in;                  ← 输入的变化率, 只有第 5 个参数 r 不为 0 时才用到
+  v.ysm_so_k2s=math.max(0.00633257,...);                                  ← 0.00633257 = 1/(2π·f)², 帧率低时自动加大防止发散
+  v.ysm_so_toufajiaosudu_y=v.ysm_so_toufajiaosudu_y+v.ysm_so_dt*v.ysm_so_toufajiaosudu_yd;   ← 弹簧当前位置(= Java 的返回值)
+  v.ysm_so_toufajiaosudu_yd=v.ysm_so_toufajiaosudu_yd+v.ysm_so_dt*(v.ysm_so_in+0.0*v.ysm_so_xd-v.ysm_so_toufajiaosudu_y-0.095493*v.ysm_so_toufajiaosudu_yd)/v.ysm_so_k2s;   ← 弹簧速度; 0.095493 = z/(π·f), 0.0 = r·z/(2π·f)
+  return v.ysm_so_toufajiaosudu_y;                                        ← 原表达式, 调用处换成了状态变量
+  ```
+
+  看不懂不要紧,调手感仍然改 Java 源文件里的 f/z/r 再转一遍(常数由工具按 Java 同一公式算好);要看弹簧实时输出,
+  用 `/ysm_debug` 把 `v.ysm_so_<键拼音>_y` 加到调试 HUD 上(键拼音见转换日志"物理函数键 → 状态变量"一行)。同一个键在多处
+  调用共用一份状态,与 Java 相同。输入里常见的 Java 量:`ysm.head_yaw`(头相对身体的偏航,左右甩头)→
+  `-(math.clamp(query.target_y_rotation,-85,85))`、`ysm.head_pitch`(俯仰)→ `query.mod.ysm_head_pitch`、
+  `q.yaw_speed`(**视线**偏航角速度,原地甩头也有值)→ `query.mod.ysm_yaw_speed`、`q.vertical_speed` / `q.ground_speed` 见映射清单;
+  界面里的预览没有实体,读头部朝向的输入恒为 0(头发静止下垂)。
 - **过渡**:Java 主链通道的 0.1s 起始过渡由生成的 `ysm_state` 状态机复刻(直挂
   animate 条目是零过渡硬切),主链成员的 `loop` 按 Java 强制语义改写(睡觉/坐下
   等在 JSON 里写成不循环也会循环;`death`/`attacked` 改 `hold_on_last_frame` 供淡出);
@@ -571,7 +591,7 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
 | `query.head_y_rotation` | `query.mod.ysm_head_pitch` | ⚠️ Java 此名是**俯仰** |
 | `query.ground_speed` | `query.mod.ysm_ground_speed` | Java 是 `getDeltaMovement` **摩擦后**速度(步行≈2.36、创造飞行≈9.9);主包按实际位移逐帧计算 × 摩擦系数(地面 0.546/空中 0.91/水 0.8/鞘翅 0.99),静止精确为 0,作者状态机的 `==0` 静止判据成立 |
 | `ysm.ground_speed2` | `query.mod.ysm_ground_speed2` | 每 tick 水平位移 × 20(格/秒);飞行/下落时照样有值(早先的 `modified_move_speed×1.9` 只是走路步频量,末影龙娘疾跑飞行前倾因此只有几度) |
-| `query.yaw_speed` | `query.mod.ysm_yaw_speed` | 网易原生噪声不可用,主包提供平滑值(度/秒) |
+| `query.yaw_speed` | `query.mod.ysm_yaw_speed` | 网易原生噪声不可用,主包按视线偏航提供平滑值(度/秒,与 Java 同口径:原地甩头也有值) |
 | `ysm.time_delta` | `query.delta_time` | 作除数,不可置零 |
 | `ysm.attack_time` | `(variable.attack_time*(1-(variable.ysm_swing_muted??0)))` | 同为原版挥手进度;使用物品期间开始的挥动读作 0(Java 没有这次挥动) |
 | `ysm.swinging` | `((variable.attack_time*(1-(variable.ysm_swing_muted??0)))>0.0)` | 同上 |

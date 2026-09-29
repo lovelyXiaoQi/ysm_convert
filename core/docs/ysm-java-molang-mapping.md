@@ -94,7 +94,7 @@ use 动画多为 `hold_on_last_frame`,按 `all_animations_finished` 出态会在
 | `query.head_y_rotation` | **头部俯仰**(=ysm.head_pitch) | 头部**偏航** | 🔶 `query.mod.ysm_head_pitch` |
 | `query.is_item_name_any('mainhand',...)` | 槽位用短名 | 槽位要全称 | 参数改写 `'slot.weapon.mainhand'`(armor 同理;`equipped_item_any/all_tags`、`max/remaining_durability` 同族) |
 | `query.life_time` | 模型累计动画秒(换模型清零) | 实体存活秒 | 保留同名(sin 摆动等价,仅相位差;绝对时长判断不等价) |
-| `query.yaw_speed` | 度/秒 | **实测噪声不可用**(走路中 0~290 间歇归零) | 🔶 `query.mod.ysm_yaw_speed`(主包差分+EMA 平滑,度/秒) |
+| `query.yaw_speed` | **视线偏航**(`getYRot`)的变化率,度/秒 | **实测噪声不可用**(走路中 0~290 间歇归零) | 🔶 `query.mod.ysm_yaw_speed`(主包按视线偏航 `GetRot` 差分+EMA 平滑,度/秒;2026-09-30 前误按身体偏航算,原地甩头恒 0,头发左右物理不动) |
 | `query.ground_speed` | 格/秒, `getDeltaMovement` **摩擦后**速度(步行≈2.36 疾跑≈3.1 创造飞行≈9.9) | 20×每 tick 水平位移(= Java `ysm.ground_speed2` 口径; 2026-09-18 实测。早先"帧间 0↔60 乱跳"的结论来自 SetMotion 驱动的采样, 客户端被服务端纠偏拉回, 不可信) | 🔶 `query.mod.ysm_ground_speed`(主包 `client/motionTracker.py` 逐帧: 位移速度 × 摩擦系数 地面 0.546 / 空中 0.91 / 水中 0.8 / 鞘翅 0.99, `LivingEntity.travelInAir`/`travelFlying`; 静止精确为 0, 作者状态机的`==0` 判静止成立)。旧产物的 `modified_move_speed×1.9`(走路步频量, 飞行/下落时几乎不动)由修复工具迁移 |
 | `query.is_using_item` | 正在使用物品 | 同名 query 存在且能取值(实测返回 0/1),但**网易 3.8.0 的原版资源包零引用**,可靠性无旁证 | ✅ 改用 `(query.main_hand_item_use_duration>0\|\|(query.blocking&&主手是盾)\|\|(query.blocking&&副手是盾))` —— 原版 `player.entity.json` pre_animation 与 attachable 动画自己在用的量(`packParser._ITEM_IN_USE_TEST`)。**注**:`is_using_item` 并未被证伪,换掉只是取更保守的原版口径。⚠️ **`query.blocking` 必须配持盾判定**:2026-09-16 实机,不持盾时按住潜行约 0.1 秒后 blocking 也变 1,早先裸用它让持剑潜行触发一次挥手(use 状态机进出一轮)。⚠️ **举盾出手时 blocking 掉线 2~4 tick**(2026-09-17 实机,可能早于挥动进度起跳 2 tick):门控里的格挡读主包共享动画 `animation.ysm.java_input_state` 维护的锁存 `(variable.ysm_block_hold??query.blocking)`,只在仍潜行且持盾时桥接掉线;使用计时取 `((variable.ysm_use_hold??0)>0\|\|query.main_hand_item_use_duration>0)`(原始 query 与锁存取或)。⚠️ **物品使用类 query 不要写进动画骨骼通道**:2026-09-17 实机 `item_remaining_use_duration('main_hand',1.0)` 在骨骼通道里持剑不使用时也大于 0(接口求值为 0);锁存的"正在使用"改由共享控制器 `controller.animation.ysm.java_use_state` 在转移里判定后写 `variable.ysm_item_in_use` |
 
@@ -331,7 +331,7 @@ direct-variable reference`):按 Java 优先级、剥掉括号后,左侧是变量
 两项里跟非零数字的比较改写成等价的 `(x-常量)==0`(常量在左侧时 `(常量-x)==0`),体检对残留报错;只差在字符串比较上
 的改写不了,体检报出来手工改结构。
 
-**已实机定标(2026-08, 2026-09-18 更正)**:网易 `query.yaw_speed` 0~290 间歇归零(平均跳变 21.7),替换为 `query.mod.ysm_yaw_speed`(主包差分+EMA 0.35 平滑,度/秒)。当时同样判"不可用"的 `query.ground_speed`(走路中帧间 0↔60
+**已实机定标(2026-08, 2026-09-18 更正)**:网易 `query.yaw_speed` 0~290 间歇归零(平均跳变 21.7),替换为 `query.mod.ysm_yaw_speed`(主包按视线偏航差分+EMA 0.35 平滑,度/秒)。当时同样判"不可用"的 `query.ground_speed`(走路中帧间 0↔60
 乱跳)是 SetMotion(3.0) 驱动采样的假象(服务端纠偏把客户端拉回),原生值实测正是 20×每 tick 水平位移;Java 运动量现由主包按 Java
 源码口径逐帧计算(见"同名陷阱"的 `query.ground_speed` 与"一"的 `input_*`)。这些 `query.mod.*` 只写在玩家身上:
 **载具 / 投射物(替换实体)的动画**读的是实体自己的运动量(Java 值绑定对载具上下文求值),移植与修复工具把其中的

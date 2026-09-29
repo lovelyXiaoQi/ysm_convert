@@ -2820,7 +2820,7 @@ def _OrderJavaAnimates(controllerAnimates, conditionalAnimates, stateAnimates, a
     # 条目与控制器同双门: 第一人称门(主域并行动画在 FP 会驱动同名骨骼的手臂几何),
     # 纸娃娃门(并行动画常含物品判定 query —— 悬浮武器/鞘位切换族, 纸娃娃上刷错)。
     # 纸娃娃域的装饰件隐藏改由 _BuildPaperdollParallels 以独立键补齐: 只放
-    # query-free 的并行族, 且不受通道接管(自有控制器驱动)影响 —— 控制器在
+    # 不引用物品/方块/位置类 query 的并行族, 且不受通道接管(自有控制器驱动)影响 —— 控制器在
     # 纸娃娃域被门挡住后, 这是纸娃娃唯一的隐藏装饰件来源(实机: ref_wither 纸娃娃
     # 糊满 Box/Backgrounds/表情面片)。
     driven = drivenParallels or set()
@@ -2906,13 +2906,17 @@ def _BuildPaperdollParallels(animEntries):
     通道接管波及, 也不与主域条目双播。对应 Java: ParallelPredicate 恒 LOOP 含
     一切渲染域; 旧版内置模型的等价物是 paperdoll_ctl 播一条纯字面量的静态动画。
 
-    准入: **query-free** —— 纸娃娃是无装备上下文的实体, 物品/骑乘 query 在其上逐帧
-    刷错(悬浮武器/鞘位切换族属此类, 纸娃娃上不播是可接受的静态降级)。引用变量不再
-    是准入条件: 变量由每实例初始化控制器(_VARIABLE_INIT_KEY)在纸娃娃实例上补齐。
-    索引没有概况的 ID(索引不可用/正则兜底解析)视为未知, 保守不放。
+    准入: 不引用纸娃娃上不安全的 query(resourceIndex.PAPERDOLL_SAFE_QUERIES 之外的: 物品/方块/位置类) ——
+    纸娃娃是无装备上下文、不在世界里的实例, 这类 query 在其上逐帧刷错(悬浮武器/鞘位切换族属此类, 纸娃娃上不播
+    是可接受的静态降级)。时间/朝向/运动量/姿态类 query 放行: 头发物理(q.life_time 积分、target_y_rotation /
+    vertical_speed 输入)与隐藏关键帧常写在同一条 pre_parallel 里, 早先"任何 query 都不放"让这类动画整条缺席,
+    隐藏的装饰件在暂停界面纸娃娃上全露出来(2026-09-30 作者反馈)。引用变量不是准入条件: 变量由每实例初始化
+    控制器(_VARIABLE_INIT_KEY)在纸娃娃实例上补齐。索引没有概况的 ID(索引不可用/正则兜底解析)视为未知, 保守不放。
 
-    实机(2026-09): 网易触屏纸娃娃与原版背包纸娃娃上 variable.is_paperdoll 均为 0,
-    主域条目照常运行 —— 本域目前不触发, 保留为引擎日后置位时的兜底。
+    实机: 网易触屏纸娃娃与原版背包纸娃娃上 variable.is_paperdoll 为 0(2026-09-23), 主域条目照常运行;
+    **暂停界面右侧的纸娃娃为 1**(2026-09-30, 3.10: 挂 is_paperdoll 条件的探针只在它身上生效), 主域全被门挡住,
+    这里是它唯一的并行族来源。该纸娃娃打开时缓存玩家的 animate 表, 只在整套重应用模型(ResetEntityExtraSkin)
+    后刷新, 单纯 RebuildPlayerRender 不刷新。
     """
     index = _GetResourceIndex()
     if index is None or not hasattr(index, "QueryAnimationMolangProfile"):
@@ -2923,7 +2927,7 @@ def _BuildPaperdollParallels(animEntries):
         if base is None:
             continue
         profile = index.QueryAnimationMolangProfile(animId)
-        if profile is None or profile.get("hasQuery"):
+        if profile is None or profile.get("hasUnsafeQuery", profile.get("hasQuery")):
             continue
         paperdollKey = _PAPERDOLL_KEY_PREFIX + key
         animations.append((paperdollKey, animId))
@@ -3952,9 +3956,9 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
             _DrivenParallelKeys([key for key, _id in autoCtlEntries],
                                 _QueryControllerAnimRefs(_NamespaceName(animNs))),
             netease.get("channel_ownership"))
-        # 纸娃娃域(引擎给纸娃娃置位 is_paperdoll 时主域条目被门挡住; 实机 2026-09 两类
-        # 纸娃娃均未置位, 本段为兜底)以独立键补齐:
-        # query-free 并行族按 Java 通道序夹着 idle —— pre_parallel(摆位/隐藏装饰件)
+        # 纸娃娃域(引擎给纸娃娃置位 is_paperdoll 时主域条目被门挡住: 暂停界面右侧的纸娃娃就是,
+        # 背包/触屏纸娃娃未置位, 见 _BuildPaperdollParallels 注)以独立键补齐:
+        # 纸娃娃安全的并行族按 Java 通道序夹着 idle —— pre_parallel(摆位/隐藏装饰件)
         # → idle_gui(站姿, 独立键避免覆盖状态驱动的 idle 条件) → parallel(叠加层)
         paperdollAnims, paperdollPre, paperdollPost = _BuildPaperdollParallels(mergedAnimEntries)
         mergedAnimEntries = mergedAnimEntries + paperdollAnims

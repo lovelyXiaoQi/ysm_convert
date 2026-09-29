@@ -51,6 +51,7 @@ sys.path.insert(0, HERE)
 import port_java_pack as port  # noqa: E402
 import fix_ported_controllers as fix  # noqa: E402
 import validate_rp_animations as validate  # noqa: E402
+import build_rp_index  # noqa: E402
 
 VERSION = "1.2"    # 1.1: molang 事件新增 const / norm / skip / tick 类别; 1.2: options.javaFunctions(实验性开关)
 _FS_ENCODING = sys.getfilesystemencoding() or "mbcs"
@@ -379,6 +380,21 @@ def BehaviorPackMarkerProblems(bpModels):
     return [BEHAVIOR_PACK_MARKER_ERROR.format(name=os.path.basename(shown), path=shown)]
 
 
+def _WriteRpIndex(sink):
+    """产物行为包写预编资源索引(ysm_models/_rp_index/<资源包 uuid>.json): 正式服 / 手机上资源包是密文, 运行期扫不了,
+    服务端读到这份索引后随模型包下发。本工程自己的 ysm_rp 不写(打包脚本发布时生成, 源码里放一份会比资源包旧)"""
+    rp = os.path.normcase(os.path.abspath(_Unprefix(port.RP)))
+    if rp == os.path.normcase(os.path.join(_FsToText(build_rp_index.ROOT), u"ysm_rp")):
+        return
+    try:
+        path, summary = build_rp_index.WriteIndex(port.RP, _BehaviorPackRoot(port.BP_MODELS), replaceAll=True)
+    except Exception:  # noqa: BLE001 — 索引写不出来不影响转换产物本身, 报出来即可
+        sink.Emit("log", pack="", level="error", text=u"预编资源索引写入失败: " + _Unprefix(traceback.format_exc()))
+        return
+    sink.Emit("log", pack="", level="detail", text=u"预编资源索引: {} (动画 {} 个, 控制器 {} 个)".format(
+        _Unprefix(_FsToText(path)), summary["animations"], summary["controllers"]))
+
+
 def _EmitReport(sink, packName, lines):
     counts = Counter()
     for line in lines:
@@ -472,6 +488,7 @@ def RunConvert(sink, job):
     # 按包并行时(转换器壳每包一个子任务)各子任务关掉 writeCollections / validate, 由收尾任务 finalize 统一做
     if options.get("writeCollections", True):
         _WriteCollections(sink, usedCollections, collections)
+        _WriteRpIndex(sink)
     validationErrors = 0
     if options.get("validate", True) and doneNames:
         validationErrors = _RunValidation(sink, doneNames)
@@ -494,6 +511,7 @@ def RunFinalize(sink, job):
         if collection and collection not in usedCollections:
             usedCollections.append(collection)
     _WriteCollections(sink, usedCollections, collections)
+    _WriteRpIndex(sink)
     validationErrors = 0
     if options.get("validate", True) and names:
         validationErrors = _RunValidation(sink, names)
@@ -529,6 +547,7 @@ def RunFix(sink, job):
         counts = _EmitReport(sink, _ToText(packName), lines)
         sink.Emit("pack_done", pack=_ToText(packName), ok=True, seconds=round(time.time() - started, 2),
                   errors=counts["error"], warnings=counts["warn"], notices=counts["notice"])
+    _WriteRpIndex(sink)
     validationErrors = 0
     if (job.get("options") or {}).get("validate", True):
         validationErrors = _RunValidation(sink, [n for n in names])
