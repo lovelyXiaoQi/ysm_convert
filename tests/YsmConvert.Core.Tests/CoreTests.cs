@@ -517,6 +517,11 @@ public class WarningCatalogTests
         Assert.Equal("基线滑铲动画缺失", WarningCatalog.ExplainLog("warn", "[WARN] 旧版枪械兼容的滑铲动画缺失, 没有生成基岩扩展状态的默认动画").Category);
         // 动画引用的音频 Java 包里没有(从别的包拷来的动画): 不是"音频三件套"缺一项
         Assert.Equal("Java 包缺音频文件", WarningCatalog.ExplainLog("notice", "[!] 源音频缺失 1 个(Java 同样不出声), 引用它们的 sound_effects 关键帧 2 条已删掉、不登记: otoko_wa_tsurai_yo").Category);
+        // 作者头像: WEBP / AVIF 基岩解不了(提醒转 PNG); 缺文件归入"Java 包声明的文件不存在"
+        Assert.Equal("作者头像格式不支持", WarningCatalog.ExplainLog("notice",
+            "[!] 作者 纸板 的头像 avatar/zb.avif 格式是 AVIF, 基岩贴图只认 PNG / JPEG, 显示默认头像; 另存为 PNG、把 ysm.json 的 avatar 指向它后重新转换").Category);
+        Assert.Equal("Java 包声明的文件不存在", WarningCatalog.ExplainLog("warn",
+            "[WARN] 作者 缺图 的头像图片缺失: avatar/missing.png(Java 同样加载失败), 已删除声明, 显示默认头像").Category);
         Assert.Equal("音频未登记", WarningCatalog.ExplainValidation("warn", "x: 效果键 y 的定义 z 不在 sounds/sound_definitions.json").Category);
         Assert.NotNull(WarningCatalog.ExplainMolang("zero", "anything").Doc);
     }
