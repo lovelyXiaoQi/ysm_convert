@@ -43,6 +43,7 @@ import sys
 import tempfile
 import time
 import traceback
+import unicodedata
 from collections import Counter, OrderedDict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -191,19 +192,35 @@ def SplitMolangLabel(label):
     return kind, body, attention
 
 
+_FORMAT_CODE = re.compile(u"§[0-9a-zA-Z]?")      # Minecraft 格式码 §<字符>(作者常把彩色名字直接当目录名)
+
+
+def _Slug(text):
+    """目录名 → [a-z0-9_] 词根: 去掉 § 格式码; 全角 / 带变音的拉丁字母分解成 ASCII 基字(Ａ→a、é→e); 标点 / 符号 /
+    emoji 当分隔(不转写成 u<码点>, 免得出现 u2728_uff01 这种名字); 汉字转拼音, 其他文字的字母按 Pinyinize 转 u<码点>。
+    可能为空串(全是符号)"""
+    text = _FORMAT_CODE.sub(u" ", _ToText(text))
+    text = u"".join(ch for ch in unicodedata.normalize("NFKD", text) if unicodedata.category(ch) != "Mn")
+    text = u"".join(ch if ch < u"\x80" or unicodedata.category(ch)[0] in "LN" else u" " for ch in text)
+    text = port.Pinyinize(text).lower()
+    text = re.sub(u"[^a-z0-9_]+", u"_", text)
+    return re.sub(u"_+", u"_", text).strip(u"_")
+
+
 def SuggestPackName(folder, collectionFolder=None):
     """Java 包目录名 → 建议包名: 拼音化 + 小写 + 只留 [a-z0-9_]; 合集成员带合集前缀防资源 ID 冲突"""
-    def _Slug(text):
-        text = port.Pinyinize(_ToText(text)).lower()
-        text = re.sub(u"[^a-z0-9_]+", u"_", text)
-        return re.sub(u"_+", u"_", text).strip(u"_")
-
     name = _Slug(folder)
     if collectionFolder:
         prefix = _Slug(collectionFolder)
         if prefix and not name.startswith(prefix + u"_"):
             name = prefix + u"_" + name
     return name or u"pack"
+
+
+def SuggestCollectionFolder(folder):
+    """Java 合集目录名 → 产物合集目录名(ysm_models/<合集>/ 与封面贴图名, 只认 [a-z0-9_]; 中文合集名原样交给宿主
+    会被当成非法目录名拒绝转换)"""
+    return _Slug(folder) or u"collection"
 
 
 def _ReadJsonSafe(path):
@@ -222,7 +239,7 @@ def _PackInfo(javaDir, collectionDir):
         "folder": _ToText(folder),
         "suggestedName": SuggestPackName(folder, collectionFolder),
         "collectionDir": _ToText(collectionDir) if collectionDir else None,
-        "collectionFolder": _ToText(collectionFolder) if collectionFolder else None,
+        "collectionFolder": SuggestCollectionFolder(collectionFolder) if collectionFolder else None,
         "error": error,
     }
     if manifest is not None:

@@ -367,6 +367,11 @@ def _FixManifest(packName, referencedParallels, report):
     if flattened:
         changed = True
         report.append("  ysm.json: 表单变量 / initialize 的 v.roaming.* 与结构体成员扁平化 {} 处".format(flattened))
+    slotDecls = port.MigrateAnimationSlotDecls(packName, manifest)
+    if slotDecls:
+        changed = True
+        report.append(u"  ysm.json: 动画声明的文件名改成资源包里的槽位文件 <槽位>.animation.json {} 处(旧产物按 Java 原文件名"
+                      u"声明, 文件名不是槽位名时主包找不到文件、这一槽位的动画全没注册)".format(slotDecls))
     if changed:
         port.DumpJson(path, manifest)
     else:
@@ -1048,7 +1053,7 @@ def _PruneMissingPbr(packName, report):
     manifest = port.LoadJson(manifestPath)
     textures = os.path.join(RP, "textures", "entity", packName)
     removed = port.PrunePbrDeclarations(manifest, lambda rel: os.path.isfile(
-        os.path.join(textures, os.path.basename(rel.replace(chr(92), "/")))))
+        os.path.join(textures, port.RpTextureFile(rel))))
     if removed:
         port.DumpJson(manifestPath, manifest)
         report.append(u"  PBR 声明指向的贴图资源包里没有, 已去掉 {} 项: {}".format(
@@ -1181,6 +1186,8 @@ def FixPack(packName):
     # (移植期它排在最后), 末尾再重新应用并与起始内容比对 —— 全流程幂等
     ownershipBefore = _OwnershipSnapshot(packName)
     port.UndoChannelOwnership(packName)
+    # 轮盘专用副本同理先撤掉, 逐通道覆盖之前按最新的原动画重建(见 port.BuildRouletteTwins 注)
+    twinsBefore = port.DropRouletteTwins(packName)
     _FixAnimationChannels(packName, report)
     knownKeys = _CollectPackAnimKeys(packName)
     if not knownKeys:
@@ -1268,6 +1275,14 @@ def FixPack(packName):
             "  控制器状态的一次性动画补 hold_on_last_frame {} 条"
             "(基岩 loop:false 播完即撤 —— 出态前会漏一帧底层姿态; "
             "Java 的尾过渡由淡出权重复刻): {}".format(len(heldOneShots), ", ".join(heldOneShots))
+        )
+    # 轮盘键同时被控制器播放的, 轮盘改播带 override 的副本(见 port.BuildRouletteTwins 注); 复制没拆伴生的完整动画
+    rouletteTwins = port.BuildRouletteTwins(packName)
+    if len(rouletteTwins) != twinsBefore:
+        report.append(
+            "  轮盘专用副本 {} 条(轮盘键同时被控制器播放, 轮盘改播带 override 的副本, 覆盖前面的层): {}".format(
+                len(rouletteTwins), ", ".join(rouletteTwins)
+            )
         )
     # Java 逐通道覆盖(伴生动画 + 占用变量, 见 port.ApplyChannelOwnership 注)
     ownership, _written = port.ApplyChannelOwnership(packName)

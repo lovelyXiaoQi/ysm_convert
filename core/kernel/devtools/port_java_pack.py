@@ -66,6 +66,7 @@ from ysmModelScripts.packLoader.packParser import (  # noqa: E402
     JavaStateLoopType, SLIDE_POSTURE_WRAPPERS, _BASELINE_COMPAT_PREFIX,
     PASSENGER_LOCATOR_KEY, ReplacedModelDecl, QUERY_IS_MAID, QUERY_TLM_IS_SITTING, TLM_SEAT_CODES,
     ReplacedTargets, TacAnimationRole, _ONESHOT_TAC_FIRE_KEY, _TacFireMembers, _BuildTacHoldAnimates,
+    RpSafeBaseName, AVATAR_FILE_PATTERN, ROULETTE_TWIN_SUFFIX,
     StripJsonComments, _BuildConditionalAnimates, _BuildJavaStateAnimates, _CLASSIFY_TESTS,
     _ClassifySelfTest,
     _CONDITION_FALLBACK_KEYS, _OWNERSHIP_COMPANION_PATTERN, _OWNERSHIP_VARIABLE_PATTERN,
@@ -145,6 +146,12 @@ MOD_ANIMATION_KEYS = (
 )
 TAC_ANIMATION_KEY = "tac"
 TLM_ANIMATION_KEY = "tlm"
+# Java 只按这张表取 files.player.animation 的槽位(RawModelAssembler.PLAYER_MAIN_ANIMATION_TYPES), 表外的键整个不加载 ——
+# 移植同样跳过(作者写错的键、中文键: 后者在资源包文件名 <槽位>.animation.json 上还会撞 ascii 编码错误)
+JAVA_PLAYER_ANIMATION_SLOTS = (
+    "main", "arm", "fp_arm", "extra", "tac", "carryon", "parcool", "swem",
+    "slashblade", "tlm", "immersive_melodies", "irons_spell_books",
+)
 
 
 def SlotSkipNames(slotKey, srcPath):
@@ -324,6 +331,13 @@ def BaseName(relPath):
     """包内相对路径 → 文件基名(去目录去扩展), 与 packParser._TextureEntryPath 同口径"""
     name = os.path.basename(relPath if isinstance(relPath, unicode) else str(relPath or ""))  # noqa: F821
     return re.sub(r"\.(json|png|jpg|jpeg)$", "", name, flags=re.I)
+
+
+def RpTextureFile(relPath):
+    """Java 包内贴图路径 → 资源包里的文件名(保留原扩展名): 基名过 packParser.RpSafeBaseName(中文、§ 颜色码等非 ASCII
+    转写), 与解析器推导的引用 textures/entity/<包>/<基名> 逐字对上; 拷贝落点与修复工具的存在性判断共用"""
+    base, ext = os.path.splitext(os.path.basename((relPath or u"").replace(chr(92), "/")))
+    return RpSafeBaseName(base) + ext
 
 
 # Java GeoBuilder 只认 bone 的 name/parent/pivot/rotation/cubes/inflate/mirror 与 cube 的
@@ -2098,6 +2112,8 @@ def _ShouldOverridePrevious(shortKey, additiveKeys=None, preKeys=None):
     EpsilonizeOverrideIdentities 注)。早先"占住骨骼、挡住主链"的判断建立在一次整份动画文件被引擎拒载
     (空 bones 节点)的观察之上, 已作废, 见 SanitizeAnimationBody 注。
     """
+    if shortKey.endswith(ROULETTE_TWIN_SUFFIX):
+        return True      # 轮盘专用副本(BuildRouletteTwins): 只从轮盘播, 覆盖前面的层(Java cap 通道)
     if _ADDITIVE_PARALLEL_PATTERN.match(shortKey):
         return False
     if _PARALLEL_SHORT_PATTERN.match(shortKey):     # pre_parallelN
@@ -3837,7 +3853,9 @@ JAVA_LANG_LOCALE = "zh_cn"
 def LoadJavaLanguage(manifest, javaDir, locale=JAVA_LANG_LOCALE):
     """Java 包的语言表 {键: 文本}; 没有语言文件返回空 dict"""
     langDir = (((manifest or {}).get("files") or {}).get("language_path")) or "lang"
-    path = os.path.join(javaDir, str(langDir).replace("/", os.sep), "{}.json".format(locale))
+    if not isinstance(langDir, (str, unicode)):  # noqa: F821
+        return {}
+    path = os.path.join(javaDir, _FsPath(langDir, javaDir).replace("/", os.sep), "{}.json".format(locale))
     if not os.path.isfile(path):
         return {}
     data = LoadJson(path)
@@ -4856,6 +4874,8 @@ def EpsilonizeOverrideIdentities(packName, manifest=None):
         fileFixes = 0
         for animId, body in (data.get("animations") or {}).items():
             shortKey = str(animId).split(".", 2)[-1] if str(animId).startswith("animation.") else str(animId)
+            if shortKey.endswith(ROULETTE_TWIN_SUFFIX):
+                continue     # 轮盘专用副本同样是轮盘键
             matched = _OWNERSHIP_COMPANION_PATTERN.match(shortKey)
             if (matched.group(1) if matched else shortKey) in roulette:
                 continue
@@ -4864,6 +4884,90 @@ def EpsilonizeOverrideIdentities(packName, manifest=None):
             DumpJson(path, data)
             fixes += fileFixes
     return fixes
+
+
+# ---- 轮盘专用副本(<动画 ID>__wheel, 解析器侧见 packParser.ROULETTE_TWIN_SUFFIX) ----
+# 轮盘键同时被作者控制器(并行 / pre 通道)或主链播放时, 原动画按控制器语义不带 override_previous_animation
+# (_ShouldOverridePrevious: 控制器层之间的覆盖由逐通道覆盖按状态让位), 从轮盘(/playanimation)播放就与前面的层
+# 同一通道相加、缩放相乘。2026-10-09 实机: 03 宇航员酒狐的摘 / 戴头盔(extra6 / extra7, 头盔控制器 player_parallel_7
+# 在头盔穿脱时也播)从轮盘播、停在末帧时, 头发 / 耳朵 / 头盔被 pre_parallel2 按 roaming 写的缩放乘成 0, 整个头只剩脸
+# (骨骼矩阵逐骨量)。Java 轮盘是 cap 通道, 覆盖排在它前面的层 → 给这类键生成带标志的副本, 解析器让轮盘指令改播副本
+# 的完整动画 ID, 控制器照旧播原动画。副本复制完整动画(排在逐通道覆盖拆伴生之前); loop 按 Java 原值: 原动画的
+# hold_on_last_frame 若是为控制器补的(状态里带 PLAY_ONCE 淡出权重, 见 FadeControllerOneShots), 副本去掉 —— Java
+# 轮盘播 PLAY_ONCE 播完即回 IDLE。修复工具开头撤掉副本(DropRouletteTwins)、逐通道覆盖之前重建, 全流程幂等。
+
+
+def _PlayOnceFadedKeys(packName):
+    """作者控制器状态里带 PLAY_ONCE 淡出权重的动画键(它们的 hold_on_last_frame 是为控制器补的)"""
+    keys = set()
+    for _path, data in _OwnershipControllerFiles(packName):
+        for body in (data.get("animation_controllers") or {}).values():
+            if not isinstance(body, dict):
+                continue
+            for state in (body.get("states") or {}).values():
+                if not isinstance(state, dict):
+                    continue
+                for _item, entries in _StateAnimationItems(state):
+                    keys.update(ref for ref, condition in entries if SplitPlayOnceFade(condition)[1] is not None)
+    return keys
+
+
+def _PlayerAnimationShortKey(animId, packName):
+    """玩家侧动画 ID → 注册键(主命名空间 / arm 命名空间去前缀); 替换实体等别的命名空间返回 None"""
+    for prefix in ("animation.{}.".format(packName), "animation.{}_arm.".format(packName)):
+        if animId.startswith(prefix):
+            return str(animId[len(prefix):])
+    return None
+
+
+def DropRouletteTwins(packName):
+    """撤掉包内全部轮盘专用副本; 返回撤掉的条数"""
+    dropped = 0
+    for path, data in _LoadPackAnimationFiles(packName):
+        animations = data.get("animations")
+        if not isinstance(animations, dict):
+            continue
+        twins = [animId for animId in animations if str(animId).endswith(ROULETTE_TWIN_SUFFIX)]
+        for animId in twins:
+            del animations[animId]
+        if twins:
+            DumpJson(path, data)
+            dropped += len(twins)
+    return dropped
+
+
+def BuildRouletteTwins(packName, manifest=None):
+    """按轮盘键生成 / 更新 / 清理轮盘专用副本(见本节注); 返回生成副本的注册键(按文件书写序)。幂等。
+    排在全部单动画处理与 FadeControllerOneShots / HoldControllerOneShots 之后、逐通道覆盖之前。"""
+    if manifest is None:
+        manifestPath = PackManifestPath(packName)
+        manifest = LoadJson(manifestPath) if os.path.isfile(manifestPath) else {}
+    roulette = _RouletteAnimationKeys(manifest)
+    faded = _PlayOnceFadedKeys(packName) if roulette else set()
+    built = []
+    for path, data in _LoadPackAnimationFiles(packName):
+        animations = data.get("animations")
+        if not isinstance(animations, dict):
+            continue
+        rebuilt = OrderedDict()
+        for animId, body in animations.items():
+            if str(animId).endswith(ROULETTE_TWIN_SUFFIX):
+                continue                      # 旧副本一律按原动画重建
+            rebuilt[animId] = body
+            shortKey = _PlayerAnimationShortKey(animId, packName)
+            if (shortKey is None or shortKey not in roulette or not isinstance(body, dict)
+                    or body.get("override_previous_animation") is True):
+                continue
+            twin = copy.deepcopy(body)
+            twin["override_previous_animation"] = True
+            if shortKey in faded and _NormalizeLoopValue(twin.get("loop")) == "hold_on_last_frame":
+                twin.pop("loop", None)
+            rebuilt[animId + ROULETTE_TWIN_SUFFIX] = twin
+            built.append(shortKey)
+        if _SerializeJson(rebuilt) != _SerializeJson(animations):
+            data["animations"] = rebuilt
+            DumpJson(path, data)
+    return built
 
 
 def CollectPreChannelAnimationKeys(packName):
@@ -7341,12 +7445,93 @@ def PortGuiImages(manifest, srcOf, rpTextures, packName, report):
     return copied
 
 
+# ---- 作者头像(metadata.authors[].avatar) ----
+# Java: 包内图片路径, 按文件内容识别 PNG / JPEG / WEBP / AVIF(natives/image/Image.Format, 不看扩展名), 作者卡片
+# 缩放画进 64x64(AuthorButton)。网易: 不带扩展名的资源包贴图路径, 解析器只认 textures/ 开头且不带图片扩展名的,
+# 其余回退默认图标(packParser._BuildAuthors)。基岩贴图只解 PNG / JPEG, 内核又没有 WEBP / AVIF 解码器。
+AVATAR_TEXTURE_DIR = "authors"
+_AVATAR_EXTENSIONS = {"png": ".png", "jpeg": ".jpg"}
+
+
+def SniffImageFormat(path):
+    """按文件头认图片格式(Java 同样只看内容): png / jpeg / webp / avif; 认不出或读不了返回 None"""
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(16)
+    except (IOError, OSError):
+        return None
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "webp"
+    if head[4:8] == b"ftyp":                      # ISO BMFF 容器(avif / avis / mif1 ...)
+        return "avif"
+    return None
+
+
+def PortAuthorAvatars(manifest, srcOf, rpTextures, packName, report):
+    """metadata.authors[].avatar(Java 包内图片)→ RP textures/entity/<包>/authors/<名>.<png|jpg>, 声明改写成不带扩展名的
+    资源包路径; 返回拷贝的图片数。
+
+    文件名: 源文件基名转拼音 ASCII 化(声明直接写落点, 不必与解析器约定), 撞名(不分大小写、不看扩展名 —— 引用不带
+    扩展名)加序号; 几位作者共用一张图只拷一次。扩展名按文件内容定(Java 不看扩展名, 基岩按扩展名解码)。
+    包里没有这个文件、而声明已是资源包路径(textures/ 开头、无图片扩展名, 作者手写的基岩扩展)的原样保留。
+    缺文件: Java 同样加载失败不显示, 删声明并告警; WEBP / AVIF / 认不出的格式: 删声明(显示默认头像)并提醒转 PNG。
+    authors/ 下的旧图不清理(可能是作者按教程手放的, 留着无害)。srcOf: 包内相对路径 → 源文件路径。"""
+    metadata = manifest.get("metadata") if isinstance(manifest, dict) else None
+    authors = metadata.get("authors") if isinstance(metadata, dict) else None
+    targets = {}            # 源文件规范路径 → 落点基名
+    taken = set()           # 已占用的落点基名(小写)
+    shown = []
+    for index, author in enumerate(authors if isinstance(authors, list) else []):
+        if not isinstance(author, dict):
+            continue
+        rel = author.get("avatar")
+        if not isinstance(rel, (str, unicode)) or not rel.strip():  # noqa: F821
+            continue
+        label = author.get("name") or index
+        src = srcOf(rel)
+        if not os.path.isfile(src):
+            if rel.startswith("textures/") and not AVATAR_FILE_PATTERN.search(rel):
+                continue
+            del author["avatar"]
+            report.append(u"[WARN] 作者 {} 的头像图片缺失: {}(Java 同样加载失败), 已删除声明, 显示默认头像".format(
+                label, rel))
+            continue
+        imageFormat = SniffImageFormat(src)
+        if imageFormat not in _AVATAR_EXTENSIONS:
+            del author["avatar"]
+            report.append(u"[!] 作者 {} 的头像 {} 格式是 {}, 基岩贴图只认 PNG / JPEG, 显示默认头像; 另存为 PNG、"
+                          u"把 ysm.json 的 avatar 指向它后重新转换".format(
+                              label, rel, imageFormat.upper() if imageFormat else u"无法识别的"))
+            continue
+        key = os.path.normcase(os.path.abspath(src))
+        if key not in targets:
+            stem = os.path.splitext(os.path.basename(rel.replace(chr(92), "/")))[0]
+            base = re.sub(r"[^A-Za-z0-9_-]", "_", AsciiFileName(stem)) or "avatar"
+            candidate, serial = base, 2
+            while candidate.lower() in taken:
+                candidate = "{}_{}".format(base, serial)
+                serial += 1
+            taken.add(candidate.lower())
+            targets[key] = candidate
+            CopyBinary(src, os.path.join(rpTextures, AVATAR_TEXTURE_DIR, candidate + _AVATAR_EXTENSIONS[imageFormat]))
+            shown.append(candidate)
+        author["avatar"] = u"textures/entity/{}/{}/{}".format(packName, AVATAR_TEXTURE_DIR, targets[key])
+    if shown:
+        report.append(u"作者头像 {} 张 → textures/entity/{}/{}/: {}".format(
+            len(shown), packName, AVATAR_TEXTURE_DIR, u", ".join(shown)))
+    return len(shown)
+
+
 PBR_TEXTURE_FIELDS = ("normal", "specular")
 _PBR_IMAGE_FILE = re.compile(r"\.(png|jpg|jpeg|tga)$", re.I)
 
 
 def PortPbrTextures(textureDecl, srcOf, rpTextures, packName, report, label):
-    """Java PBR 贴图形态 {uv, normal?, specular?} 的法线/高光图 → RP 贴图, 与皮肤贴图同一拍平规则(包贴图目录 + 文件名)。
+    """Java PBR 贴图形态 {uv, normal?, specular?} 的法线/高光图 → RP 贴图, 与皮肤贴图同一拍平规则(包贴图目录 + RpTextureFile)。
 
     主包解析器按同一规则写 pbr 字段(packParser._PbrMapsFromDecl), 运行层挂到渲染控制器的 PBR 贴图槽并换 pbr
     材质预设(ysm_rp/shaders/glsl/ysm_pbr.glsl, LabPBR 编码原样可用)。无图片扩展名的声明是基岩真实引用路径, 不拷;
@@ -7366,7 +7551,7 @@ def PortPbrTextures(textureDecl, srcOf, rpTextures, packName, report, label):
             del textureDecl[field]
             report.append(u"[WARN] {} 的 PBR {} 贴图缺失, 已从 ysm.json 去掉这项声明: {}".format(label, field, rel))
             continue
-        fileName = os.path.basename(rel.replace(chr(92), "/"))
+        fileName = RpTextureFile(rel)
         CopyBinary(src, os.path.join(rpTextures, fileName))
         report.append(u"PBR {} {} → textures/entity/{}/{}".format(field, rel, packName, BaseName(fileName)))
         copied.append(field)
@@ -7447,12 +7632,47 @@ def PortCollectionManifest(collectionDir, collection):
     return report
 
 
+def AnimationSlotDeclPath(key, relPath):
+    """玩家动画槽位的声明路径: 资源包里这一槽位的文件固定叫 <槽位>.animation.json(RewriteAnimations 的落点), 主包按
+    声明的文件名在资源包里找它(resourceIndex._MatchIndexedFile)—— Java 文件名不是槽位名时(中文名 / player.animation.json)
+    声明改成槽位文件名, 否则这一槽位的动画一条都注册不上。目录部分原样保留(同控制器 / 替换实体动画的声明改写)"""
+    srcName = relPath.replace(u"\\", u"/").rsplit(u"/", 1)[-1]
+    outName = u"{}.animation.json".format(key)
+    if srcName == outName:
+        return relPath
+    return relPath[:len(relPath) - len(srcName)] + outName
+
+
+def MigrateAnimationSlotDecls(packName, manifest):
+    """旧产物: files.player.animation 声明的文件名在包的资源包动画目录里没有、槽位文件 <槽位>.animation.json 有 →
+    声明改指槽位文件(见 AnimationSlotDeclPath); 就地改 manifest, 返回改写数(幂等)"""
+    decl = ((manifest.get("files") or {}).get("player") or {}).get("animation")
+    if not isinstance(decl, dict):
+        return 0
+    folder = os.path.join(RP, "animations", packName)
+    count = 0
+    for key in list(decl.keys()):
+        relPath = decl[key]
+        if not isinstance(relPath, (str, unicode)) or not relPath:  # noqa: F821
+            continue
+        newPath = AnimationSlotDeclPath(key, relPath)
+        if newPath == relPath:
+            continue
+        srcName = relPath.replace(u"\\", u"/").rsplit(u"/", 1)[-1]
+        if os.path.isfile(os.path.join(folder, _FsPath(srcName, folder))) \
+                or not os.path.isfile(os.path.join(folder, _FsPath(u"{}.animation.json".format(key), folder))):
+            continue
+        decl[key] = newPath
+        count += 1
+    return count
+
+
 def _JavaAnimationCatalog(animationDecl, srcPath, withMods):
     """玩家模型的 Java 动画原名 → (Java 循环类型, Java 时长秒); 脚本控制器按它判"包里有没有这个动画"与播完时刻。
     口径同 Java 玩家动画表(大小写敏感的原名): 声明的动画文件里除第一人称手臂(fp_arm)之外全部, 跳过的模组联动文件不算"""
     catalog = OrderedDict()
     for key, relPath in animationDecl.items():
-        if key == "fp_arm" or (not withMods and key in MOD_ANIMATION_KEYS):
+        if key == "fp_arm" or key not in JAVA_PLAYER_ANIMATION_SLOTS or (not withMods and key in MOD_ANIMATION_KEYS):
             continue
         if not isinstance(relPath, (str, unicode)) or not os.path.isfile(srcPath(relPath)):  # noqa: F821
             continue
@@ -7564,12 +7784,13 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     for key in modelDecl:
         src = _Src(modelDecl[key])
         if not os.path.isfile(src):
-            report.append("[WARN] 几何缺失: {}".format(modelDecl[key]))
+            report.append(u"[WARN] 几何缺失: {}".format(modelDecl[key]))
             continue
+        # arm 几何 ID 段与解析器同一转写(packParser.RpSafeBaseName: 中文文件名转 u<码点>, 资源 ID 只收 ASCII)
         identifier = "geometry.{}".format(packName) if key == "main" \
-            else "geometry.{}_{}".format(packName, BaseName(modelDecl[key]))
+            else "geometry.{}_{}".format(packName, RpSafeBaseName(BaseName(modelDecl[key])))
         rpOut = os.path.join(rpModels, "{}.geo.json".format(key))
-        report.append("几何 {} → {}".format(key, identifier))
+        report.append(u"几何 {} → {}".format(key, identifier))
         RewriteGeometry(src, rpOut, identifier, report)
         if key == "arm":
             # 第一人称手臂: 重建成"原版手臂骨架包装 + 移位后的 Java 子树"
@@ -7635,6 +7856,11 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
             additiveKeys |= CollectParallelChannelAnimKeys(scriptData, nameMapper)
             preKeys |= CollectPreChannelAnimKeys(scriptData, nameMapper)
     for key in list(animationDecl.keys()):
+        if key not in JAVA_PLAYER_ANIMATION_SLOTS:
+            report.append(u"跳过 Java 不加载的动画槽位 {}: {}(Java 只认 {})".format(
+                key, animationDecl[key], u"/".join(JAVA_PLAYER_ANIMATION_SLOTS)))
+            del animationDecl[key]
+            continue
         if not withMods and key in MOD_ANIMATION_KEYS:
             del animationDecl[key]
             skippedMods.append(key)
@@ -7668,7 +7894,10 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
         for animId in animIds:
             if animId.startswith(nsPrefix):
                 knownAnimKeys.add(str(animId[len(nsPrefix):]))
+        animationDecl[key] = AnimationSlotDeclPath(key, relPath)
         note = " (跳过 {} 个分组标题条目)".format(len(dropped)) if dropped else ""
+        if animationDecl[key] != relPath:
+            note += " (声明的文件名改为 {}.animation.json)".format(key)
         if vectorFixes:
             note += " (标量通道展开为向量 {} 处)".format(vectorFixes)
         if stmtFixes:
@@ -7975,8 +8204,7 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
         texRel = entry.get("texture")
         texPath = texRel.get("uv") if isinstance(texRel, dict) else texRel
         if texPath and os.path.isfile(_Src(texPath)):
-            CopyBinary(_Src(texPath),
-                       os.path.join(rpTextures, os.path.basename(str(texPath))))
+            CopyBinary(_Src(texPath), os.path.join(rpTextures, RpTextureFile(texPath)))
         # PBR 贴图只有载具接得上(自有渲染控制器带贴图槽); 投射物沿用原版渲染控制器, 解析器告警忽略
         if section == "vehicles":
             PortPbrTextures(texRel, _Src, rpTextures, packName, report, u"{} {}".format(section, modelSegment))
@@ -8025,13 +8253,21 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
         if not os.path.isfile(src):
             report.append(u"[WARN] 贴图缺失: {}".format(texPath))
             continue
-        CopyBinary(src, os.path.join(rpTextures, os.path.basename(str(texPath))))
-        report.append("贴图 {} → textures/entity/{}/{}".format(
-            texPath, packName, BaseName(texPath)))
+        # 皮肤名 = 贴图基名(皮肤卡片照 Java 显示, 含 § 颜色码 / 中文的照旧), 资源包文件名转写成 ASCII(RpTextureFile)
+        rpFile = RpTextureFile(texPath)
+        CopyBinary(src, os.path.join(rpTextures, rpFile))
+        rpBase = os.path.splitext(rpFile)[0]
+        report.append(u"贴图 {} → textures/entity/{}/{}{}".format(
+            texPath, packName, rpBase,
+            u"" if rpBase == os.path.splitext(os.path.basename(texPath.replace(chr(92), "/")))[0]
+            else u"(文件名含非 ASCII, 资源包里转写, 皮肤名不变)"))
         PortPbrTextures(texEntry, _Src, rpTextures, packName, report, u"贴图 {}".format(texPath))
 
     # ---- GUI 卡片前景/背景图(properties.gui_background / gui_foreground) ----
     PortGuiImages(manifest, _Src, rpTextures, packName, report)
+
+    # ---- 作者头像(metadata.authors[].avatar): 拷进资源包, 声明改写成资源包路径 ----
+    PortAuthorAvatars(manifest, _Src, rpTextures, packName, report)
 
     # ---- ysm.json: 原样搬运(推导全部由主包 parser 承担) ----
     # 例外: ?? 的默认值必须落到初始化表 —— 基岩未初始化变量读作 0, 而 Java 的
@@ -8191,7 +8427,7 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                 # entityCutoutNoCull, 不剔除背面; saury 是剔除版, 预览里火焰/飘带会缺面
                 ("materials", OrderedDict([("default", "bloom_nocull"), ("tohru", "tohru")])),
                 ("textures", OrderedDict([
-                    ("default", "textures/entity/{}/{}".format(packName, skinName))])),
+                    ("default", "textures/entity/{}/{}".format(packName, RpSafeBaseName(skinName)))])),
                 ("geometry", OrderedDict([("default", "geometry.{}".format(packName))])),
                 # 统一 GUI 换肤控制器(与 packParser.DEFAULT_GUI_RENDER_CONTROLLER 同名):
                 # 运行层把多皮肤的贴图/几何数组追加到**这个**控制器上, 实体定义引用
@@ -8258,6 +8494,12 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                       u"基岩 loop:false 播完即撤, 出态前会漏一帧底层姿态"
                       u"(实机: 持剑挥击收回时 punch 骨骼闪一下); Java 的尾过渡由上一步的淡出权重复刻"
                       .format(len(heldOneShots)))
+    # 轮盘专用副本: 轮盘键同时被控制器播放时轮盘改播带 override 的副本(见 BuildRouletteTwins 注); 排在逐通道覆盖之前 ——
+    # 副本复制的是还没拆伴生的完整动画
+    rouletteTwins = BuildRouletteTwins(packName, manifest)
+    if rouletteTwins:
+        report.append(u"轮盘专用副本 {} 条: 轮盘键同时被控制器播放(原动画不带 override), 轮盘改播带 override 的副本, "
+                      u"像 Java 的 cap 通道一样覆盖前面的层: {}".format(len(rouletteTwins), u", ".join(rouletteTwins)))
     # 逐通道覆盖排在所有删通道/改状态步骤之后, 只处理它们剩下的冲突(见 ApplyChannelOwnership 注)
     ownership, _ownershipFiles = ApplyChannelOwnership(packName, manifest=manifest)
     report.extend(OwnershipReportLines(ownership))

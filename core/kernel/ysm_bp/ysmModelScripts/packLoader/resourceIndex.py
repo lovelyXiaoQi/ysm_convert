@@ -93,6 +93,8 @@ _ANIMATION_LOOP_PATTERN = re.compile(r'"loop"\s*:\s*' + _JSON_SCALAR)
 # 关键帧时间戳键("1.25": 形态): 动画体里只有关键帧/timeline/音效/粒子的时间用数字字符串作键。
 # animation_length 缺省时按它推 Java 的隐含时长(见 QueryAnimationLength)
 _KEYFRAME_TIME_PATTERN = re.compile(r'"(\d+(?:\.\d+)?)"\s*:')
+# 动画体里的 sound_effects 段(字面量打头, 见 _SpanSoundEvents)
+_SOUND_EFFECTS_PATTERN = re.compile(r'"sound_effects"\s*:\s*\{')
 # Java 无限长(pojo Animation.calculateLength 无关键帧 → Float.MAX_VALUE)的表示, 与移植工具
 # port_java_pack.JAVA_INFINITE_LENGTH 同值
 JAVA_INFINITE_LENGTH = 1000000.0
@@ -131,6 +133,11 @@ def _NewIndex():
         "animPlayback": {},
         # 动画 ID → 没写 animation_length 时的 Java 隐含时长(秒; 只登记缺省的那些, 移植产物都显式写了)
         "animImpliedLength": {},
+        # 动画 ID → ((时间, 效果键), ...)(sound_effects 关键帧, 按时间排; 只登记带音效的动画)。用途: 轮盘动画音效由主包
+        # 接管播放、打断即停(见业务包 config/wheelSound)
+        "animSounds": {},
+        # 有没有音效不知道的动画 ID: 来自没有 animSounds 表的旧预编文档(转换器早先写的)。不序列化(只在装载时产生)
+        "animSoundsUnknown": set(),
     }
 
 
@@ -215,6 +222,58 @@ def _SpanImpliedLength(text, start, end):
     return latest if latest > 0 else JAVA_INFINITE_LENGTH
 
 
+def _ObjectEnd(text, openIndex, limit):
+    """text[openIndex] 是 '{': 返回与它配平的 '}' 之后的位置(字符串里的括号不算); 截断 / 不配平返回 None"""
+    depth = 0
+    inString = escaped = False
+    position = openIndex
+    while position < limit:
+        ch = text[position]
+        position += 1
+        if inString:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                inString = False
+        elif ch == '"':
+            inString = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return position
+    return None
+
+
+def _SpanSoundEvents(text, start, end):
+    """动画体区段的 sound_effects 关键帧 → ((时间, 效果键), ...)(按时间排); 没写 / 解析不了 → ()。
+    段很小(只有带音效的动画才有): 按括号配平截出整个对象再 json 解析"""
+    match = _SOUND_EFFECTS_PATTERN.search(text, start, end)
+    if match is None:
+        return ()
+    stop = _ObjectEnd(text, match.end() - 1, end)
+    if stop is None:
+        return ()
+    try:
+        section = json.loads(text[match.end() - 1:stop])
+    except ValueError:
+        return ()
+    events = []
+    for stamp, value in (section.items() if isinstance(section, dict) else ()):
+        try:
+            moment = float(stamp)
+        except (TypeError, ValueError):
+            continue
+        for item in (value if isinstance(value, list) else [value]):
+            effect = item.get("effect") if isinstance(item, dict) else None
+            if isinstance(effect, (str, type(u""))) and effect:
+                events.append((moment, _Str(effect)))
+    return tuple(sorted(events))
+
+
 def _IndexAnimationFile(text, target, fileIds, index=None):
     """动画文件 → 登记全部动画 ID 及其 molang 概况/播放时长; 一条都认不出时退回宽松正则(同控制器文件的兜底)"""
     index = _index if index is None else index
@@ -232,6 +291,9 @@ def _IndexAnimationFile(text, target, fileIds, index=None):
         index["animPlayback"][resId] = (declared, _SpanScalar(_ANIMATION_LOOP_PATTERN, text, start, end))
         if declared is None:
             index["animImpliedLength"][resId] = _SpanImpliedLength(text, start, end)
+        sounds = _SpanSoundEvents(text, start, end)
+        if sounds:
+            index["animSounds"][resId] = sounds
 
 
 def _IndexControllerFile(text, target, fileIds, index=None):
@@ -477,6 +539,7 @@ def SerializeIndex(index):
         ("ctlAnimRefs", _Table("ctlAnimRefs", sorted)),
         ("animPlayback", _Table("animPlayback", list)),
         ("animImpliedLength", _Table("animImpliedLength", lambda value: value)),
+        ("animSounds", _Table("animSounds", lambda events: [[moment, effect] for moment, effect in events])),
     ])
 
 
@@ -527,6 +590,13 @@ def _MergeDocument(doc, index):
             index["animPlayback"].setdefault(_Str(resId), (playback[0], _Str(playback[1])))
     for resId, value in (doc.get("animImpliedLength") or {}).items():
         index["animImpliedLength"].setdefault(_Str(resId), value)
+    for resId, events in (doc.get("animSounds") or {}).items():
+        if isinstance(events, list):
+            index["animSounds"].setdefault(_Str(resId), tuple(
+                (float(event[0]), _Str(event[1])) for event in events
+                if isinstance(event, list) and len(event) == 2 and isinstance(event[0], (int, float))))
+    if "animSounds" not in doc:
+        index["animSoundsUnknown"].update(_Str(resId) for resId in doc.get("anims") or ())
 
 
 def _NoteCoverage(doc):
@@ -808,6 +878,36 @@ def QueryAnimationLength(animId):
     if playback[0] is not None:
         return playback[0]
     return index["animImpliedLength"].get(normId, JAVA_INFINITE_LENGTH)
+
+
+def QueryAnimationSounds(animId):
+    """动画的音效关键帧与播放方式 → {"known", "events": [(时间, 效果键), ...](按时间排, 没有音效为空),
+    "length": 时长(同 QueryAnimationLength), "loop": loop 原值}; 索引不可用 / ID 未登记(原版动画等)返回 None。
+    known 为假 = 有没有音效不知道(旧预编文档没有音效表、宽松正则兜底认出的 ID), events 为空。
+
+    用途: 轮盘动画音效由主包接管播放、打断即停(业务包 config/wheelSound)。
+    """
+    index = EnsureIndex()
+    if not index["available"] or not isinstance(animId, str) or not animId:
+        return None
+    normId = animId[:-6] if animId.endswith(".local") else animId
+    if normId not in index["anims"]:
+        return None
+    playback = index["animPlayback"].get(normId)
+    known = playback is not None and normId not in index["animSoundsUnknown"]
+    return {"known": known, "events": list(index["animSounds"].get(normId) or ()) if known else [],
+            "length": QueryAnimationLength(normId), "loop": playback[1] if playback else None}
+
+
+def HasAnimation(animId):
+    """索引里有没有这条动画(资源包里确有定义); 索引不可用 → False。
+
+    用途: 解析器判断轮盘键有没有轮盘专用副本(packParser.ROULETTE_TWIN_SUFFIX)。
+    """
+    index = EnsureIndex()
+    if not index["available"] or not isinstance(animId, str) or not animId:
+        return False
+    return (animId[:-6] if animId.endswith(".local") else animId) in index["anims"]
 
 
 def IsAnimationMissing(animId):

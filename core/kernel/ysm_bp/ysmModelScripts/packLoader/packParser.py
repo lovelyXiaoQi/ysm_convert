@@ -3,7 +3,7 @@
 
 目标: Java 版模型包的 ysm.json **原样拷贝**即可用, 创作者只需完成资源侧的机械转换:
 1. 动画文件内的键加前缀:  idle → animation.<包名>.idle  (基岩动画为全局命名, 必须唯一)
-2. 贴图放置:              textures/entity/<包名>/<原文件名>.png
+2. 贴图放置:              textures/entity/<包名>/<原文件名>.png(文件名含非 ASCII 时按 RpSafeBaseName 转写)
 3. 几何体命名:            geometry.<包名>
 4. 预览实体定义:          resource_pack/entity/<包名>.entity.json (identifier = ysm_pack:<包名>)
 
@@ -884,12 +884,40 @@ def _TextureEntryPath(entry):
     return path or None
 
 
+def RpSafeBaseName(name):
+    """Java 包内文件基名(去扩展) → 资源包里用的基名(贴图文件名、arm 几何 ID 段); 移植工具的拷贝落点与本解析器
+    推导的引用共用本函数, 两边必须逐字一致。
+
+    基岩贴图路径 / 资源 ID 只收 ASCII, 运行层又没有拼音库 → 确定性转写: 纯 ASCII 原样返回(既有产物不变), 非 ASCII
+    字符(中文、§ 颜色码 ...)逐个转 u<码点十六进制>(至少 4 位, 与移植工具标识符兜底同一形态)。皮肤名 = 贴图基名不变
+    (皮肤卡片照 Java 原样显示, § 颜色码照常上色), 只换资源包里的文件名。码点按 UTF-8 解码后取, 代理对合成一个码点
+    (窄 / 宽 Unicode 构建的解释器结果一致)。"""
+    if not isinstance(name, unicode):  # noqa: F821 — py2
+        try:
+            name.decode("ascii")
+            return name
+        except UnicodeDecodeError:
+            name = name.decode("utf-8", "replace")
+    elif all(ord(ch) < 128 for ch in name):
+        return str(name)
+    parts = []
+    index = 0
+    while index < len(name):
+        code = ord(name[index])
+        index += 1
+        if 0xD800 <= code < 0xDC00 and index < len(name) and 0xDC00 <= ord(name[index]) < 0xE000:
+            code = 0x10000 + ((code - 0xD800) << 10) + (ord(name[index]) - 0xDC00)
+            index += 1
+        parts.append(chr(code) if code < 128 else "u{:04x}".format(code))
+    return "".join(parts)
+
+
 # ---- PBR 附属贴图(Java 版 {uv, normal?, specular?}, LabPBR 编码; 见主包 ysm_rp/shaders/glsl/ysm_pbr.glsl) ----
 # Java 版 YSM 自己不渲染它们, 只交给 Oculus/Iris 光影包; 基岩这边由主包的 pbr 材质预设按前向光照近似
 # (法线图调制漫反射、太阳方向高光、高光图 alpha 自发光接泛光)。按皮肤各带一套, 皮肤名仍只取 uv 的文件名。
 # 字段名 pbr = {"normal": 资源包路径, "specular": 资源包路径}, 只含声明了的; 不参与皮肤继承(modelNormalizer 逐字段列举)。
 def _PbrTexturePath(raw, prefix):
-    """PBR 贴图声明 → 资源包贴图路径: 与皮肤贴图同一规则(拍平成 prefix + 文件名);
+    """PBR 贴图声明 → 资源包贴图路径: 与皮肤贴图同一规则(拍平成 prefix + 文件名, 文件名经 RpSafeBaseName);
     无图片扩展名 = 基岩真实引用路径, 原样直通; 空白串按 Java 忽略(StringUtils.isBlank)"""
     if not isinstance(raw, str) or not raw.strip():
         return None
@@ -898,7 +926,7 @@ def _PbrTexturePath(raw, prefix):
         return None
     if not _IMAGE_EXT_PATTERN.search(raw):
         return path
-    return prefix + path.split("/")[-1]
+    return prefix + RpSafeBaseName(path.split("/")[-1])
 
 
 def _PbrMapsFromDecl(textureDecl, prefix):
@@ -926,7 +954,7 @@ def _DerivePbrMaps(jsonDict, netease, packName, textureMap):
         uvPath = _TextureEntryPath(entry)
         if not maps or not uvPath:
             continue
-        skinName = skinByPath.get(prefix + uvPath.split("/")[-1])
+        skinName = skinByPath.get(prefix + RpSafeBaseName(uvPath.split("/")[-1]))
         if skinName and skinName not in result:
             result[skinName] = maps
     return result
@@ -939,7 +967,7 @@ def _DeriveSkins(jsonDict, netease, packName, warnings):
 
     files.player.texture 为**列表混排**(与 animation 声明同构):
     - 字符串 / {uv: 路径}(Java 原生, 含 PBR 形态): 皮肤名 = 文件名去扩展,
-      贴图按约定拼 textures/entity/<包名>/<文件名>;
+      贴图按约定拼 textures/entity/<包名>/<文件名>(含非 ASCII 的文件名经 RpSafeBaseName 转写, 皮肤名不变);
     - {皮肤名: 贴图路径}(基岩扩展): 皮肤名显式给出、路径**直通**(基岩真实
       引用路径) —— 皮肤名与文件名不一致/共享贴图目录的场景, 同名覆盖前者。
     """
@@ -1011,7 +1039,7 @@ def _DeriveSkins(jsonDict, netease, packName, warnings):
     for name, _path in javaEntries:
         skinKey = "default" if name == defaultName else name
         skinSort.append(skinKey)
-        textureMap[skinKey] = texturePrefix + name
+        textureMap[skinKey] = texturePrefix + RpSafeBaseName(name)
     # 混排的直通条目在改名链之后并入: 同名覆盖推导路径, 新名追加
     for skinName, texturePath in directEntries:
         if skinName not in textureMap:
@@ -1023,14 +1051,20 @@ def _DeriveSkins(jsonDict, netease, packName, warnings):
     return skinSort, textureMap
 
 
+# Java 头像是包内图片路径(Java 按内容识别 PNG / JPEG / WEBP / AVIF), 带扩展名; 网易侧是不带扩展名的资源包贴图路径
+AVATAR_FILE_PATTERN = re.compile(r"\.(png|jpe?g|tga|webp|avif)$", re.I)
+
+
 def _BuildAuthors(metadata):
     authors = []
     for author in metadata.get("authors") or []:
         if not isinstance(author, dict) or not author.get("name"):
             continue
         avatar = author.get("avatar") or NULL_ICON
-        if not avatar.startswith("textures/"):
-            # Java 版 avatar 为包内相对路径, 网易侧须为资源包贴图路径, 否则回退默认图标
+        if not isinstance(avatar, _KEY_STRING_TYPES) or not avatar.startswith("textures/") \
+                or AVATAR_FILE_PATTERN.search(avatar):
+            # 包内路径(可能恰好也以 textures/ 开头)引擎读不到, 回退默认图标; 移植工具会把头像拷进资源包并改写成
+            # textures/entity/<包>/authors/<名>(port_java_pack.PortAuthorAvatars)
             avatar = NULL_ICON
         authors.append({
             "avatar": avatar,
@@ -1075,7 +1109,25 @@ def _QueryIndexAnimations(namespace, foundVars=None):
     entries = index.QueryNamespaceAnimations(namespace)
     if entries and foundVars is not None:
         foundVars.update(index.QueryNamespaceVariables(namespace))
-    return entries
+    return _WithoutRouletteTwins(entries)
+
+
+def _WithoutRouletteTwins(entries):
+    """动画注册表去掉轮盘专用副本(只由轮盘指令按完整 ID 播, 见 ROULETTE_TWIN_SUFFIX 注)"""
+    if not entries:
+        return entries
+    return [entry for entry in entries if not str(entry[1]).endswith(ROULETTE_TWIN_SUFFIX)]
+
+
+def _HasIndexedAnimation(animId):
+    """资源索引里有没有这条动画; 索引不可用 → False"""
+    index = _GetResourceIndex()
+    if index is None or not hasattr(index, "HasAnimation"):
+        return False
+    try:
+        return bool(index.HasAnimation(animId))
+    except Exception:
+        return False
 
 
 def _AppendFunctionExecutor(declaration, animEntries, animateEntries):
@@ -1187,7 +1239,24 @@ def _QueryIndexFileAnimations(declPath, nsHint, foundVars=None):
     fileIds, fileVars = got
     if foundVars is not None:
         foundVars.update(fileVars)
-    return [(_ShortAnimKey(animId), animId) for animId in fileIds]
+    return _WithoutRouletteTwins([(_ShortAnimKey(animId), animId) for animId in fileIds])
+
+
+def _QueryIndexSlotAnimations(declKey, declPath, nsHint, foundVars=None):
+    """dict 声明的一个动画槽位 → [(短键, 动画ID), ...]; 未命中返回 None。
+
+    先按声明的文件名找; 找不到再按槽位文件名 <槽位>.animation.json 找 —— 移植工具在资源包里按槽位给文件命名, 旧转换
+    产物的声明却留着 Java 原文件名(中文名 / player.animation.json), 这种包不重新转换也要能装上(新产物的声明已改成
+    槽位文件名, 见 port_java_pack.AnimationSlotDeclPath)。补查的路径拼在本包命名空间目录下: 精确路径一般不存在,
+    只能按文件名 + 本包命名空间命中, 别的包的同名文件认不进来。
+    """
+    got = _QueryIndexFileAnimations(declPath, nsHint, foundVars)
+    if got is not None or not nsHint or not isinstance(declPath, str) or not isinstance(declKey, str):
+        return got
+    slotName = "{}.animation.json".format(declKey)
+    if declPath.replace("\\", "/").rsplit("/", 1)[-1] == slotName:
+        return None
+    return _QueryIndexFileAnimations("animations/{}/{}".format(nsHint, slotName), nsHint, foundVars)
 
 
 def _QueryIndexFileControllers(declPath, nsHint, foundVars=None):
@@ -1299,7 +1368,7 @@ def _LoadDeclaredAnimations(jsonDict, animNs, readTextFunc, warnings, foundVars=
         if skipKeys and declKey in skipKeys:
             continue
         declPath = animationDecl[declKey]
-        got = _QueryIndexFileAnimations(declPath, nsName, foundVars)
+        got = _QueryIndexSlotAnimations(declKey, declPath, nsName, foundVars)
         if got is None:
             missedKeys.append(declKey)
         else:
@@ -1448,7 +1517,7 @@ def _LoadArmAnimations(jsonDict, packName, readTextFunc, warnings, foundVars=Non
         for declKey in _FP_ARM_ANIMATION_KEYS:
             if declKey not in animationDecl:
                 continue
-            got = _QueryIndexFileAnimations(animationDecl[declKey], armNsName, foundVars)
+            got = _QueryIndexSlotAnimations(declKey, animationDecl[declKey], armNsName, foundVars)
             if got is not None:
                 indexed += got
     if not indexed:
@@ -3428,7 +3497,7 @@ def _BuildReplaceEntities(jsonDict, packName, readTextFunc, warnings, foundVars=
                 replace["texture"] = texturePath
             else:
                 replace["texture"] = "textures/entity/{}/{}".format(
-                    packName, texturePath.split("/")[-1])
+                    packName, RpSafeBaseName(texturePath.split("/")[-1]))
         if pbrMaps and sectionKey == "vehicles":
             replace["pbr"] = pbrMaps
         if sectionKey == "vehicles":
@@ -3622,6 +3691,12 @@ def _OrderedKeys(mapping):
 ROULETTE_RETURN_COMMAND = "@return"
 # 按钮条目附加信息里"播放动画"的临时键: 解析期记下动画键, 定稿时按注册结果换成 play 指令或删掉
 _ROULETTE_PLAY_KEY = "_play_key"
+_ROULETTE_PLAY_PREFIX = "/playanimation @s "
+# 轮盘专用副本(移植 / 修复工具生成, devtools/port_java_pack.BuildRouletteTwins): 轮盘键同时被作者控制器(或主链)播放时,
+# 原动画按控制器语义不带 override_previous_animation, 从轮盘播就与前面的层同一通道相加、缩放相乘(03 宇航员酒狐摘 / 戴头盔
+# 停在末帧时头发、耳朵、头盔全被乘成 0)。Java 轮盘是 cap 通道, 覆盖前面的层 → 副本 <动画 ID>__wheel 带标志, 轮盘指令改用
+# 副本的完整动画 ID 播(不注册进动画表: 存档快照里的旧动画表照样能播), 控制器照旧播原动画。`__wheel` 是保留后缀
+ROULETTE_TWIN_SUFFIX = "__wheel"
 
 
 def _NormalizeRouletteButton(button):
@@ -3748,16 +3823,30 @@ def _BuildRoulette(properties, netease, warnings):
     return extra, classifyList, buttonsList, animKeys
 
 
-def _FinalizeRouletteEntries(entries, playableKeys):
-    """按钮条目定稿: 键有注册动画才保留"播放动画"(Java 外圈对无动画的键静默无操作, 表单页不放
-    点了没反应的按钮), 删掉临时键; 附加信息空了就退回二元组"""
+def _RouletteTwinCommand(command, animTable):
+    """轮盘播放指令的动画键有轮盘专用副本(见 ROULETTE_TWIN_SUFFIX 注)时改播副本的完整动画 ID; 否则原样"""
+    if not isinstance(command, str) or not command.startswith(_ROULETTE_PLAY_PREFIX):
+        return command
+    key, sep, tail = command[len(_ROULETTE_PLAY_PREFIX):].partition(" ")
+    animId = animTable.get(key)
+    if not isinstance(animId, str) or not animId or not _HasIndexedAnimation(animId + ROULETTE_TWIN_SUFFIX):
+        return command
+    return _ROULETTE_PLAY_PREFIX + animId + ROULETTE_TWIN_SUFFIX + sep + tail
+
+
+def _FinalizeRouletteEntries(entries, animTable):
+    """条目定稿(animTable = 最终动画表 {键: 动画 ID}): 按钮条目的键有注册动画才保留"播放动画"(Java 外圈对无动画的键
+    静默无操作, 表单页不放点了没反应的按钮), 删掉临时键, 附加信息空了就退回二元组; 有轮盘专用副本的键改播副本"""
     finalized = []
     for entry in entries or []:
         if len(entry) > 2 and isinstance(entry[2], dict) and _ROULETTE_PLAY_KEY in entry[2]:
             meta = OrderedDict((k, v) for k, v in entry[2].items() if k != _ROULETTE_PLAY_KEY)
-            if entry[2][_ROULETTE_PLAY_KEY] not in playableKeys:
+            if entry[2][_ROULETTE_PLAY_KEY] not in animTable:
                 meta.pop("play", None)
+            elif "play" in meta:
+                meta["play"] = _RouletteTwinCommand(meta["play"], animTable)
             entry = (entry[0], entry[1], meta) if meta else (entry[0], entry[1])
+        entry = (entry[0], _RouletteTwinCommand(entry[1], animTable)) + tuple(entry[2:])
         finalized.append(entry)
     return finalized
 
@@ -3826,7 +3915,7 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
     else:
         armModelPath = _TextureEntryPath(armModelRaw)
         if armModelPath:
-            armGeometry = "geometry.{}_{}".format(packName, armModelPath.split("/")[-1])
+            armGeometry = "geometry.{}_{}".format(packName, RpSafeBaseName(armModelPath.split("/")[-1]))
 
     # BP 副本文件里引用的 molang 变量(动画+控制器), 供变量初始化推导
     fileMolangVars = set()
@@ -4164,12 +4253,12 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
         # 箭矢沿用既有专用链路: 推导出的 minecraft:arrow 条目同步派生旧 arrow 键
         if "arrow" not in defaultSkin and "minecraft:arrow" in replaceEntities:
             defaultSkin["arrow"] = replaceEntities["minecraft:arrow"]
-    # 按钮格的"播放动画"按最终动画表定稿(Java 模式含官方基线兜底的 extra0-7 等)
-    playableKeys = set(key for key, _animId in defaultSkin["animations"])
-    extraButtons = _FinalizeRouletteEntries(extraButtons, playableKeys)
+    # 按钮格的"播放动画"按最终动画表定稿(Java 模式含官方基线兜底的 extra0-7 等); 同键后注册者胜出(同 AddPlayerAnimation)
+    animTable = dict(defaultSkin["animations"])
+    extraButtons = _FinalizeRouletteEntries(extraButtons, animTable)
     for classifyItem in classifyList:
         classifyItem["extra_animation"] = _FinalizeRouletteEntries(
-            classifyItem["extra_animation"], playableKeys)
+            classifyItem["extra_animation"], animTable)
     if extraButtons:
         defaultSkin["extra"] = extraButtons
     if classifyList:

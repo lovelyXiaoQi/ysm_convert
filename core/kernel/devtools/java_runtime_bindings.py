@@ -237,7 +237,7 @@ def RewriteTextureNameCompare(text, report=None):
         index = sink.textureIndex.get(name)
         if index is None:
             if report is not None:
-                report["warn:ysm.texture_name 比较的贴图 '{}' 不在本包贴图表里(== 恒假)".format(name)] += 1
+                report[u"warn:ysm.texture_name 比较的贴图 '{}' 不在本包贴图表里(== 恒假)".format(name)] += 1
             return "(0.0)" if operator == "==" else "(1.0)"
         return "(query.mod.ysm_skin_index{}{})".format(operator, index)
 

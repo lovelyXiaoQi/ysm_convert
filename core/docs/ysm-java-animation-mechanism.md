@@ -339,14 +339,15 @@ Java 同一状态内的多条动画是加权相加(`BedrockAnimationController` 
 |---|---|---|
 | 配置 | `properties.extra_animation`(LinkedHashMap 保序;数量/名称不限;`#分类` 子菜单 / `值#按钮` config_forms / `#return`) | 同,`packParser._BuildRoulette` 一条目一格(`#return` 占格,子轮盘点击时限 5 层);按钮格 = 表单页 + 页顶"播放动画"(Java 内外圈两个动作,基岩选择轮盘只有一个点击);radio labels 解析期转有序列表。界面逻辑 `client/ui/rouletteMenu.py`(纯函数,离线测试 `TestRouletteMenu`) |
 | 表单 | ForgeSlider 按 step 取整、checkbox 写 1/0、radio 执行选项语句后 `init()` 整页重读;roaming 变量按模型哈希持久化并同步,非 roaming 赋值提交给周围玩家 | 同口径取值;全部表单变量按模型分桶存 ModAttr `extraVariable`(`config/rouletteVariables.py`,存档 + 同步,切回模型恢复),滑条拖动防抖 0.4s 后整桶提交 |
-| 触发 | 8 个可绑按键 + 轮盘 UI → 网络同步 → `player.cap` 通道播(CapPredicate) | 轮盘 UI → Call 服务端 → `SetCommand("/playanimation @s <键> default 0 \"<停止条件>\"", 玩家)`(server/modelSystem.py:148-154;**第 4 参才是停止表达式**,第 2 参是回落态、第 3 参是淡出秒) |
+| 触发 | 8 个可绑按键 + 轮盘 UI → 网络同步 → `player.cap` 通道播(CapPredicate) | 轮盘 UI → Call 服务端 `OnYsmSetCommand` → `SetCommand("/playanimation @s <键> default 0 \"<停止条件>\" ysm.wheel", 玩家)`(**第 4 参才是停止表达式**,第 2 参是回落态、第 3 参是淡出秒;第 5 参控制器名由服务端补上 —— `wheelSound.PinController`,解析器产出的完整形态才补:全部轮盘动画播在同一个运行期控制器上,同一玩家同时只有一个,换播顶掉旧的,对齐 Java 只有一个 cap 通道) |
 | 循环 | 听动画 JSON 的 loop(不传 override) | 同(播放注册键,循环类型由动画文件决定) |
 | **移动打断** | 客户端每 tick:输入冲量/跳跃/潜行键即停(PlayerMoveEvent.java:36-58);**移动中按键直接拒绝触发** | 停止表达式默认 `query.vertical_speed>0.3 \|\| query.ground_speed>0.3 \|\| q.is_sneaking`(packParser.py:61,语义对齐跳/跑/潜行);另 ysmWheelAnim 标志被任何 action/输入变化清零(server/molangSystem `OnYsmPlayerActionMolang` / `PlayerInputVectorChanged`) |
 | 锁定 | 2.3.0 轮盘"锁定"按钮 + Alt L 快捷键,运行时切换 | `extra_stop_expression: ""` 关停止条件 ≈ 永锁,但粒度是**整包配置** ⚠️ 无运行时开关 |
 | 播完自停 | PLAY_ONCE 播完 → 本地玩家回报服务端(CustomPlayerEntity.java:120-130) | /playanimation 单次动画播完自然结束,回落 `default` 态 |
 | 重复触发重播 | shouldReset → indicateReload(CapPredicate.java:23-30) | 重发 /playanimation 即重播 |
+| 音效 | 每个动画控制器只停**自己**放的音效(`SoundInstanceManager.stopAllPlayingSounds`:状态转移 / 清空 / 播完回 IDLE 时),轮盘动画被移动打断、换播、播完,它放的声音都跟着停 | 引擎的 `sound_effects` 关键帧只管出声不管停(动画停了长音乐照样放完;`StopCustomMusic` 按名字停不了引擎放的,`/stopsound` 按名字对每个听者全停、会误伤别的玩家)→ ✅ 主包接管(`config/wheelSound` + `client/wheelSoundHost`):只出现在轮盘动画里的效果键注册玩家音效时登记成空串,服务端开播后广播,各客户端按资源索引的音效关键帧(`QueryAnimationSounds`)排程、`PlayCustomMusic` 绑在实体上播(循环动画每圈重放);停止条件在实体上求值为真 / 换播 / 单次动画播完 +0.15s(Java 淡出)/ 换模型 / 离开视野时 `StopCustomMusicById` 只停这个玩家这次播的实例。同一效果键也被别的动画或作者控制器播放的**不接管**(引擎照常出声,打断后放完);资源索引说不清有没有音效(旧预编文档)的整个模型不接管 |
 | 可见性查询 | `ctrl.playing_extra_animation`(cap 通道非 IDLE) | `query.mod.ysm_wheel_anim`(ModAttr):轮盘动画指令执行成功时置 1(server/modelSystem `_MarkWheelAnimation`),移动/动作清 0,只播一遍的动画按资源索引里的 `animation_length` 到点清 0(循环与 hold_on_last_frame 与 Java 一样一直算"播放中");旧界面"关轮盘就置 1"已废弃 |
-| 优先级 | cap 通道在 main/hold/swing/use 之后、parallel 之前(1.2.0 起低于 Parallel) | /playanimation 引擎层叠加,与控制器动画的覆盖关系由引擎决定(实测:高于控制器动画) |
+| 优先级 | cap 通道在 main/hold/swing/use 之后、parallel 之前(1.2.0 起低于 Parallel) | /playanimation 引擎层叠加,与控制器动画的覆盖关系由引擎决定(实测:高于控制器动画)。轮盘动画带 `override_previous_animation` 复刻 cap 覆盖前面的层;轮盘键同时被作者控制器播放(原动画按控制器语义不能带标志,从轮盘播会与 pre_parallel 的显隐缩放相乘 —— 宇航员酒狐摘 / 戴头盔整头被乘成 0)时,轮盘改播移植 / 修复工具生成的带标志专用副本 `<动画 ID>__wheel`,控制器照旧播原动画 |
 
 ---
 
