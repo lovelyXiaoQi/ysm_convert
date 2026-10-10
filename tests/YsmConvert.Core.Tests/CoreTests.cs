@@ -522,6 +522,9 @@ public class WarningCatalogTests
             "[!] 作者 纸板 的头像 avatar/zb.avif 格式是 AVIF, 基岩贴图只认 PNG / JPEG, 显示默认头像; 另存为 PNG、把 ysm.json 的 avatar 指向它后重新转换").Category);
         Assert.Equal("Java 包声明的文件不存在", WarningCatalog.ExplainLog("warn",
             "[WARN] 作者 缺图 的头像图片缺失: avatar/missing.png(Java 同样加载失败), 已删除声明, 显示默认头像").Category);
+        // 骨骼名不合动画文件的命名规则: 与"标识符转拼音"分开说(带空格的英文名也在内, 不合规就整份动画文件加载不了)
+        Assert.Equal("骨骼名改名", WarningCatalog.ExplainLog("info",
+            "骨骼名改名 1 个(动画文件里的骨骼名只认 A-Za-z0-9_.-, 空格 / 中文等一个就作废整份动画文件; 几何与动画同表改): music box→music_box").Category);
         Assert.Equal("音频未登记", WarningCatalog.ExplainValidation("warn", "x: 效果键 y 的定义 z 不在 sounds/sound_definitions.json").Category);
         Assert.NotNull(WarningCatalog.ExplainMolang("zero", "anything").Doc);
     }

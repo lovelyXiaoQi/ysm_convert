@@ -181,6 +181,8 @@ public static class WarningCatalog
             return new("Java 包声明的文件不存在", "ysm.json 声明的文件在 Java 包里找不到(Java 同样加载失败), 已跳过; 补上文件后重新转换, 或从 ysm.json 删掉声明。", PortTutorialDoc);
         if (t.Contains("音频", StringComparison.Ordinal) || t.Contains("ogg", StringComparison.OrdinalIgnoreCase))
             return new("音频三件套", "动画音效要 ogg + sound_definitions + files.player.sound_effect 三处齐全才会响, 缺一无声。", PackGuideDoc);
+        if (t.StartsWith("骨骼名改名", StringComparison.Ordinal))
+            return new("骨骼名改名", "基岩动画文件里的骨骼名只能用英文字母、数字和 _ . -, 带空格、中文等的骨骼名只要有一个, 整份动画文件就加载不了(模型停在绑定姿态)。这些骨骼已在几何和全部动画里同表改名(中文转拼音), 动画照常对得上骨骼; 想保留可读的名字, 可在 Java 包里先改成英文名再转换。", PortTutorialDoc);
         if (t.Contains("非 ASCII", StringComparison.Ordinal) || t.Contains("拼音", StringComparison.Ordinal))
             return new("标识符转拼音", "中文动画名/骨骼名已转成拼音(基岩 ID 只认 ASCII), 引用同步改写; 若转出的名字难读可在 Java 包里先改英文名。", PortTutorialDoc);
         if (t.Contains("?? 默认值", StringComparison.Ordinal))
