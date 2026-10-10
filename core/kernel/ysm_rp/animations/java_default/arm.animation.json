@@ -5118,14 +5118,14 @@
       }, 
       "timeline": {
         "0.0": [
-          "v.jump=((0.5<(variable.ysm_airborne??0))&&!((variable.ysm_ctrl_main??0)==10)&&!query.is_riding);", 
-          "v.qh=!v.jump?v.qh2+1+(v.qh2>=2?-v.qh2 : 0) : 0;", 
-          "v.random=math.random(-30,30);"
+          "(query.is_in_ui&&query.mod.ysm_is_model&&!query.mod.ysm_local_first_person)?{return 0;};v.jump=((0.5<(variable.ysm_airborne??0))&&!((variable.ysm_ctrl_main??0)==10)&&!query.is_riding);", 
+          "(query.is_in_ui&&query.mod.ysm_is_model&&!query.mod.ysm_local_first_person)?{return 0;};v.qh=!v.jump?v.qh2+1+(v.qh2>=2?-v.qh2 : 0) : 0;", 
+          "(query.is_in_ui&&query.mod.ysm_is_model&&!query.mod.ysm_local_first_person)?{return 0;};v.random=math.random(-30,30);"
         ], 
-        "0.0833": "v.qh2=v.qh;", 
+        "0.0833": "(query.is_in_ui&&query.mod.ysm_is_model&&!query.mod.ysm_local_first_person)?{return 0;};v.qh2=v.qh;", 
         "1.5417": [
-          "v.qh=0;", 
-          "v.qh2=0;"
+          "(query.is_in_ui&&query.mod.ysm_is_model&&!query.mod.ysm_local_first_person)?{return 0;};v.qh=0;", 
+          "(query.is_in_ui&&query.mod.ysm_is_model&&!query.mod.ysm_local_first_person)?{return 0;};v.qh2=0;"
         ]
       }, 
       "override_previous_animation": true, 
@@ -18467,7 +18467,7 @@
         }
       }, 
       "timeline": {
-        "0.0": "v.mace=math.max(0.1*q.vertical_speed,-2);"
+        "0.0": "(query.is_in_ui&&query.mod.ysm_is_model&&!query.mod.ysm_local_first_person)?{return 0;};v.mace=math.max(0.1*q.vertical_speed,-2);"
       }, 
       "override_previous_animation": true, 
       "loop": "hold_on_last_frame"

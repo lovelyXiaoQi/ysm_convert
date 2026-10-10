@@ -193,6 +193,10 @@ class RuntimeSink(object):
         self.probes = OrderedDict()       # 探针变量短名 → 规整后的声明
         self.bindRotations = {}           # 骨骼名(小写) → [rx, ry, rz]
         self.textureIndex = {}            # Java 贴图名(小写, 不带扩展名) → 主包皮肤序号
+        self.boneNames = None             # 包级骨骼改名表(port_java_pack.BoneNameMapper): 几何与动画里的骨骼名已按它改过
+
+    def MapBoneName(self, name):
+        return self.boneNames.Convert(name) if self.boneNames is not None else name
 
     def SetBindRotations(self, geoPath):
         self.bindRotations = LoadBindRotations(geoPath)
@@ -394,7 +398,10 @@ def RewriteBoneRotationCall(args, memberTail, report=None):
     sink = CurrentSink()
     if report is not None:
         report["map:ysm.bone_rot('{}').{} -> 骨骼旋转回读变量".format(boneName, axis)] += 1
-    return BoneRotationRead(boneName, axis, sink.bindRotations if sink is not None else None)
+    if sink is None:
+        return BoneRotationRead(boneName, axis)
+    # 几何与动画里的骨骼名按包级改名表改过(引擎命名规则): 读侧按改后的名字取绑定旋转与回读变量, 与写侧对上
+    return BoneRotationRead(sink.MapBoneName(boneName), axis, sink.bindRotations)
 
 
 def LoadBindRotations(geoPath):
@@ -641,6 +648,47 @@ def DeclarationReportLine(declaration):
 # ------------------------------------------------------------------ 鞘翅追随角 ----
 
 ELYTRA_STATE_ANIMATION = "animation.ysm.java_elytra_state"
+# HUD 纸娃娃(潜行/疾跑时左上角)那一遍渲染: 引擎把同一个实体在界面里再画一遍(query.is_in_ui 读的是实体自身的
+# "正在界面里渲染"标志), 与世界那一遍共用变量域, 每帧排在世界那一遍之后把整张 animate 表再跑一遍(状态机进出语句、
+# 时间线、骨骼通道全在内, 状态机是界面自己的一份), 时间与挥动进度按 tick 取整。这一遍必须**只读**: 写下的变量就是
+# 世界实体的变量 —— 逐帧累积的走两步, 一次性信号被界面那份状态机先消费(port_java_pack.GuardPackUiPass 注)。只认穿着
+# 模型的世界实体(主包置 query.mod.ysm_is_model): 选择界面的预览实体、背包纸娃娃各有独立变量域、读到的是注册缺省值 0。
+# 只读的前提是世界那一遍这一帧**也跑了**同一条目 —— 按条目在世界那一遍跑不跑分两种口径:
+# - 恒开条目(输入锁存 / 鞘翅追随 / 使用状态控制器 / 函数执行体: 条件 "1" 或 query.mod.ysm_is_model): UI_PASS_TEST
+# - 主域条目(包与基线的动画 / 控制器、旧版兼容资源: 带 !variable.is_first_person 门): 第一人称时世界那一遍不跑主域,
+#   界面那一遍(引擎给它置 is_first_person=0)是这一帧唯一跑主域的一遍, 必须照常写 —— 否则进态计时、占用、已见挥动
+#   序号全不更新, 界面那份状态机逐帧来回(2026-10-10 实机: 第一人称潜行时纸娃娃抽搐)。再叠主包逐渲染帧写的本机
+#   第一人称标志(只写在本机玩家上, 注册缺省 0: 远程玩家与女仆的口径不变) → UI_PASS_MAIN_TEST
+UI_PASS_TEST = "(query.is_in_ui&&query.mod.ysm_is_model)"
+LOCAL_FIRST_PERSON_QUERY = "query.mod.ysm_local_first_person"
+UI_PASS_MAIN_TEST = "(query.is_in_ui&&query.mod.ysm_is_model&&!{})".format(LOCAL_FIRST_PERSON_QUERY)
+
+
+def UiPassSkip(test=UI_PASS_MAIN_TEST):
+    """语句前缀(状态 on_entry/on_exit、动画时间线): 界面那一遍 return 结束整条表达式, 后面的语句不执行。
+    2026-10-10 实机: animate 条件里的同一前缀在界面那一遍拦下全部后续语句(119 次全拦), 世界那一遍照常执行"""
+    return "{}?{{return 0;}};".format(test)
+
+
+def UiPassWorldOnlyHead(test=UI_PASS_MAIN_TEST):
+    """骨骼通道里写实体变量的顶层语句包成"仅世界那一遍执行"的块(通道还要返回值, 不能整句跳过): !(界面那一遍)?{语句;};"""
+    return "!{}?{{".format(test)
+
+
+UI_PASS_SKIP = UiPassSkip()
+UI_PASS_WORLD_ONLY_HEAD = UiPassWorldOnlyHead()
+UI_PASS_WORLD_ONLY_TAIL = "}"
+# 两种口径的前缀 / 块头都认(修复工具摘守卫、体检判口径; 恒开口径与 2026-10-10 首版产物的主域守卫同形)
+UI_PASS_SKIPS = (UI_PASS_SKIP, UiPassSkip(UI_PASS_TEST))
+UI_PASS_WORLD_ONLY_HEADS = (UI_PASS_WORLD_ONLY_HEAD, UiPassWorldOnlyHead(UI_PASS_TEST))
+
+
+def StripUiPassSkip(text):
+    """语句去掉界面那一遍的跳过前缀(两种口径都认; 修复工具与体检按原语句识别)"""
+    for skip in UI_PASS_SKIPS:
+        if text.startswith(skip):
+            return text[len(skip):]
+    return text
 
 
 def BuildElytraStateStatement():
@@ -648,13 +696,14 @@ def BuildElytraStateStatement():
 
     Java: 目标角 —— 滑翔时按速度方向 f4 = 下落时 1-(-v̂y)^1.5、否则 1, rotX = 20·f4 + 15·(1-f4)、
     rotZ = -90·f4 - 15·(1-f4); 潜行 rotX 40 / rotY 5 / rotZ -45; 其余 15 / 0 / -15。每渲染帧向目标靠 10%
-    (帧率相关), 这里按 60 帧折成与帧率无关的系数 1-0.9^(60·dt)。速度方向取主包逐帧的位移速度
-    (query.mod.ysm_ground_speed2, 格/秒)与 query.vertical_speed。资源包文件走旧版 Molang 语义: 三元全加括号。
+    (帧率相关), 这里按 60 帧折成与帧率无关的系数 1-0.9^(60·dt); HUD 纸娃娃那一遍(UI_PASS_TEST)系数取 0,
+    不再追一步。速度方向取主包逐帧的位移速度(query.mod.ysm_ground_speed2, 格/秒)与 query.vertical_speed。
+    资源包文件走旧版 Molang 语义: 三元全加括号。
     """
     speed = "math.sqrt(query.mod.ysm_ground_speed2*query.mod.ysm_ground_speed2" \
             "+query.vertical_speed*query.vertical_speed)"
     lines = [
-        "variable.ysm_el_k=1-math.pow(0.9,math.clamp(query.delta_time,0,0.1)*60)",
+        "variable.ysm_el_k=({}?0:(1-math.pow(0.9,math.clamp(query.delta_time,0,0.1)*60)))".format(UI_PASS_TEST),
         "variable.ysm_el_s={}".format(speed),
         "variable.ysm_el_f=((query.vertical_speed<0&&variable.ysm_el_s>0.0001)"
         "?(1-math.pow(math.clamp(-query.vertical_speed/variable.ysm_el_s,0,1),1.5)):1)",

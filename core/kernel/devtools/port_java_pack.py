@@ -391,8 +391,9 @@ def StripJavaIgnoredGeometry(data):
     return fixes
 
 
-def RewriteGeometry(srcPath, dstPath, identifier, report=None):
-    """几何文件 → 改 identifier + 剥掉 Java 不渲染的字段后写出(Java 与基岩同为 bedrock geometry 格式)"""
+def RewriteGeometry(srcPath, dstPath, identifier, report=None, boneNames=None):
+    """几何文件 → 改 identifier + 剥掉 Java 不渲染的字段后写出(Java 与基岩同为 bedrock geometry 格式)。
+    boneNames: 包级骨骼改名表(BoneNameMapper), 与动画共用; None = 本文件单独建一张"""
     data = LoadJson(srcPath)
     changed = 0
     for geo in data.get("minecraft:geometry") or []:
@@ -400,6 +401,10 @@ def RewriteGeometry(srcPath, dstPath, identifier, report=None):
         if isinstance(desc, dict):
             desc["identifier"] = identifier
             changed += 1
+    renamedBones = RenameGeometryBones(data, boneNames if boneNames is not None else BoneNameMapper())
+    if renamedBones and report is not None:
+        report.append(u"  几何 {} 骨骼名改成动画文件写得进去的形态(引擎只认 [A-Za-z0-9_.-], 动画同表改名): {}".format(
+            os.path.basename(dstPath), u", ".join(u"{}→{}".format(old, new) for old, new in renamedBones)))
     stripped = StripJavaIgnoredGeometry(data)
     if stripped and report is not None:
         report.append(u"  几何 {} 剥掉 Java 不渲染的字段 {} 处"
@@ -631,15 +636,15 @@ def RenameAnimationBones(body, renames):
     """动画体里 bones 段的骨骼名改名(大小写不敏感, 保序); 返回改名数。幂等(新名不在表里)。"""
     if not renames or not isinstance(body, dict):
         return 0
-    table = dict((str(old).lower(), new) for old, new in renames.items())
+    table = dict((_LowerName(old), new) for old, new in renames.items())
     boneChannels = body.get("bones")
     if not isinstance(boneChannels, dict):
         return 0
     renamed = OrderedDict()
     fixes = 0
     for name in boneChannels:
-        target = table.get(str(name).lower())
-        if target and str(name).lower() != str(target).lower():
+        target = table.get(_LowerName(name))
+        if target and _LowerName(name) != _LowerName(target):
             fixes += 1
             renamed[target] = boneChannels[name]
         else:
@@ -1256,10 +1261,56 @@ def _ReplaceFunctionCalls(text, report):
 # 调用处替换为状态变量 v.ysm_so_<键>_y, 积分语句提到该 molang 语句之前(纯表达式串
 # 包成 "语句; return 表达式;" 复杂表达式)。状态变量经产物变量扫描自动初始化(值 0,
 # 与 Java 新建物理对象 lastSimulation=0 一致)。
+# HUD 纸娃娃那一遍(runtime_bindings.UI_PASS_TEST: 同一实体在界面里再画一遍, 共用变量域, 时间按 tick 取整且超前
+# 于世界那一遍)不积分: dt 取 0, t / x_prev 原样保留 —— 否则下一帧世界那一遍 dt 被夹成 0、积分全挪到界面那一遍,
+# 同一段时间反复积分(弹簧变快)、显示值按 tick 跳。旧产物由 GuardPhysicsUiPass 迁移(修复工具与基线共用)
 _PHYSICS_CALL_PATTERN = re.compile(r"\b(?:ysm\.)?(second_order|first_order)\s*\(")
 _PHYSICS_SLUG_PATTERN = re.compile(r"[^a-z0-9_]+")
 _PHYSICS_DT_MAX = "0.1"      # 帧间隔上限(秒): 卡顿/动画久未求值后不做巨步积分
 _PHYSICS_PI = 3.14159265358979
+_PHYSICS_UI_FLAG = u"v.ysm_so_ui"
+
+
+def _PhysicsUiStatement(test=runtime_bindings.UI_PASS_MAIN_TEST):
+    """积分头的界面那一遍判定句; 口径随所在条目(主域缺省, 函数执行体恒开, 见 UiPassTestFor)"""
+    return u"{}={}?1:0".format(_PHYSICS_UI_FLAG, test)
+
+
+_PHYSICS_UI_STATEMENT = _PhysicsUiStatement()
+_PHYSICS_UI_STATEMENTS = (_PHYSICS_UI_STATEMENT, _PhysicsUiStatement(runtime_bindings.UI_PASS_TEST))
+# 旧产物的积分头(dt + t 两句)与输入记忆句; 迁移后的形态不再匹配(幂等)
+_LEGACY_PHYSICS_HEAD = re.compile(
+    r"(?:v|variable)\.ysm_so_dt=math\.clamp\((?:q|query)\.life_time-((?:v|variable)\.ysm_(?:so|fo)_[a-z0-9_]+)_t,"
+    r"0,([0-9.]+)\);\1_t=(?:q|query)\.life_time(?=;)")
+_LEGACY_PHYSICS_INPUT = re.compile(r"((?:v|variable)\.ysm_so_[a-z0-9_]+)_x=((?:v|variable)\.ysm_so_in)(?=;)")
+
+
+def _PhysicsHead(state):
+    """积分头: 界面那一遍判定 + dt + 时间戳(见上方 HUD 纸娃娃注)"""
+    return [
+        _PHYSICS_UI_STATEMENT,
+        u"v.ysm_so_dt={f}>0?0:math.clamp(q.life_time-{s}_t,0,{m})".format(f=_PHYSICS_UI_FLAG, s=state,
+                                                                          m=_PHYSICS_DT_MAX),
+        u"{s}_t={f}>0?{s}_t:q.life_time".format(f=_PHYSICS_UI_FLAG, s=state),
+    ]
+
+
+def GuardPhysicsUiPass(text):
+    """旧产物的物理积分块补 HUD 纸娃娃那一遍守卫(形态同 _PhysicsHead); 返回 (新文本, 迁移块数)。幂等"""
+    if u"ysm_so_dt=math.clamp(" not in text:
+        return text, 0
+
+    def _Head(match):
+        state = match.group(1)
+        return u"{ui};v.ysm_so_dt={f}>0?0:math.clamp(q.life_time-{s}_t,0,{m});{s}_t={f}>0?{s}_t:q.life_time".format(
+            ui=_PHYSICS_UI_STATEMENT, f=_PHYSICS_UI_FLAG, s=state, m=match.group(2))
+
+    text, heads = _LEGACY_PHYSICS_HEAD.subn(_Head, text)
+    if heads:
+        text = _LEGACY_PHYSICS_INPUT.sub(
+            lambda match: u"{s}_x={f}>0?{s}_x:{i}".format(s=match.group(1), f=_PHYSICS_UI_FLAG, i=match.group(2)),
+            text)
+    return text, heads
 
 
 def _SplitTopLevelStatements(text):
@@ -1410,12 +1461,10 @@ class PhysicsRewriter(object):
         rawZ = params[1] if len(params) > 1 and params[1].strip() else "1"
         rawR = params[2] if len(params) > 2 and params[2].strip() else "1"
         numF, numZ, numR = _MolangNumber(rawF), _MolangNumber(rawZ), _MolangNumber(rawR)
-        lines = [
-            u"v.ysm_so_dt=math.clamp(q.life_time-{s}_t,0,{m})".format(s=state, m=_PHYSICS_DT_MAX),
-            u"{s}_t=q.life_time".format(s=state),
+        lines = _PhysicsHead(state) + [
             u"v.ysm_so_in=({x})".format(x=inputExpr.strip()),
             u"v.ysm_so_xd=v.ysm_so_dt>0?(v.ysm_so_in-{s}_x)/v.ysm_so_dt:0".format(s=state),
-            u"{s}_x=v.ysm_so_in".format(s=state),
+            u"{s}_x={f}>0?{s}_x:v.ysm_so_in".format(s=state, f=_PHYSICS_UI_FLAG),
         ]
         if numF is not None and numZ is not None and numR is not None:
             f = min(max(numF, 0.001), 5.0)          # Java Mth.clamp(f,0,5); f=0 在 Java 亦除零
@@ -1445,9 +1494,7 @@ class PhysicsRewriter(object):
     def _FirstOrderBlock(self, slug, inputExpr, params):
         state = u"v.ysm_fo_" + slug
         rawR = params[0] if params and params[0].strip() else "1"
-        lines = [
-            u"v.ysm_so_dt=math.clamp(q.life_time-{s}_t,0,{m})".format(s=state, m=_PHYSICS_DT_MAX),
-            u"{s}_t=q.life_time".format(s=state),
+        lines = _PhysicsHead(state) + [
             # Java: y = (1 - dt/r)·y + (dt/r)·x; 系数钳到 [0,1] 免 dt>r 时反向发散
             u"v.ysm_so_a=math.clamp(v.ysm_so_dt/math.max({r},0.0001),0,1)".format(r=rawR.strip()),
             u"{s}_y={s}_y+v.ysm_so_a*(({x})-{s}_y)".format(s=state, x=inputExpr.strip()),
@@ -3540,8 +3587,11 @@ def GatePreviewEntityQueriesInBody(body):
 def RewriteAnimations(srcPath, dstPath, namespace, molangDefaults=None, molangReport=None,
                       nameMapper=None, foundVars=None, additiveKeys=None, physics=None,
                       forceStateLoops=False, preKeys=None, particles=None, sounds=None,
-                      previewGate=False, boneRenames=None, functions=None, skipNames=None):
+                      previewGate=False, boneRenames=None, functions=None, skipNames=None, boneNames=None):
     """动画文件 → 裸短名加 animation.<namespace>. 前缀 + 条件名引擎安全转义。
+
+    boneNames: 包级骨骼改名表(BoneNameMapper, 与几何共用): bones 下不合引擎命名规则的骨骼名一个就作废整份文件;
+    None = 本文件单独建一张。
 
     skipNames: 不移植的 Java 动画原名(枪械槽位里基岩驱动不了的逐枪/手雷动画, 见 TacSlotSkipNames), 当分组标题一样跳过。
 
@@ -3579,6 +3629,7 @@ def RewriteAnimations(srcPath, dstPath, namespace, molangDefaults=None, molangRe
     loopFixes = 0
     physicsFixes = 0
     sanitizeFixes = 0
+    boneMapper = boneNames if boneNames is not None else BoneNameMapper()
 
     def _Note(label, count=1):
         if molangReport is not None and count:
@@ -3601,6 +3652,10 @@ def RewriteAnimations(srcPath, dstPath, namespace, molangDefaults=None, molangRe
             molangReport[u"lower:{} -> {}".format(name, name.lower())] += 1
         body = animations[name]
         if isinstance(body, dict):
+            if isinstance(body.get("bones"), dict):
+                boneMapper.Register(body["bones"])
+                _Note(u"norm:骨骼名含引擎不认的字符(空格/中文等, 一个就作废整份动画文件) -> 与几何同表改名",
+                      RenameAnimationBones(body, boneMapper.Renames(body["bones"])))
             _Note(u"norm:第一人称手臂动画的骨骼名按重建后的 arm 几何改名",
                   RenameAnimationBones(body, boneRenames))
             # ---- Java 解析器层面的字段语义(pojo Animation.Adapter)先归一 ----
@@ -3797,6 +3852,112 @@ class AsciiNameMapper(object):
         if candidate != rawName:
             self.converted.append((rawName, candidate))
         return candidate
+
+
+# 动画文件 bones 下的骨骼名键: 引擎 schema 按 [a-zA-Z0-9_.-]+ 整串匹配(动画文件 schema 的 bones 子项),
+# **一个不合规的键作废整份动画文件**(豪包 main 动画引用已删除的骨骼 "music box", 257 个动画全丢、模型停在绑定姿态)。
+# 几何的骨骼名是值不是键, 不受这条约束; 但动画按名字找骨骼(不分大小写) —— 几何与全部动画用同一张表改名
+BONE_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+_BONE_KEY_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _LowerName(name):
+    return name.lower() if isinstance(name, (str, unicode)) else str(name).lower()  # noqa: F821
+
+
+class BoneNameMapper(object):
+    """骨骼名 → 动画文件写得进去的名字。合规名原样返回; 不合规的转拼音、非法字符折成下划线, 撞上已登记的名字加序号。
+    引擎按不分大小写匹配骨骼, 登记与查表都按小写。几何先 Register 全部骨骼名再改名、动画后改 —— 同一实例保证两边一致"""
+
+    def __init__(self):
+        self._mapping = {}
+        self._taken = set()
+        self.converted = []                            # [(原名, 新名)] 供汇总留痕
+
+    def Register(self, names):
+        for name in names:
+            if isinstance(name, (str, unicode)) and BONE_KEY_PATTERN.match(name):  # noqa: F821
+                self._taken.add(name.lower())
+
+    def Convert(self, name):
+        if not isinstance(name, (str, unicode)) or BONE_KEY_PATTERN.match(name):  # noqa: F821
+            return name
+        key = name.lower()
+        if key not in self._mapping:
+            base = _BONE_KEY_UNSAFE.sub("_", Pinyinize(name)).strip("_") or "bone"
+            candidate, index = base, 2
+            while candidate.lower() in self._taken:
+                candidate = u"{}_{}".format(base, index)
+                index += 1
+            self._taken.add(candidate.lower())
+            self._mapping[key] = str(candidate)
+            self.converted.append((name, self._mapping[key]))
+        return self._mapping[key]
+
+    def Renames(self, names):
+        """{原名: 新名}, 只含要改的(供 RenameAnimationBones)"""
+        return dict((name, self.Convert(name)) for name in names if self.Convert(name) != name)
+
+
+def GeometryBoneNames(data):
+    """几何文件数据 → 全部骨骼名"""
+    names = []
+    for geometry in (data.get("minecraft:geometry") or []) if isinstance(data, dict) else []:
+        for bone in (geometry.get("bones") or []) if isinstance(geometry, dict) else []:
+            if isinstance(bone, dict) and isinstance(bone.get("name"), (str, unicode)):  # noqa: F821
+                names.append(bone["name"])
+    return names
+
+
+def RenameGeometryBones(data, boneNames):
+    """几何里不合引擎命名规则的骨骼名(name 与 parent)按改名表改; 先登记本几何的全部骨骼名。返回 [(原名, 新名)](骨骼本身)"""
+    boneNames.Register(GeometryBoneNames(data))
+    renamed = []
+    for geometry in (data.get("minecraft:geometry") or []) if isinstance(data, dict) else []:
+        for bone in (geometry.get("bones") or []) if isinstance(geometry, dict) else []:
+            if not isinstance(bone, dict):
+                continue
+            for field in ("name", "parent"):
+                value = bone.get(field)
+                if isinstance(value, (str, unicode)) and boneNames.Convert(value) != value:  # noqa: F821
+                    bone[field] = boneNames.Convert(value)
+                    if field == "name":
+                        renamed.append((value, bone[field]))
+    return renamed
+
+
+def SanitizePackBoneNames(packName):
+    """已落盘产物迁移: 包的 RP 几何(models/entity/<包>)与动画里不合引擎命名规则的骨骼名同表改名。幂等; 返回 [(原名, 新名)]"""
+    boneNames = BoneNameMapper()
+    geometries = []
+    geoDir = os.path.join(RP, "models", "entity", packName)
+    for name in sorted(os.listdir(geoDir)) if os.path.isdir(geoDir) else []:
+        if name.endswith(".json"):
+            try:
+                geometries.append((os.path.join(geoDir, name), LoadJson(os.path.join(geoDir, name))))
+            except ValueError:
+                continue
+    for _path, data in geometries:
+        boneNames.Register(GeometryBoneNames(data))
+    for path, data in geometries:
+        if RenameGeometryBones(data, boneNames):
+            DumpJson(path, data)
+    animDir = os.path.join(RP, "animations", packName)
+    for name in sorted(os.listdir(animDir)) if os.path.isdir(animDir) else []:
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(animDir, name)
+        try:
+            data = LoadJson(path)
+        except ValueError:
+            continue
+        renamed = 0
+        for body in (data.get("animations") or {}).values():
+            if isinstance(body, dict) and isinstance(body.get("bones"), dict):
+                renamed += RenameAnimationBones(body, boneNames.Renames(body["bones"]))
+        if renamed:
+            DumpJson(path, data)
+    return boneNames.converted
 
 
 def _StateSafe(name):
@@ -4161,38 +4322,84 @@ def _TransitionItems(entry):
     return [(target, condition) for target, condition in entry.items()]
 
 
-def _NegatedCore(condition):
-    """条件形如 !(A) / !A → 返回 A(去掉一层包裹括号); 其他形态返回 None"""
-    text = (condition or "").strip()
-    if not text.startswith("!"):
+def _ClosingParen(text, start):
+    """text[start] 是 '(' → 与它配对的 ')' 下标; 没配上 -1"""
+    depth = 0
+    for index in range(start, len(text)):
+        if text[index] == "(":
+            depth += 1
+        elif text[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+    return -1
+
+
+def _StripOuterParens(text):
+    """去掉整体包裹的括号(可多层)"""
+    text = (text or "").strip()
+    while text.startswith("(") and _ClosingParen(text, 0) == len(text) - 1:
+        text = text[1:-1].strip()
+    return text
+
+
+def _TopLevelSplit(text, separator):
+    """按括号外的 separator('&&' / '||')切分"""
+    parts, depth, start, index = [], 0, 0, 0
+    while index < len(text):
+        ch = text[index]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif depth == 0 and text.startswith(separator, index):
+            parts.append(text[start:index])
+            index += len(separator)
+            start = index
+            continue
+        index += 1
+    parts.append(text[start:])
+    return [part.strip() for part in parts]
+
+
+def _RequiredConjuncts(condition):
+    """条件成立时必然成立的合取项(去掉多余括号, 嵌套的 && 展平); 顶层有 || 的整体算一项"""
+    text = _StripOuterParens(condition)
+    if len(_TopLevelSplit(text, "||")) > 1:
+        return [text]
+    parts = _TopLevelSplit(text, "&&")
+    if len(parts) == 1:
+        return [text]
+    out = []
+    for part in parts:
+        out.extend(_RequiredConjuncts(part))
+    return out
+
+
+_SINGLE_OPERAND_BREAKERS = re.compile(r"&&|\|\||==|!=|<|>|\?|:|[-+*/]")
+
+
+def _NegatedConjunct(text):
+    """合取项形如 !X(X 是单个操作数或整体括号)→ X(去括号); 否则 None。!v.a>0 是 (!v.a)>0, 不算"""
+    text = text.strip()
+    if not text.startswith("!") or text.startswith("!="):
         return None
-    core = text[1:].strip()
-    if core.startswith("(") and core.endswith(")"):
-        depth = 0
-        for index, ch in enumerate(core):
-            if ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-                if depth == 0 and index != len(core) - 1:
-                    return core   # 括号不是整体包裹, 原样
-        core = core[1:-1]
-    return core or None
+    rest = text[1:].strip()
+    if rest.startswith("("):
+        return _StripOuterParens(rest) if _ClosingParen(rest, 0) == len(rest) - 1 else None
+    return None if _SINGLE_OPERAND_BREAKERS.search(rest) else rest
 
 
-def _RequiresPositively(text, core):
-    """text 里是否出现了未被 ! 否定的 core(前面越过若干 '(' 后不是 '!')"""
-    start = 0
-    while True:
-        index = text.find(core, start)
-        if index < 0:
-            return False
-        cursor = index - 1
-        while cursor >= 0 and text[cursor] in "( ":
-            cursor -= 1
-        if cursor < 0 or text[cursor] != "!":
-            return True
-        start = index + len(core)
+def _Contradicts(first, second):
+    """两个条件不可能同时成立: 一方的某个必然合取项是 !core, 另一方的必然合取项里有 core 的全部合取项。
+    只认合取结构, 认不出当不矛盾(早先按子串判, 把 "地速==0||待机" 里的"待机"当成必要条件, 漏插了旁路与自环)"""
+    for a, b in ((first, second), (second, first)):
+        required = set(_StripOuterParens(part) for part in _RequiredConjuncts(b))
+        for part in _RequiredConjuncts(a):
+            core = _NegatedConjunct(part)
+            if core and all(_StripOuterParens(p) in required for p in _RequiredConjuncts(core)):
+                return True
+    return False
 
 
 def BypassEmptyHubStates(body):
@@ -4205,8 +4412,13 @@ def BypassEmptyHubStates(body):
     时入态没有动画, 姿态先淡到**绑定姿态**再由 hub 淡进下一状态 —— 凋灵娘落地
     (jump_down → cache → idle)一瞬间直立(用户实测 2026-09-03)。
     做法: 对每条 X→H(条件 cx), 在它之前插入 X→Y(条件 (cx)&&(cy)), Y 取 H 的每条出边
-    (顺序即 H 的优先级); Y==X 的自环不插(重进状态会重播动画); H 出边条件含
-    all_animations_finished(相对 H 自己的动画)的不插。X→H 原条目保留作兜底。
+    (顺序即 H 的优先级); H 出边条件含 all_animations_finished(相对 H 自己的动画)的不插。X→H 原条目保留作兜底。
+    **回到 X 自己的出边(Y==X)插成自环 X→X**: Java 每帧从当前状态起连走没有动画的状态(BedrockAnimationController
+    .process 的 skipPathSet 循环), X→H→X 在同一帧走完 = 重进 X(动画从头播); 基岩一帧只走一步, 不插自环就 X、H 逐帧来回
+    (凋灵娘睡觉时 pre_parallel_1 的 idle→cache "!ctrl.idle" 与 cache→idle "地速==0" 同时成立, 整个人抽搐, 2026-10-10)。
+    基岩转到自己同样把动画重置从头播, 只是不跑进/出态语句(ActorAnimationControllerPlayer 只在状态号变了才 fireEvents) ——
+    cx 用计时变量判播完(RewriteFinishedQueries 的 ysm_t0_*, 进态语句里刷新)的不插, 否则计时不刷新、每帧重播。
+    已有的旁路条目原地不动, 新增的按 H 的出边顺序插在同组里排在它后面的条目之前(旧产物补自环时顺序与新移植一致)。
     """
     states = body.get("states") if isinstance(body, dict) else None
     if not isinstance(states, dict):
@@ -4238,40 +4450,16 @@ def BypassEmptyHubStates(body):
         transitions = state.get("transitions")
         if not isinstance(transitions, list):
             continue
-        existing = set()
-        for entry in transitions:
-            for target, condition in _TransitionItems(entry):
-                existing.add((target, condition))
+        existing = set(item for entry in transitions for item in _TransitionItems(entry))
         rebuilt, hubEntries = [], []
         for entry in transitions:
             items = _TransitionItems(entry)
             for target, condition in items:
                 if target in hubs and isinstance(condition, (str, unicode)):  # noqa: F821
-                    negatedCore = _NegatedCore(condition)
-                    for hubTarget, hubCondition in hubs[target]:
-                        if hubTarget == name or hubTarget not in states \
-                                or not isinstance(hubCondition, (str, unicode)):  # noqa: F821
-                            continue
-                        # 目标本身也是空状态(作者剪掉死引用后变空的一串状态)不插: 旁路进空状态
-                        # 没有收益, 且下一遍会把复合转移再展开一层, 链式增长(幂等性守护逮到)
-                        if hubTarget in hubs:
-                            continue
-                        # X→hub 的条件是 !A 而 hub 出边要求 A(如落地后 → jump_up), 或反过来
-                        # (进 hub 要求飞行, 出边是 !飞行): 恒假, 不插
-                        if negatedCore and _RequiresPositively(hubCondition, negatedCore):
-                            continue
-                        hubNegatedCore = _NegatedCore(hubCondition)
-                        if hubNegatedCore and _RequiresPositively(condition, hubNegatedCore):
-                            continue
-                        # X 自己已有同目标同条件的直达转移(在前面先判): 旁路是纯冗余
-                        if (hubTarget, hubCondition) in existing:
-                            continue
-                        composite = u"({})&&({})".format(condition, hubCondition)
-                        if (hubTarget, composite) in existing:
-                            continue
-                        existing.add((hubTarget, composite))
-                        rebuilt.append(OrderedDict([(hubTarget, composite)]))
+                    for item, earlier, later in _PlanHubBypass(name, condition, hubs[target], hubs, states, existing):
+                        existing.add(item)
                         added += 1
+                        rebuilt.insert(_HubBypassSlot(rebuilt, earlier, later), OrderedDict([item]))
             # 指向空中转状态的转移一律排到**最后**: 它是"其他都不匹配"的兜底。基岩按列表
             # 顺序取第一个条件成立的转移, 原序里作者常把兜底写在中间(凋灵娘 idle 的
             # →cache 排在 →jump_up 之前) —— 起跳时 cache 先命中, 于是"起跳一瞬间直立"。
@@ -4281,6 +4469,43 @@ def BypassEmptyHubStates(body):
             state["transitions"] = newTransitions
             added = added or 1     # 仅重排也要落盘
     return added
+
+
+def _PlanHubBypass(stateName, condition, hubOutgoing, hubs, states, existing):
+    """X→H(条件 condition)要新增的旁路条目 → [((目标, 复合条件), 同组排在它前面的条目, 同组排在它后面的条目)], 按 H 的出边顺序"""
+    candidates = []
+    for hubTarget, hubCondition in hubOutgoing:
+        if not isinstance(hubCondition, (str, unicode)) or hubTarget not in states:  # noqa: F821
+            continue
+        # 目标本身也是空状态(作者剪掉死引用后变空的一串状态)不插: 旁路进空状态
+        # 没有收益, 且下一遍会把复合转移再展开一层, 链式增长(幂等性守护逮到)
+        if hubTarget in hubs:
+            continue
+        # 回到 X 自己插自环; cx 靠计时变量判播完的不插(基岩自环不跑进态语句, 计时不刷新就每帧重播)
+        if hubTarget == stateName and "ysm_t0_" in condition:
+            continue
+        # X→hub 的条件是 !A 而 hub 出边要求 A(如落地后 → jump_up), 或反过来
+        # (进 hub 要求飞行, 出边是 !飞行): 恒假, 不插
+        if _Contradicts(condition, hubCondition):
+            continue
+        # X 自己已有同目标同条件的直达转移(在前面先判): 旁路是纯冗余
+        if (hubTarget, hubCondition) in existing:
+            continue
+        candidates.append((hubTarget, u"({})&&({})".format(condition, hubCondition)))
+    return [(item, set(candidates[:index]), set(candidates[index + 1:]))
+            for index, item in enumerate(candidates) if item not in existing]
+
+
+def _HubBypassSlot(rebuilt, earlier, later):
+    """新增旁路条目的插入位置: 同组排在它后面的(上一遍生成的)条目之前, 否则紧跟同组排在它前面的, 都没有就接在末尾"""
+    keys = [list(entry.items())[0] if isinstance(entry, dict) and len(entry) == 1 else None for entry in rebuilt]
+    for index, key in enumerate(keys):
+        if key in later:
+            return index
+    for index in range(len(keys) - 1, -1, -1):
+        if keys[index] in earlier:
+            return index + 1
+    return len(rebuilt)
 
 
 # ---- Java 控制器语义(AnimationProtoMapper / BedrockAnimationController)与基岩的差异 ----
@@ -7248,8 +7473,9 @@ def SeparatePackLikeTerms(packName):
     return _RewritePackMolang(packName, SeparateAnimationLikeTerms, SeparateControllerLikeTerms)
 
 
-def _RewritePackMolang(packName, animationFunc, controllerFunc):
-    """包的 RP 动画/控制器文件逐份套改写函数(返回改动列表), 有改动才落盘; 返回改动总数"""
+def _RewritePackMolang(packName, animationFunc, controllerFunc, withIds=False):
+    """包的 RP 动画/控制器文件逐份套改写函数(返回改动列表), 有改动才落盘; 返回改动总数。
+    withIds: 改写函数按 func(动画/控制器 ID, 体) 调用"""
     total = 0
     for sub, func in (("animations", animationFunc),
                       ("animation_controllers", controllerFunc)):
@@ -7268,13 +7494,246 @@ def _RewritePackMolang(packName, animationFunc, controllerFunc):
             if not isinstance(bodies, dict):
                 continue
             count = 0
-            for body in bodies.values():
+            for bodyId, body in bodies.items():
                 if isinstance(body, dict):
-                    count += len(func(body))
+                    count += len(func(bodyId, body) if withIds else func(body))
             if count:
                 DumpJson(path, data)
                 total += count
     return total
+
+
+# ---- HUD 纸娃娃那一遍只读(见 runtime_bindings.UI_PASS_TEST 注) ----
+# 同一实体在界面里再画一遍、共用变量域、每帧排在世界那一遍之后: 界面那一份状态机的进出语句、时间线和骨骼通道里的赋值照样
+# 改世界实体的变量。2026-10-10 实机(豪 YSM 三段挥砍, 末影龙娘同款连招): 挥砍动画时间线把 v.swing_sword 置 1 时世界那一遍的
+# 并行控制器已经求值过, 界面那一遍的同一控制器看到它、出招、on_exit 清 0 并计数加 1, 本体从没进过出招状态 —— 潜行 / 疾跑才显示
+# 纸娃娃, 所以"只有 idle / walk 正常"。计数器多走一步、随机待机多抽一次、头发锁存与骨骼旋转回读被界面上下文的值覆盖同理。
+# 界面那一遍一律只读:
+# - 时间线与状态 on_entry/on_exit 里写实体变量的语句加前缀 UI_PASS_SKIP(界面那一遍整句跳过);
+# - 骨骼通道里写实体变量的顶层语句包成仅世界那一遍执行的块, 通道照常求值、读到的是世界那一遍写下的量;
+# - 不动: 物理积分块(自带 dt 守卫, 见 _PhysicsHead)、全是 x = x ?? 缺省 的初始化状态(幂等)、t./temp. 临时变量(不跨表达式)、
+#   指令(/ 与 @ 开头)、带 return 的块语句(跳过它会改变通道返回值)。
+# 判据按条目口径(UiPassTestFor): 包里的动画 / 控制器都是主域条目, 第一人称时世界那一遍不跑, 界面那一遍照常写
+# (runtime_bindings.UI_PASS_MAIN_TEST); 函数执行体恒开, 世界那一遍每帧都跑(UI_PASS_TEST)。物理积分头的判定句同口径。
+# 移植与基线收尾整包加一遍(GuardPackUiPass); 修复工具开头整包摘掉(UnguardPackUiPass), 各步骤照旧在原语句上工作, 末尾加回。
+UI_PASS_REPORT = (u"HUD 纸娃娃那一遍只读: {} 处写变量的语句只在世界那一遍执行(纸娃娃与世界实体共用变量, 界面那一遍会先把"
+                  u"一次性信号消费掉、计数器多走一步)")
+_ENTITY_VARIABLE_ASSIGN = re.compile(r"\b(?:v|variable)\.[A-Za-z_][A-Za-z0-9_.]*\s*=(?!=)", re.IGNORECASE)
+_TOP_LEVEL_ASSIGN_TARGET = re.compile(r"^((?:v|variable)\.[A-Za-z_][A-Za-z0-9_.]*)\s*=(?!=)", re.IGNORECASE)
+_COMMAND_STATEMENT = re.compile(r"^\s*[/@]")
+_IDEMPOTENT_INIT_STATEMENT = re.compile(r"^\s*((?:v|variable)\.[A-Za-z_][A-Za-z0-9_.]*)\s*=\s*\1\s*\?\?", re.IGNORECASE)
+_RETURN_WORD = re.compile(r"\breturn\b")
+# 世界那一遍恒开的主包共享条目(条件 "1"): 第一人称时世界那一遍照跑, 界面那一遍是重跑
+UI_PASS_ALWAYS_ON_IDS = frozenset([
+    "controller.animation.ysm.java_use_state",
+    "animation.ysm.java_input_state",
+    "animation.ysm.java_ctrl_state",
+    runtime_bindings.ELYTRA_STATE_ANIMATION,
+])
+
+
+def UiPassTestFor(entryId):
+    """动画 / 控制器 ID → 界面那一遍的判据: 世界那一遍恒开的条目(函数执行体 animation.<包>.ysm_fx_frame、主包共享的
+    输入 / 使用状态)用 UI_PASS_TEST; 其余是主域条目(第一人称时世界那一遍不跑), 用 UI_PASS_MAIN_TEST"""
+    if isinstance(entryId, (str, unicode)) and (  # noqa: F821
+            entryId.endswith(u"." + java_functions.EXECUTOR_KEY) or entryId in UI_PASS_ALWAYS_ON_IDS):
+        return runtime_bindings.UI_PASS_TEST
+    return runtime_bindings.UI_PASS_MAIN_TEST
+
+
+def GuardUiPassStatement(text, test=runtime_bindings.UI_PASS_MAIN_TEST):
+    """时间线 / 状态进出的一条语句 → 界面那一遍整句跳过(前缀 UiPassSkip(test)); 不写实体变量的、指令原样返回,
+    带着另一口径前缀的换成这一口径"""
+    if not isinstance(text, (str, unicode)):  # noqa: F821
+        return text
+    skip = runtime_bindings.UiPassSkip(test)
+    if text.startswith(skip):
+        return text
+    body = runtime_bindings.StripUiPassSkip(text).strip()
+    if not body or _COMMAND_STATEMENT.match(body) or not _ENTITY_VARIABLE_ASSIGN.search(body):
+        return text
+    if not body.endswith(";"):
+        body += ";"
+    return skip + body
+
+
+def UnguardUiPassStatement(text):
+    if not isinstance(text, (str, unicode)):  # noqa: F821
+        return text
+    return runtime_bindings.StripUiPassSkip(text)
+
+
+def _UnwrapWorldOnly(piece):
+    """仅世界那一遍执行的块(两种口径都认) → 块里的语句(不带结尾分号); 不是这种块返回 None"""
+    tail = runtime_bindings.UI_PASS_WORLD_ONLY_TAIL
+    for head in runtime_bindings.UI_PASS_WORLD_ONLY_HEADS:
+        if piece.startswith(head) and piece.endswith(tail):
+            inner = piece[len(head):-len(tail)].strip()
+            return inner[:-1].strip() if inner.endswith(";") else inner
+    return None
+
+
+def _GuardableChannelStatement(piece):
+    """骨骼通道的一条顶层语句要不要包成仅世界那一遍执行的块"""
+    if not piece or _RETURN_WORD.match(piece) or _UnwrapWorldOnly(piece) is not None:
+        return False
+    target = _TOP_LEVEL_ASSIGN_TARGET.match(piece)
+    if target:
+        return not _PHYSICS_STATE_TARGET.match(target.group(1))
+    # 块语句(条件块 / loop): 里面写实体变量、且不带 return 才包
+    return "{" in piece and bool(_ENTITY_VARIABLE_ASSIGN.search(piece)) and not _RETURN_WORD.search(piece)
+
+
+def GuardUiPassAssignments(text, test=runtime_bindings.UI_PASS_MAIN_TEST):
+    """骨骼通道表达式 → 写实体变量的顶层语句包成仅世界那一遍执行的块 `!(界面那一遍)?{语句;};`(另一口径的块换成这一口径);
+    没有可包的原样返回"""
+    if not isinstance(text, (str, unicode)) or not _ENTITY_VARIABLE_ASSIGN.search(text):  # noqa: F821
+        return text
+    head = runtime_bindings.UiPassWorldOnlyHead(test)
+    statements, endsWithSemicolon = _SplitTopLevelStatements(text)
+    pieces, changed = [], False
+    for statement in statements:
+        piece = statement.strip()
+        inner = None if piece.startswith(head) else _UnwrapWorldOnly(piece)
+        if inner is not None:
+            piece, changed = inner, True
+        if _GuardableChannelStatement(piece):
+            piece = u"{}{};{}".format(head, piece, runtime_bindings.UI_PASS_WORLD_ONLY_TAIL)
+            changed = True
+        pieces.append(piece)
+    if not changed:
+        return text
+    joined = u";".join(pieces)
+    return joined + u";" if endsWithSemicolon else joined
+
+
+def UnguardUiPassAssignments(text):
+    if not isinstance(text, (str, unicode)) or \
+            not any(head in text for head in runtime_bindings.UI_PASS_WORLD_ONLY_HEADS):  # noqa: F821
+        return text
+    statements, endsWithSemicolon = _SplitTopLevelStatements(text)
+    pieces, changed = [], False
+    for statement in statements:
+        piece = statement.strip()
+        inner = _UnwrapWorldOnly(piece)
+        if inner is not None:
+            piece, changed = inner, True
+        pieces.append(piece)
+    if not changed:
+        return text
+    joined = u";".join(pieces)
+    return joined + u";" if endsWithSemicolon else joined
+
+
+def NormalizePhysicsUiTest(text, test=runtime_bindings.UI_PASS_MAIN_TEST):
+    """物理积分头的界面那一遍判定句换成条目口径(_PhysicsHead 一律按主域写, 函数执行体在整包加守卫时换成恒开)"""
+    if not isinstance(text, (str, unicode)) or _PHYSICS_UI_FLAG not in text:  # noqa: F821
+        return text
+    wanted = _PhysicsUiStatement(test)
+    for statement in _PHYSICS_UI_STATEMENTS:
+        if statement != wanted and statement in text:
+            text = text.replace(statement, wanted)
+    return text
+
+
+def _IdempotentInitLines(lines):
+    strings = [line for line in lines if isinstance(line, (str, unicode))]  # noqa: F821
+    return bool(strings) and all(_IDEMPOTENT_INIT_STATEMENT.match(line) for line in strings)
+
+
+def _MapStatementList(lines, func, where, changes):
+    for index, line in enumerate(lines):
+        if isinstance(line, (str, unicode)):  # noqa: F821
+            newLine = func(line)
+            if newLine != line:
+                lines[index] = newLine
+                changes.append(where + (index,))
+
+
+def _MapChannelStrings(node, func, path, changes):
+    if isinstance(node, dict):
+        items = [(key, node[key]) for key in list(node.keys()) if key != "lerp_mode"]
+    elif isinstance(node, list):
+        items = list(enumerate(node))
+    else:
+        return
+    for key, value in items:
+        if isinstance(value, (str, unicode)):  # noqa: F821
+            newValue = func(value)
+            if newValue != value:
+                node[key] = newValue
+                changes.append(path + (key,))
+        else:
+            _MapChannelStrings(value, func, path + (key,), changes)
+
+
+def _MapControllerUiPass(body, statementFunc):
+    changes = []
+    for stateName, state in (body.get("states") or {}).items():
+        if not isinstance(state, dict):
+            continue
+        for key in ("on_entry", "on_exit"):
+            lines = state.get(key)
+            if isinstance(lines, list) and not _IdempotentInitLines(lines):
+                _MapStatementList(lines, statementFunc, (stateName, key), changes)
+    return changes
+
+
+def _MapAnimationUiPass(body, statementFunc, channelFunc):
+    changes = []
+    timeline = body.get("timeline")
+    if isinstance(timeline, dict):
+        for stamp in list(timeline.keys()):
+            value = timeline[stamp]
+            if isinstance(value, (str, unicode)):  # noqa: F821
+                newValue = statementFunc(value)
+                if newValue != value:
+                    timeline[stamp] = newValue
+                    changes.append(("timeline", stamp))
+            elif isinstance(value, list):
+                _MapStatementList(value, statementFunc, ("timeline", stamp), changes)
+    if isinstance(body.get("bones"), dict):
+        _MapChannelStrings(body["bones"], channelFunc, ("bones",), changes)
+    return changes
+
+
+def _GuardUiPassLine(line, test):
+    """语句守卫 + 语句里物理积分头的判定句换成同一口径(时间线里也有积分块)"""
+    return GuardUiPassStatement(NormalizePhysicsUiTest(line, test), test)
+
+
+def GuardControllerUiPass(body, test=runtime_bindings.UI_PASS_MAIN_TEST):
+    """控制器体: 各状态 on_entry/on_exit 里写实体变量的语句加界面那一遍跳过前缀(口径 test); 返回改动列表(幂等)"""
+    return _MapControllerUiPass(body, lambda line: _GuardUiPassLine(line, test))
+
+
+def UnguardControllerUiPass(body):
+    return _MapControllerUiPass(body, UnguardUiPassStatement)
+
+
+def GuardAnimationUiPass(body, test=runtime_bindings.UI_PASS_MAIN_TEST):
+    """动画体: 时间线语句加跳过前缀, 骨骼通道里写实体变量的顶层语句包成仅世界那一遍执行的块, 物理积分头的判定句
+    换成同一口径(test); 返回改动列表(幂等)"""
+    return _MapAnimationUiPass(body, lambda line: _GuardUiPassLine(line, test),
+                               lambda value: GuardUiPassAssignments(NormalizePhysicsUiTest(value, test), test))
+
+
+def UnguardAnimationUiPass(body):
+    return _MapAnimationUiPass(body, UnguardUiPassStatement, UnguardUiPassAssignments)
+
+
+def GuardPackUiPass(packName):
+    """包的 RP 动画/控制器文件(包目录第一层; replace_entities/ 下的替换实体不进界面)加界面那一遍只读守卫, 口径按
+    条目(UiPassTestFor); 返回改动处数"""
+    return _RewritePackMolang(packName,
+                              lambda animId, body: GuardAnimationUiPass(body, UiPassTestFor(animId)),
+                              lambda ctlId, body: GuardControllerUiPass(body, UiPassTestFor(ctlId)),
+                              withIds=True)
+
+
+def UnguardPackUiPass(packName):
+    """GuardPackUiPass 的逆(修复工具开头摘掉, 末尾加回); 返回摘掉的处数"""
+    return _RewritePackMolang(packName, UnguardAnimationUiPass, UnguardControllerUiPass)
 
 
 def PortBaselinePack(javaDir, packName=JAVA_BASELINE_PACK, withMods=False):
@@ -7330,6 +7789,9 @@ def PortBaselinePack(javaDir, packName=JAVA_BASELINE_PACK, withMods=False):
     precedence = ExplicitPackPrecedence(packName)
     if precedence:
         report.append(u"运算符优先级显式化 {} 处".format(precedence))
+    uiPass = GuardPackUiPass(packName)
+    if uiPass:
+        report.append(UI_PASS_REPORT.format(uiPass))
     if molangDefaults:
         report.append(u"[!] 基线动画用到 ?? 默认值 {} 个(各包初始化表不含, 读作 0): {}".format(
             len(molangDefaults), u", ".join(sorted(molangDefaults))))
@@ -7781,6 +8243,16 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     modelDecl = player.get("model") or {}
     # fp_arm 动画的骨骼改名表(arm 几何重建时产出; 没有 arm 几何时为空)
     fpArmBoneRenames = {}
+    # 骨骼名改名表: 几何与全部动画共用(动画文件的骨骼名键只认 [A-Za-z0-9_.-], 见 BoneNameMapper); 玩家几何的骨骼名
+    # 先全部登记 —— 改出来的名字不跟另一份玩家几何里的骨骼撞名。bone_rot 读侧按同一张表找骨骼
+    boneNames = BoneNameMapper()
+    runtimeSink.boneNames = boneNames
+    for key in modelDecl:
+        if os.path.isfile(_Src(modelDecl[key])):
+            try:
+                boneNames.Register(GeometryBoneNames(LoadJson(_Src(modelDecl[key]))))
+            except ValueError:
+                pass
     for key in modelDecl:
         src = _Src(modelDecl[key])
         if not os.path.isfile(src):
@@ -7791,7 +8263,7 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
             else "geometry.{}_{}".format(packName, RpSafeBaseName(BaseName(modelDecl[key])))
         rpOut = os.path.join(rpModels, "{}.geo.json".format(key))
         report.append(u"几何 {} → {}".format(key, identifier))
-        RewriteGeometry(src, rpOut, identifier, report)
+        RewriteGeometry(src, rpOut, identifier, report, boneNames=boneNames)
         if key == "arm":
             # 第一人称手臂: 重建成"原版手臂骨架包装 + 移位后的 Java 子树"
             # (见 BuildFirstPersonArmGeometry 长注); 改名表要带到 fp_arm 动画改写
@@ -7888,7 +8360,7 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                 # 第一人称手臂动画独占改名表: arm 文件(第三人称手部条件动画)不能改 ——
                 # 它按短键并进主域, 作用在**主几何**的 RightArm 上
                 boneRenames=fpArmBoneRenames if key == "fp_arm" else None,
-                functions=activeFunctions, skipNames=tacSkipped)
+                functions=activeFunctions, skipNames=tacSkipped, boneNames=boneNames)
         dropped = [name for name in dropped if name not in tacSkipped]
         nsPrefix = u"animation.{}.".format(namespace)
         for animId in animIds:
@@ -8138,7 +8610,7 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
         geoOut = os.path.join(rpModels, "{}.geo.json".format(modelSegment))
         if geoOut not in writtenReplacedGeometries:
             writtenReplacedGeometries.add(geoOut)
-            RewriteGeometry(_Src(modelRel), geoOut, identifier)
+            RewriteGeometry(_Src(modelRel), geoOut, identifier, report, boneNames=boneNames)
             if section == "projectiles" and WrapProjectileGeometry(geoOut):
                 report.append(u"  投射物几何外包朝向根骨骼 {} → {}(Y -90°): 运行层在根上播 Java 的朝向与缩放(0.7 换算为 0.8)".format(
                     PROJECTILE_ROOT_BONE, PROJECTILE_FIX_BONE))
@@ -8168,7 +8640,7 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                 molangDefaults, molangReport, nameMapper, packVars, physics=physics, sounds=soundSink,
                 # Java 的载具/弹射物动画同样调自定义函数(18 号 GMA_T.50 的 fn.motorSynth / fn.move); 音效请求
                 # 计数器落在替换实体自己身上, 主包宿主按实体轮询
-                functions=activeFunctions)
+                functions=activeFunctions, boneNames=boneNames)
             localized = LocalizeReplacedEntityQueries(
                 os.path.join(rpAnims, "{}.animation.json".format(namespaceSegment)))
             if localized:
@@ -8343,6 +8815,12 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
                 u"" if _LazyPinyin is not None else u"(未装 pypinyin, 退化为码点形式)",
                 ", ".join(u"{}→{}".format(a, b) for a, b in cjk[:4])
                 + (u" ..." if len(cjk) > 4 else u"")))
+    if boneNames.converted:
+        report.append(u"骨骼名改名 {} 个(动画文件里的骨骼名只认 A-Za-z0-9_.-, 空格 / 中文等一个就作废整份动画文件; "
+                      u"几何与动画同表改): {}".format(
+                          len(boneNames.converted),
+                          u", ".join(u"{}→{}".format(a, b) for a, b in boneNames.converted[:4])
+                          + (u" ..." if len(boneNames.converted) > 4 else u"")))
 
     # ---- properties 子树与顶层 initialize 的变量名同步扁平化 ----
     # 动画/控制器文件里的 v.roaming.<名> / v.<结构体>.<成员> 已由 PortMolangText 扁平化
@@ -8546,6 +9024,10 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     if precedenceFixes:
         report.append(u"运算符优先级显式化(收尾) {} 处: 资源包按 min_engine_version 1.18.0 走旧版 Molang 语义"
                       u"(三元左结合、&& 不比 || 紧), 两种语义可能分叉处补括号".format(precedenceFixes))
+    # ---- HUD 纸娃娃那一遍只读(最后一步: 上面各步骤写下的状态进出语句 / 时间线 / 通道赋值一并带上, 见 GuardPackUiPass 注) ----
+    uiPassFixes = GuardPackUiPass(packName)
+    if uiPassFixes:
+        report.append(UI_PASS_REPORT.format(uiPassFixes))
 
     # ---- 合集清单与封面(存在则一并搬运, 触发文件夹分组) ----
     if collection:

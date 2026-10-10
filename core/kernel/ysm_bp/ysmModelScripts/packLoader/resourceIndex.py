@@ -71,9 +71,10 @@ _SPAN_QUERY_NAME_PATTERN = re.compile(
 # 纸娃娃是独立渲染实例: 没有物品栏(is_item_name_any 报 "called without a specified entity")、不在世界里
 # (relative_block_* 报 "Scope requires an Actor"), YSM 选择界面的预览上 position / position_delta 也报"没有实体";
 # 时间、朝向、运动量、姿态标志这类实体自身的量照常求值(原版纸娃娃动画 look_at_target_ui / move.arms 读的就是
-# 这些)。白名单之外的一律按不安全 —— 宁可纸娃娃上少一条动画, 也不在界面打开期间逐帧刷错
+# 这些)。白名单之外的一律按不安全 —— 宁可纸娃娃上少一条动画, 也不在界面打开期间逐帧刷错。is_in_ui 读实体自身的
+# "正在界面里渲染"标志: 物理积分的界面守卫(port_java_pack._PhysicsHead)靠它, 不能因此把带物理的并行族挡在纸娃娃外
 PAPERDOLL_SAFE_QUERIES = frozenset([
-    "mod",
+    "mod", "is_in_ui",
     "anim_time", "life_time", "time_stamp", "frame_alpha", "delta_time", "time_of_day",
     "target_x_rotation", "target_y_rotation", "head_x_rotation", "head_y_rotation",
     "body_x_rotation", "body_y_rotation", "eye_target_x_rotation", "eye_target_y_rotation", "yaw_speed",

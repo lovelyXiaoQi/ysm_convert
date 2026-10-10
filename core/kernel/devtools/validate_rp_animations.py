@@ -143,6 +143,9 @@ def _PostOnlyLinearStamps(value, channel):
 
 _BONE_EXTRA_KEYS = ("relative_to",)
 _RESOURCE_ID_OK = re.compile(r"^[a-z0-9_.\-]+$")
+# 引擎 schema 对这些键整串匹配 [a-zA-Z0-9_.-]+(动画文件 bones 下的骨骼名; 控制器的状态名、转移目标、状态 animations
+# 条目键、variables 键), 一个不合规就作废整份文件(port.BoneNameMapper 注)
+_SCHEMA_NAME_OK = re.compile(r"^[A-Za-z0-9_.\-]+$")
 # 表达式内赋值: 逻辑运算符之后紧跟 `v.x =`(不是 ==)
 _ASSIGN_IN_EXPR = re.compile(r"(?:\|\||&&|\?\?)\s*\(?\s*(?:v|variable)\.[A-Za-z_][A-Za-z0-9_.]*\s*=(?!=)")
 _DANGLING_JAVA_PREFIX = re.compile(r"(?:ysm|ctrl|fn|tlm|args)\.(?![A-Za-z_])")
@@ -271,6 +274,51 @@ def _CheckMolangLikeTerms(slots, where, path, errors, warnings):
                         u"{} + {}".format(where, molang_syntax.FormatSlotPath(slotPath), left[:60], right[:60]))
 
 
+def _Port():
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import port_java_pack as port
+    return port
+
+
+# HUD 纸娃娃那一遍只读(port_java_pack.GuardPackUiPass 注): 写实体变量的语句必须带守卫, 否则界面那一份状态机 / 时间线 /
+# 骨骼通道会改世界实体的变量(一次性信号被先消费、计数器多走一步)。守卫的判据按条目口径查(port.UiPassTestFor): 主域条目
+# 带的是恒开口径时, 第一人称下界面那一遍(这一帧唯一跑主域的一遍)也不写, 进态计时与已见序号永不更新 → 纸娃娃抽搐。
+# 诊断探针(shared/)不挂在玩家模型上, 替换实体不进界面; java_mode 的骨骼通道自带专用守卫(输入锁存 / 鞘翅追随由各自的
+# 测试守护, 主状态序号每遍开头重算), 不按通道口径查
+def _UiPassExempt(path, channel=False):
+    parts = os.path.normpath(path).split(os.sep)
+    if "shared" in parts or "replace_entities" in parts:
+        return True
+    return channel and "java_mode" in parts
+
+
+def _CheckUiPassStatements(lines, where, label, errors, entryId=None):
+    port = _Port()
+    test = port.UiPassTestFor(entryId)
+    if isinstance(lines, _STRING_TYPES):
+        lines = [lines]
+    if not isinstance(lines, list) or port._IdempotentInitLines(lines):
+        return
+    for line in lines:
+        if isinstance(line, _STRING_TYPES) and port._GuardUiPassLine(line, test) != line:
+            errors.append(u"{} {}: 写实体变量的语句缺 HUD 纸娃娃那一遍的跳过前缀或判据口径不对(界面那一份会改世界实体的变量 / "
+                          u"第一人称时没人写, 见 port_java_pack.GuardPackUiPass): {}".format(where, label, line[:80]))
+
+
+def _CheckUiPassChannels(bones, where, errors, entryId=None):
+    port = _Port()
+    test = port.UiPassTestFor(entryId)
+    strings = []
+    _WalkStrings(bones, [], strings)
+    for slotPath, text in strings:
+        if slotPath and slotPath[-1] == "lerp_mode":
+            continue
+        if port.GuardUiPassAssignments(port.NormalizePhysicsUiTest(text, test), test) != text:
+            errors.append(u"{} {}: 骨骼通道写实体变量的语句没包成仅世界那一遍执行的块或判据口径不对(HUD 纸娃娃那一遍会改世界"
+                          u"实体的变量 / 第一人称时没人写, 见 port_java_pack.GuardPackUiPass): {}".format(
+                              where, u"/".join(str(p) for p in slotPath), text[:80]))
+
+
 def ValidateAnimationFile(path, errors, warnings):
     try:
         data = _LoadJson(path)
@@ -295,6 +343,9 @@ def ValidateAnimationFile(path, errors, warnings):
                 errors.append(u"{}: 空 bones 节点(引擎: Required child not found, 整份文件作废)".format(where))
             else:
                 for boneName, channels in bones.items():
+                    if not _SCHEMA_NAME_OK.match(boneName):
+                        errors.append(u"{}: 骨骼名 {!r} 含引擎不认的字符(只认 A-Za-z0-9_.-), 整份文件解析失败".format(
+                            where, boneName))
                     if not isinstance(channels, dict) or not channels:
                         errors.append(u"{}: 骨骼 {} 为空/非对象".format(where, boneName))
                         continue
@@ -347,6 +398,11 @@ def ValidateAnimationFile(path, errors, warnings):
         _CheckMolangSyntax(molang_syntax.AnimationMolangSlots(body), where, errors)
         _CheckMolangPrecedence(molang_syntax.AnimationMolangSlots(body), where, path, errors, warnings)
         _CheckMolangLikeTerms(molang_syntax.AnimationMolangSlots(body), where, path, errors, warnings)
+        if not _UiPassExempt(path):
+            for stamp, value in (body.get("timeline") or {}).items():
+                _CheckUiPassStatements(value, where, u"timeline {}".format(stamp), errors, animId)
+            if isinstance(bones, dict) and not _UiPassExempt(path, channel=True):
+                _CheckUiPassChannels(bones, where, errors, animId)
 
 
 def ValidateControllerFile(path, errors, warnings):
@@ -374,10 +430,21 @@ def ValidateControllerFile(path, errors, warnings):
         initial = body.get("initial_state", "default")
         if initial not in states:
             errors.append(u"{}: initial_state {} 不存在".format(where, initial))
+        for name in (body.get("variables") or {}) if isinstance(body.get("variables"), dict) else []:
+            if not _SCHEMA_NAME_OK.match(name):
+                errors.append(u"{}: variables 键 {!r} 含引擎不认的字符, 整份文件解析失败".format(where, name))
         for stateName, state in states.items():
+            if not _SCHEMA_NAME_OK.match(stateName):
+                errors.append(u"{}: 状态名 {!r} 含引擎不认的字符(只认 A-Za-z0-9_.-), 整份文件解析失败".format(
+                    where, stateName))
             if not isinstance(state, dict):
                 errors.append(u"{}: 状态 {} 不是对象".format(where, stateName))
                 continue
+            for entry in state.get("animations") or []:
+                for animKey in (entry.keys() if isinstance(entry, dict) else []):
+                    if not _SCHEMA_NAME_OK.match(animKey):
+                        errors.append(u"{}: 状态 {} 的动画条目键 {!r} 含引擎不认的字符, 整份文件解析失败".format(
+                            where, stateName, animKey))
             if "animations" in state and not state["animations"]:
                 errors.append(u"{}: 状态 {} 的 animations 为空数组(整份控制器文件静默拒载)".format(
                     where, stateName))
@@ -396,8 +463,14 @@ def ValidateControllerFile(path, errors, warnings):
                 for target, condition in entry.items():
                     if target not in states:
                         errors.append(u"{}: 状态 {} 转移到未定义状态 {}".format(where, stateName, target))
+                    elif not _SCHEMA_NAME_OK.match(target):
+                        errors.append(u"{}: 状态 {} 的转移目标 {!r} 含引擎不认的字符, 整份文件解析失败".format(
+                            where, stateName, target))
                     if condition in ("", None):
                         errors.append(u"{}: 状态 {} → {} 条件为空".format(where, stateName, target))
+            if not _UiPassExempt(path):
+                for key in ("on_entry", "on_exit"):
+                    _CheckUiPassStatements(state.get(key), where, u"状态 {} {}".format(stateName, key), errors, ctlId)
         _CheckMolangStrings(body, where, errors, warnings)
         _CheckMolangSyntax(molang_syntax.ControllerMolangSlots(body), where, errors)
         _CheckMolangPrecedence(molang_syntax.ControllerMolangSlots(body), where, path, errors, warnings)
@@ -517,6 +590,7 @@ def CheckChannelOwnership(packs, errors):
                     for line in state.get("on_entry") or []:
                         if not isinstance(line, _STRING_TYPES):
                             continue
+                        line = _Port().UnguardUiPassStatement(line)   # HUD 纸娃娃那一遍的跳过前缀
                         matched = _OWNERSHIP_ASSIGN.match(line)
                         if matched:
                             assigned.add(matched.group(1))

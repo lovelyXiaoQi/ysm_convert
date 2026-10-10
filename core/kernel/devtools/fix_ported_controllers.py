@@ -60,6 +60,12 @@ port_java_pack.py 后补的三条转换规则只对"再跑一次移植"生效, �
    要恢复"Q 弹"随动请用 port_java_pack.py 从 Java 包重新移植。同理**只能在移植期做**的还有:
    animation_length 缺省 → Java 推导(末关键帧/无限长)、blend_transition 的 Java→基岩归属重映射、
    sound_effects 关键帧的音频拷贝与登记 —— 这三条产物里看不出原始形态, 请重新移植。
+13. (2026-10-09) 物理积分块补 HUD 纸娃娃那一遍的守卫(port.GuardPhysicsUiPass): 同一实体在界面里再画一遍、
+   共用变量域, 旧产物在那一遍里接着积分 —— 潜行/疾跑时头发等随动部件按 tick 跳、弹簧变快。
+14. (2026-10-10) HUD 纸娃娃那一遍整体只读(port.GuardPackUiPass): 时间线与状态进出语句加跳过前缀, 骨骼通道里写实体变量的
+   顶层语句只在世界那一遍执行 —— 界面那份状态机会先把一次性信号消费掉(三段挥砍潜行 / 疾跑时本体不出招)。
+15. (2026-10-10) 骨骼名按引擎命名规则同表改名(port.SanitizePackBoneNames): 动画文件 bones 下的键只认 [A-Za-z0-9_.-],
+   一个不合规(空格 / 中文等)就作废整份文件 —— 几何与全部动画用同一张表改。
 
 用法: python fix_ported_controllers.py [包名 ...]   (缺省修全部 JSON 包)
 """
@@ -697,6 +703,9 @@ def _MigrateOneString(value):
     # Java 单层结构体成员 v.<结构体>.<成员> → v.<结构体>_<成员>(移植期 PortMolangText ①'; 早先的产物漏了
     # roaming 以外的结构体, 初始化控制器的 ?? 落在成员访问上引擎报错, 见 port._STRUCT_MEMBER_PATTERN 注)
     value, fixes = port.FlattenStructMemberText(value)
+    # 物理积分块补 HUD 纸娃娃那一遍守卫(界面那一遍不积分, 见 port._PhysicsHead 注)
+    value, physicsFixes = port.GuardPhysicsUiPass(value)
+    fixes += physicsFixes
     for oldExpr, newExpr in _OLD_TO_NEW_EXPANSIONS:
         if oldExpr != newExpr and oldExpr in value:
             fixes += value.count(oldExpr)
@@ -1181,7 +1190,28 @@ def _FixJavaStateDeclaration(packName, report):
 
 
 def FixPack(packName):
+    # HUD 纸娃娃那一遍只读守卫(port.GuardPackUiPass 注)先整包摘掉: 下面各步骤(撤掉/重做逐通道覆盖、比对生成的状态机、
+    # 补计时语句 ...)都按原语句识别, 与移植期看到的同形态; 末尾整包加回(提前返回 / 出错也加回), 全流程幂等
+    unguarded = port.UnguardPackUiPass(packName)
+    try:
+        report = _FixPackSteps(packName)
+    finally:
+        guarded = port.GuardPackUiPass(packName)
+    if guarded > unguarded:
+        report.append(u"  " + port.UI_PASS_REPORT.format(guarded))
+    return report
+
+
+def _FixPackSteps(packName):
     report = ["== {}".format(packName)]
+    # 骨骼名先改成引擎认的形态(见 port.BoneNameMapper 注): 不合规的键作废整份动画文件, 后面的步骤要读得到它
+    renamedBones = port.SanitizePackBoneNames(packName)
+    if renamedBones:
+        report.append(
+            u"  骨骼名改成动画文件写得进去的形态(引擎只认 [A-Za-z0-9_.-], 一个不合规就作废整份动画文件; 几何同表改名): {}".format(
+                u", ".join(u"{}→{}".format(old, new) for old, new in renamedBones)
+            )
+        )
     # Java 逐通道覆盖的伴生动画/占用变量先整体撤掉, 让下面每一步看到与移植期相同的数据
     # (移植期它排在最后), 末尾再重新应用并与起始内容比对 —— 全流程幂等
     ownershipBefore = _OwnershipSnapshot(packName)
