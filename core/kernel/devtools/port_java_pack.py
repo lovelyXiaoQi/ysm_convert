@@ -22,7 +22,7 @@
 
 用法:
     python devtools/port_java_pack.py <Java包目录> [--name <包名>] [--collection <合集目录>] [--with-mods]
-                                      [--java-functions]
+                                      [--java-functions] [--material <预设名|材质名|键=材质,...>] [--cull on|off]
     python devtools/port_java_pack.py --list          # 列出子模块自带的官方包
 
 包名缺省取 Java 包目录名; --collection 把模型放进 ysm_models/<合集>/<包名>/,
@@ -30,6 +30,8 @@
 默认只移植 main/arm/extra/carryon/fp_arm 等本体动画与枪械 tac 动画, 其余第三方模组联动动画
 (slashblade/parcool/...)整键跳过, 需要时加 --with-mods。
 Java 自定义函数(functions/*.molang)是实验性功能, 缺省不转换(fn.* / 音效调用置零), 需要时加 --java-functions。
+--material / --cull 写产物 ysm.json 的顶级 material / cull(缺省自动: 主包按 Java 的 all_cutout 与 PBR 贴图判定,
+见 ApplyMaterialOptions 注)。
 """
 import copy
 import errno
@@ -64,7 +66,8 @@ from ysmModelScripts.packLoader.packParser import (  # noqa: E402
     AnimationChannelPairs, BuildOneShotControllers, BuildStateChainController,
     EscapeConditionKey, IsSupportedTacAnimationName, JAVA_CRAWL_POSE, JAVA_SNEAK_POSE, JAVA_TO_BEDROCK_ENTITY_IDS,
     JavaStateLoopType, SLIDE_POSTURE_WRAPPERS, _BASELINE_COMPAT_PREFIX,
-    PASSENGER_LOCATOR_KEY, ReplacedModelDecl, QUERY_IS_MAID, QUERY_TLM_IS_SITTING, TLM_SEAT_CODES,
+    PASSENGER_LOCATOR_KEY, ReplacedModelDecl, QUERY_IS_MAID, QUERY_TLM_IS_SITTING, QUERY_TLM_IS_BEGGING,
+    TLM_BEG_KEY, TLM_SEAT_CODES,
     ReplacedTargets, TacAnimationRole, _ONESHOT_TAC_FIRE_KEY, _TacFireMembers, _BuildTacHoldAnimates,
     RpSafeBaseName, AVATAR_FILE_PATTERN, ROULETTE_TWIN_SUFFIX,
     StripJsonComments, _BuildConditionalAnimates, _BuildJavaStateAnimates, _CLASSIFY_TESTS,
@@ -86,6 +89,8 @@ from script_controller import ConvertScript, ScriptNotConvertible  # noqa: E402
 import java_runtime_bindings as runtime_bindings  # noqa: E402
 # Java 自定义函数(functions/*.molang): fn.* 内联、音效调用改写成主包宿主请求、事件体编译(见 java_functions.py 注)
 import java_functions  # noqa: E402
+# 材质预设表与主包运行层同一份(转换选项的预设名据此认, 见 ApplyMaterialOptions)
+from ysmModelScripts.core.materialResolver import MATERIAL_PRESETS  # noqa: E402
 
 RP = os.path.join(ROOT, "ysm_rp")
 BP_MODELS = os.path.join(ROOT, "ysm_bp", "ysm_models")
@@ -139,7 +144,8 @@ ARM_ANIMATION_KEYS = ("fp_arm", "arm")
 # 枪械槽位 tac 例外, 默认移植: 基岩的枪械模组(Eplus军械库等)按旧版协议写 v.tac.*, 主包运行层归一成 Java 口径,
 # 解析器按 Java 三通道合成播放(packParser._TAC_HOLD_GUN 上方注); 只带基岩驱动得了的那些(SlotSkipNames)。
 # 车万女仆槽位 tlm 同样默认移植: 网易版车万女仆给女仆套 YSM 模型, 骑女仆座位时按娱乐类型播这些动画(packParser 骑乘链的
-# 女仆座位成员, TLM_SEAT_CODES); 只带座位动画, 雕像 / 手办 / 棋局输赢 / 讨食 / 扫帚 / 椅子与女仆物品的条件动画基岩驱动不了
+# 女仆座位成员, TLM_SEAT_CODES), 主人拿着蛋糕时播祈求 beg(packParser 的 misc 通道条件动画, TLM_BEG_KEY); 只带这两类,
+# 雕像 / 手办 / 棋局输赢 / 扫帚 / 椅子与女仆物品的条件动画基岩驱动不了
 MOD_ANIMATION_KEYS = (
     "parcool", "swem", "slashblade",
     "immersive_melodies", "irons_spell_books",
@@ -157,11 +163,11 @@ JAVA_PLAYER_ANIMATION_SLOTS = (
 def SlotSkipNames(slotKey, srcPath):
     """槽位里基岩驱动不了的 Java 动画原名 → 集合; 其他槽位 → 空集:
     - 枪械槽位 tac: 逐枪条件动画(协议里没有枪 ID)、Java 不播的类型后缀如 minigun、手雷、别的模组的动画;
-    - 车万女仆槽位 tlm: 女仆座位动画(TLM_SEAT_CODES)以外的全部"""
+    - 车万女仆槽位 tlm: 女仆座位动画(TLM_SEAT_CODES)与祈求(TLM_BEG_KEY)以外的全部"""
     if slotKey == TAC_ANIMATION_KEY:
         supported = IsSupportedTacAnimationName
     elif slotKey == TLM_ANIMATION_KEY:
-        supported = lambda name: name in TLM_SEAT_CODES  # noqa: E731
+        supported = lambda name: name in TLM_SEAT_CODES or name == TLM_BEG_KEY  # noqa: E731
     else:
         return set()
     try:
@@ -1004,12 +1010,12 @@ _CTRL_NAME_MAP = [
 # 网易侧有对应数据的联动量(TACZ 的 variable.tac.*、CarryOn 类型), 见 java_runtime_bindings.RUNTIME_CTRL_ROWS
 _CTRL_NAME_MAP = runtime_bindings.MergeNameRows(_CTRL_NAME_MAP, runtime_bindings.RUNTIME_CTRL_ROWS)
 
-# tlm.*(车万女仆联动值, Java TLMBindingInner): 坐下由网易版车万女仆的运行层写在女仆身上(玩家恒为主包注册的缺省 0,
+# tlm.*(车万女仆联动值, Java TLMBindingInner): 坐下、祈求由网易版车万女仆的运行层写在女仆身上(玩家恒为主包注册的缺省 0,
 # 与 Java 对非女仆实体返回 0 一致); 其余基岩女仆没有对应数据, 取 Java 没装女仆模组时的缺省绑定
 # (TlmClientCompat.addEmptyBinding: is_entity 真、gomoku_rank 1、字符串量空串, 其余 0)
 _TLM_NAME_MAP = [
     ("is_sitting", QUERY_TLM_IS_SITTING),
-    ("is_begging", "0.0"),
+    ("is_begging", QUERY_TLM_IS_BEGGING),
     ("has_backpack", "0.0"),
     ("favorability_point", "0.0"),
     ("favorability_level", "0.0"),
@@ -2617,11 +2623,12 @@ def ApplyJavaLoopSemantics(shortKey, body):
       <键>_done 空状态完成;
     - 主手挥击族(swing$/#/:, swing_hand): Java 听 JSON、缺省 PLAY_ONCE + 尾过渡 →
       未写循环者同样改 hold_on_last_frame, 淡出由 ysm_swing 的 cooldown 完成
-      (loop:true 者保持: 触发消失即走)。
+      (loop:true 者保持: 触发消失即走);
+    - 车万女仆的祈求 beg: misc 通道(MaidMiscPredicate)用 playLoopAnimation 播, 强制 LOOP。
     """
     raw = body.get("loop")
     current = _NormalizeLoopValue(raw)
-    loopType = JavaStateLoopType(shortKey)
+    loopType = "loop" if shortKey == TLM_BEG_KEY else JavaStateLoopType(shortKey)
     # 枪械 hold / fire 通道: TacCompatInner 设动画时显式给循环类型(hold 通道 LOOP、fire 通道 PLAY_ONCE), 文件里的 loop
     # 不算(AnimationPlayer.setAnimation 的 loopTypeOverride); PLAY_ONCE 同挥击族改 hold_on_last_frame(出态不露底)
     tacRole = TacAnimationRole(shortKey)
@@ -6132,6 +6139,8 @@ _OVERRIDE_CONDITION_RANKS = {
 _CARRY_ON_RANK = (18, "player_carry_on")
 _ONESHOT_SWING_RANK = (12, "player_swing")
 _ONESHOT_USE_RANK = (15, "player_use")
+# 车万女仆的 misc 通道(祈求 beg; MaidControllerCollection: post_use 之后、passenger 之前)
+_MAID_MISC_RANK = (16.5, "maid_misc")
 # 枪械: hold 通道条件动画与 hold_mainhand 同通道, fire 通道状态机在 post_hold 之后、pre_swing 之前
 _TAC_HOLD_RANK = _OVERRIDE_CONDITION_RANKS["hold_mainhand"]
 _ONESHOT_TAC_FIRE_RANK = (10, "player_fire")
@@ -6163,6 +6172,8 @@ def _DirectConditionRank(key):
         return _OVERRIDE_CONDITION_RANKS.get(parsed[0][0])
     if _UnescapeConditionKey(key).startswith("carryon:") or key.startswith("carryon_"):
         return _CARRY_ON_RANK
+    if key == TLM_BEG_KEY:
+        return _MAID_MISC_RANK
     return None
 
 
@@ -8048,6 +8059,180 @@ def PrunePbrDeclarations(manifest, textureExists):
     return removed
 
 
+# ---- 材质与背面剔除(转换选项; 主包怎么用见 packParser._ModelCull / materialResolver 模块注) ----
+# 选项写进产物 ysm.json 的顶级扩展键: material(预设名 / 自定义材质名 / [[材质键, 材质], ...])、cull(布尔, 覆盖 Java
+# properties.all_cutout)。缺省 None = 自动, 不写键, 主包照 Java 包判定: all_cutout 打开 → 剔除背面(负尺寸描边),
+# 皮肤带 PBR 贴图 → pbr, 其余 cutout; 发光组(ysmGlow* 骨骼)缺省 emissive。
+MATERIAL_OPTION_KEY = "material"
+CULL_OPTION_KEY = "cull"
+_MATERIAL_NAME = re.compile(r"^[A-Za-z0-9_.]+$")
+_AUTO_OPTION_WORDS = (u"", u"auto", u"自动")
+_CULL_ON_WORDS = (u"on", u"true", u"1", u"yes", u"cull", u"剔除", u"开")
+_CULL_OFF_WORDS = (u"off", u"false", u"0", u"no", u"nocull", u"不剔除", u"关")
+# Bedrock 几何方块尺寸: 三个分量里有负的就是"负尺寸"方块(Blockbench 拖过零点得到的反向方块, 描边外壳也这么做)
+_CUBE_SIZE = re.compile(r'"size"\s*:\s*\[\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*\]')
+
+
+def _OptionText(value):
+    """选项值 → unicode: 任务单里是 utf-8 / unicode, 命令行(py2 的 sys.argv)是文件系统编码的字节串"""
+    if isinstance(value, str):
+        for encoding in ("utf-8", sys.getfilesystemencoding() or "mbcs"):
+            try:
+                return value.decode(encoding)
+            except (UnicodeDecodeError, LookupError):
+                continue
+        return value.decode("utf-8", "replace")
+    return unicode(value)  # noqa: F821
+
+
+def NormalizeMaterialOption(value):
+    """转换选项的材质 → ysm.json 顶级 material 的值; None = 自动(不写)。
+    接受预设名 / 材质名(英文字母、数字、_ .); "键=材质, 键=材质" 或 [[键, 材质], ...] 按材质键分别指定(default = 模型本体,
+    ysm_glow = 发光组)。写错抛 ValueError(说明哪里不对)"""
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        pairs = []
+        for item in value:
+            if not (isinstance(item, (list, tuple)) and len(item) == 2):
+                raise ValueError(u"按材质键指定要写成 [键, 材质] 二元组: {}".format(_OptionText(json.dumps(item))))
+            pairs.append((item[0], item[1]))
+    else:
+        text = _OptionText(value).strip()
+        if text.lower() in _AUTO_OPTION_WORDS:
+            return None
+        if u"=" not in text:
+            if not _MATERIAL_NAME.match(text):
+                raise ValueError(u"材质名只能用英文字母、数字、_ 和 .: {}".format(text))
+            return str(text)
+        pairs = []
+        for part in re.split(u"[,，;；\r\n]+", text):
+            if not part.strip():
+                continue
+            key, sep, name = part.partition(u"=")
+            if not sep:
+                raise ValueError(u"按材质键指定要写成 键=材质: {}".format(part.strip()))
+            pairs.append((key.strip(), name.strip()))
+    result, seen = [], set()
+    for key, name in pairs:
+        for piece in (key, name):
+            if not isinstance(piece, (str, unicode)) or not _MATERIAL_NAME.match(piece):  # noqa: F821
+                raise ValueError(u"材质键 / 材质名只能用英文字母、数字、_ 和 .: {}".format(_OptionText(piece)))
+        if key in seen:
+            raise ValueError(u"材质键重复: {}".format(_OptionText(key)))
+        seen.add(key)
+        result.append([str(key), str(name)])
+    return result or None
+
+
+def NormalizeCullOption(value):
+    """转换选项的背面剔除 → True(剔除) / False(不剔除) / None(自动: 照 Java properties.all_cutout)"""
+    if value is None or isinstance(value, bool):
+        return value
+    text = _OptionText(value).strip().lower()
+    if text in _AUTO_OPTION_WORDS:
+        return None
+    if text in _CULL_ON_WORDS:
+        return True
+    if text in _CULL_OFF_WORDS:
+        return False
+    raise ValueError(u"背面剔除只认 auto / on / off: {}".format(text))
+
+
+def CountNegativeCubes(text):
+    """几何文件文本里尺寸带负分量的方块数(正则按 "size" 键扫, 不做整份 JSON 解析: 发现阶段要扫很多包)"""
+    count = 0
+    for match in _CUBE_SIZE.finditer(text):
+        try:
+            if any(float(part) < 0 for part in match.groups()):
+                count += 1
+        except ValueError:
+            continue
+    return count
+
+
+def DetectMaterialProfile(manifest, javaDir=None):
+    """Java 包的材质画像(转换器发现阶段列出来, 移植汇总行引用): allCutout = properties.all_cutout(Java 全部剔除背面,
+    负尺寸描边模型); pbrSkins / pbrVehicles = 带 PBR 贴图的皮肤 / 载具数; negativeCubes = 玩家几何(main / arm)里的负尺寸方块
+    —— 官方模型也常见(拖拽出来的反向方块), Java 缺省不剔除它们, 外观同普通方块, 只有 all_cutout 打开才剔除成描边外壳"""
+    properties = manifest.get("properties") if isinstance(manifest.get("properties"), dict) else {}
+    files = manifest.get("files") if isinstance(manifest.get("files"), dict) else {}
+    player = files.get("player") if isinstance(files.get("player"), dict) else {}
+
+    def _HasPbr(decl):
+        return isinstance(decl, dict) and any(
+            isinstance(decl.get(field), (str, unicode)) and decl.get(field).strip()  # noqa: F821
+            for field in PBR_TEXTURE_FIELDS)
+
+    pbrSkins = sum(1 for entry in (player.get("texture") or []) if _HasPbr(entry))
+    pbrVehicles = sum(1 for section, _ids, entry, _model, _ns in ReplacedTargets(files)
+                      if section == "vehicles" and _HasPbr(entry.get("texture")))
+    negativeCubes = 0
+    model = player.get("model") if isinstance(player.get("model"), dict) else {}
+    for key in ("main", "arm"):
+        rel = model.get(key)
+        if isinstance(rel, dict):
+            rel = rel.get("uv")
+        if not javaDir or not isinstance(rel, (str, unicode)) or not rel or rel.startswith("geometry."):  # noqa: F821
+            continue
+        path = os.path.join(javaDir, _FsPath(rel, javaDir).replace("/", os.sep))
+        if os.path.isfile(path):
+            with open(path, "rb") as handle:
+                negativeCubes += CountNegativeCubes(handle.read().decode("utf-8-sig", "replace"))
+    return OrderedDict([("allCutout", properties.get("all_cutout") is True), ("pbrSkins", pbrSkins),
+                        ("pbrVehicles", pbrVehicles), ("negativeCubes", negativeCubes)])
+
+
+def _MaterialText(material):
+    if isinstance(material, list):
+        return u", ".join(u"{}={}".format(key, name) for key, name in material)
+    return _OptionText(material)
+
+
+def ApplyMaterialOptions(manifest, profile, material=None, cull=None):
+    """转换选项(已规整: NormalizeMaterialOption / NormalizeCullOption)写进产物 ysm.json 顶级 material / cull; 返回汇总行。
+    自动(None)不写键, 汇总行写明主包会按 Java 包怎么选; 自定义材质名(不是 YSM 预设)记一条提醒"""
+    report = []
+    if material is not None:
+        manifest[MATERIAL_OPTION_KEY] = material
+    if cull is not None:
+        manifest[CULL_OPTION_KEY] = cull
+    netease = manifest.get("netease") if isinstance(manifest.get("netease"), dict) else {}
+    declared = manifest.get(MATERIAL_OPTION_KEY) or netease.get(MATERIAL_OPTION_KEY)
+    culled = manifest.get(CULL_OPTION_KEY) if isinstance(manifest.get(CULL_OPTION_KEY), bool) else profile["allCutout"]
+    cullSource = u"转换选项" if cull is not None else (
+        u"ysm.json 顶级 cull" if isinstance(manifest.get(CULL_OPTION_KEY), bool) else u"Java properties.all_cutout")
+    suffix = u"_cull" if culled else u""
+    if declared is None:
+        body = u"pbr{0}(带 PBR 贴图的 {1} 个皮肤) / cutout{0}".format(suffix, profile["pbrSkins"]) \
+            if profile["pbrSkins"] else u"cutout{}".format(suffix)
+        kind = u"负尺寸描边·剔除背面" if culled else u"普通"
+        if profile["pbrSkins"]:
+            kind = u"PBR · " + kind
+        report.append(u"材质: 自动({}) → 本体 {}, 发光组 emissive{}".format(kind, body, suffix))
+    else:
+        names = [name for _key, name in declared] if isinstance(declared, list) else [declared]
+        custom = [name for name in names if name not in MATERIAL_PRESETS]
+        origin = u"转换选项" if material is not None else u"沿用 Java 包里写的"
+        report.append(u"材质: {}({}, ysm.json 顶级 material){}".format(
+            _MaterialText(declared), origin, u"; 背面剔除打开, 预设换成剔除背面版" if culled else u""))
+        if custom:
+            report.append(u"[!] 自定义材质 {}: 不是 YSM 材质预设, 主组件原样注册 —— 资源包的 materials/*.material 里要有它的定义"
+                          u"(原版材质名也行), 不参与描边 / 泛光后处理, 背面剔除开关对它不起作用".format(
+                              u", ".join(_OptionText(name) for name in custom)))
+    if cull is not None or culled:
+        report.append(u"背面剔除: {}({}{})".format(
+            u"剔除" if culled else u"不剔除", cullSource,
+            u"; Java properties.all_cutout = {}".format(u"true" if profile["allCutout"] else u"false")
+            if cull is not None else u""))
+    if profile["negativeCubes"]:
+        report.append(
+            u"几何含负尺寸方块 {} 个: 背面剔除打开, 它们从外面看只剩背面(描边外壳)".format(profile["negativeCubes"]) if culled else
+            u"几何含负尺寸方块 {} 个: 不剔除背面, 按普通方块显示(与 Java 缺省一致); 如果它们是描边外壳, 把转换器的“背面剔除”"
+            u"设为剔除(或 Java 包 properties.all_cutout 写 true)".format(profile["negativeCubes"]))
+    return report
+
+
 # ---- Java 合集(ysm_models/<合集>/<子包>, 合集目录带 ysm-pack.json, 可选封面 ysm-pack.png) ----
 COLLECTION_MANIFEST = "ysm-pack.json"
 COLLECTION_COVER = "ysm-pack.png"
@@ -8209,12 +8394,14 @@ def _ApplyScriptControllerBlends(path, script):
     DumpJson(path, data)
 
 
-def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None, javaFunctions=False):
+def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None, javaFunctions=False,
+             material=None, cull=None):
     """移植一个 Java 包; 返回汇总行列表。molangSink 传入 Counter 时把 molang 替换/降级计数原样并入
     (宿主据此做结构化告警, 汇总文本里的 "[!] label xN" 行是同一份数据的可读形态)。
     javaFunctions: 转换 Java 自定义函数(functions/*.molang, 见 java_functions.py 注), **实验性, 缺省关** ——
     关着时与支持它之前一样: fn.* / ysm.play_sound 等调用置零, @player_init / @player_update / @sync 不转换,
-    脚本控制器只做决策树展开。"""
+    脚本控制器只做决策树展开。
+    material / cull: 转换选项的材质与背面剔除(见 ApplyMaterialOptions 注), None = 自动(主包按 Java 包判定)。"""
     manifestPath = os.path.join(javaDir, "ysm.json")
     if not os.path.isfile(manifestPath):
         raise SystemExit(u"[ERROR] 不是 Java 模型包目录(缺 ysm.json): {}".format(_DisplayPath(javaDir)))
@@ -8854,6 +9041,19 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     if passengerLocatorTable:
         report.append(PassengerLocatorReportLine(passengerLocatorTable))
 
+    # ---- 材质与背面剔除(转换选项写顶级 material / cull; 自动时不写, 汇总行写明主包按 Java 包怎么选) ----
+    try:
+        materialOption = NormalizeMaterialOption(material)
+    except ValueError as error:
+        materialOption = None
+        report.append(u"[WARN] 材质选项写得不对, 按自动处理: {}".format(_OptionText(error.args[0])))
+    try:
+        cullOption = NormalizeCullOption(cull)
+    except ValueError as error:
+        cullOption = None
+        report.append(u"[WARN] 背面剔除选项写得不对, 按自动处理: {}".format(_OptionText(error.args[0])))
+    report.extend(ApplyMaterialOptions(manifest, DetectMaterialProfile(manifest, javaDir), materialOption, cullOption))
+
     if not manifest.get("netease"):
         manifest.pop("netease", None)     # 空的兼容段不落盘
     DumpJson(os.path.join(bpDir, "ysm.json"), manifest)
@@ -9056,6 +9256,7 @@ def main():
     withMods = False
     javaFunctions = False
     baseline = False
+    material = cull = None
     index = 1
     while index < len(args):
         if args[index] == "--with-mods":
@@ -9076,6 +9277,10 @@ def main():
             packName = args[index + 1]
         elif args[index] == "--collection":
             collection = args[index + 1]
+        elif args[index] == "--material":
+            material = args[index + 1]
+        elif args[index] == "--cull":
+            cull = args[index + 1]
         index += 2
     if baseline:
         packName = packName or JAVA_BASELINE_PACK
@@ -9086,7 +9291,8 @@ def main():
         print("[DONE] {} 基线动画移植完成 —— 记得重启游戏(资源包改动需重载)".format(packName))
         return
     packName = packName or os.path.basename(os.path.normpath(javaDir))
-    for line in PortPack(javaDir, packName, collection, withMods, javaFunctions=javaFunctions):
+    for line in PortPack(javaDir, packName, collection, withMods, javaFunctions=javaFunctions,
+                         material=material, cull=cull):
         if isinstance(line, unicode):  # noqa: F821 — py2 stdout 是字节流
             line = line.encode("utf-8")
         print("  " + line)

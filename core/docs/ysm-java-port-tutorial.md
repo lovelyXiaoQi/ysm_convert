@@ -96,7 +96,8 @@ custom/纸板狐模型包/                    你的组件/
 | `icon` | ✅ | 选择界面图标,取文件名 → `textures/entity/<包名>/<文件名>` |
 | `free` | ❌ | 授权体系是 Java 服务,忽略 |
 | `gui_background` / `gui_foreground` | ✅ | 选择界面卡片的背景图(纸娃娃之下)/前景图(纸娃娃之上、名字之下),铺满卡片,与 Java 卡片同序;移植工具拷到 `textures/entity/<包名>/gui_background.png` / `gui_foreground.png`(文件名统一,中文名也行) |
-| `render_layers_first` / `all_cutout` / `gui_no_lighting` | ❌ | 渲染标志,基岩渲染管线不同,忽略。需要半透明/全亮/剔除背面时改用网易侧 `material` 预设(见 §2.4) |
+| `all_cutout` | ✅ | 全部剔除背面(负尺寸描边模型):主包把材质预设(含发光组、PBR、弹射物/载具)换成剔除背面版;顶级 `cull` 覆盖它,转换器"背面剔除"列即写这个键。缺省 false 与 Java 一样不剔除,负尺寸方块按普通方块显示 |
+| `render_layers_first` / `gui_no_lighting` | ❌ | 渲染标志,基岩渲染管线不同,忽略。需要半透明/全亮时改用网易侧 `material` 预设(见 §2.4) |
 | `disable_preview_rotation` | ✅ | 选择界面卡片的取景: 缺省与 Java 一样把模型转过 20° 并略俯视(展示动画就是按这个取景摆的),置 `true` 才正对镜头。旧版写法的包与 py 模型一律正对,不受影响。皮肤卡片与 Java 一样恒带转角、播 idle |
 | `merge_multiline_expr` | ❌ | 属转换环节职责:多行 molang 数组请在移植时手工合并成单串 |
 
@@ -122,7 +123,8 @@ custom/纸板狐模型包/                    你的组件/
 |---|---|
 | `animation_namespace` | 动画 ID 前缀不想用默认 `animation.<包名>` 时声明(比如沿用你已有的命名) |
 | `skins` | **多皮肤差异化**:逐皮肤覆盖几何/材质/缩放(Java 的皮肤只能换贴图,网易可以整套换) |
-| `material` | 材质预设(`cutout`/`cutout_cull`/`translucent`/`emissive`/`pbr`,玩家开描边时自动换描边变体),可逐皮肤(`skins.<名>.material`)、逐材质键(`ysm_glow` = 发光组)指定;通常不用写(缺省即 Java 的 `entityCutoutNoCull`) |
+| `material` | 材质预设(`cutout`/`translucent`/`emissive`/`pbr` 及剔除背面版 `*_cull`,玩家开描边时自动换描边变体),可逐皮肤(`skins.<名>.material`)、逐材质键(`ysm_glow` = 发光组)指定,也可以写资源包里定义的自定义材质名;通常不用写(缺省即 Java 的 `entityCutoutNoCull`)。转换器的"材质"列直接选 |
+| `cull` | 背面剔除开关,覆盖 Java `all_cutout`(转换器"背面剔除"列):负尺寸方块做的描边外壳要它才显形 |
 | `files.player.animate` | `{"注册键": "molang 条件"}` 给动画/控制器挂播放条件——**基岩动画系统的核心机制**,Java 硬编码状态机在基岩就是靠这些条件+控制器复刻的(想深改看[机制对照](ysm-java-animation-mechanism.md)) |
 | `extra_stop_expression` | 轮盘动画停止条件(缺省"移动/跳跃/潜行即停",对齐 Java 的移动打断;置 `""` 相当于 Java 的"锁定"常开) |
 | `initialize` | molang 变量显式初始化(通常不用写——动画文件里的变量会被自动扫描初始化) |
@@ -316,7 +318,7 @@ FAQ 的说明一致)。`death`/`ladder_up`/`ladder_stillness`/`ladder_down` 在�
 |---|---|
 | `carryon`(Carry On) | **原样移植即可**:`carryon:block`/`entity`/`player`/`princess` 四条按条件动画转义为 `carryon.cls.*`,主包按搬运状态(`ysm_carryon` 1=实体 2=方块 3=玩家,princess=被玩家抱起)自动合成播放条件——网易版自带搬运玩法,语义同 Java。旧通道(旧版 list 声明形态的包)也可沿用改下划线(`carryon_block` 等)覆盖主包基线搬运动画的做法 |
 | `tac`(枪械) | **原样移植即可**(移植工具默认就带):主链持枪版 `tac:idle`/`walk`/`run` 等、手持 `tac:<climb\|climbing\|aim\|run\|hold>:<pistol\|rifle\|rpg>`、开火通道 `tac:reload:`/`tac:melee:`/`tac:<climbing\|aim\|hold>:fire:` 转义成 `tac.cls.*`,主包按 Java TACZCompat 三通道播放,数据来自基岩枪械模组(Eplus军械库等)写的 `v.tac.*`(字段与动作 → 动画对照见 `ysm-tac-protocol.md`)。包里没写的枪械动画按名字逐个回落 Java 默认模型的那一套。基岩另有滑铲扩展:主链 `slide`/`tac:slide`、手持 `tac:slide:<类型>`,想自定义就在 `tac` 槽位里加同名动画(Java 版不认这几个名字,不影响 Java 端);整身姿态写在 `Root` 或转换器补的滑铲姿态骨骼 `ysm_body_root`/`ysm_torso_root` 上,别写在 `AllBody`/`UpperBody` 上(持枪、开火、近战动画会整根覆盖它们,见 `ysm-tac-protocol.md` 第 5 节),也别给自己的骨骼起这两个名字。逐枪条件动画(`tac:hold$tacz:ak47`)、`minigun` 这类 Java 不播的类型后缀与手雷动画基岩驱动不了,转换时跳过并留痕 |
-| `tlm`(车万女仆) | **只移植座位动画**:网易版车万女仆给女仆套 YSM 模型,女仆骑在娱乐座位上时按类型播 `gomoku`/`bookshelf`/`computer`/`keyboard`/`picnic`(包里没有就回落 Java 默认模型的那一套),女仆坐下播主链的 `sit`。雕像 / 手办 / 棋局输赢 / 讨食 / 扫帚 / 椅子与女仆物品的条件动画基岩驱动不了,转换时跳过并留痕。动画里的 `tlm.is_sitting` 读女仆的坐下状态,其余 `tlm.*` 取 Java 没装女仆模组时的缺省值 |
+| `tlm`(车万女仆) | **只移植座位动画与祈求**:网易版车万女仆给女仆套 YSM 模型,女仆骑在娱乐座位上时按类型播 `gomoku`/`bookshelf`/`computer`/`keyboard`/`picnic`,主人拿着蛋糕时循环播 `beg`(包里没有就回落 Java 默认模型的那一套),女仆坐下播主链的 `sit`。雕像 / 手办 / 棋局输赢 / 扫帚 / 椅子与女仆物品的条件动画基岩驱动不了,转换时跳过并留痕。动画里的 `tlm.is_sitting` / `tlm.is_begging` 读女仆的坐下 / 祈求状态,其余 `tlm.*` 取 Java 没装女仆模组时的缺省值 |
 | `parcool` / `swem` / `slashblade` / `immersive_melodies` / `irons_spell_books` | 基岩无对应模组,**不移植**(文件不搬即可) |
 
 ### 第 6 步:动画控制器
@@ -514,7 +516,8 @@ molang 变量初始化到不了它。预览会播放你的 `parallel*`/`pre_para
 | **状态机里不播动画的中转状态**(如凋灵娘的 `cache`:落地后 `jump_down → cache → idle`) | 切换时从当前姿态快照插值,经过空状态只多花 1 tick,姿态连续 | ❌ 交叉淡化是"出态权重 1→0 + 入态 0→1",入空状态时没有入态动画,姿态先淡到**绑定姿态**再淡进下一状态——落地一瞬间直立 | 工具给每条 `X→空状态` 前置 `X→Y` 旁路转移(条件相与,目标限有动画的状态,矛盾/自环/含 `all_animations_finished` 的不插),一步到位只做一次动画间淡化 |
 | **手持物品的挂点** | 渲染在 `RightHandLocator` / `LeftHandLocator` 骨骼上(`PlayerLocator` 注册表 + `CustomPlayerItemInHandLayer`),定位组可有多个成员(`RightHandLocator2/3` → 渲染多份) | 只认**固定骨骼名 `rightItem` / `leftItem`**(原版 `geometry.humanoid.custom` 里 `rightItem` 是 `rightArm` 的空子骨骼,pivot 在掌心并把 z 前推 1;骨骼内的 `lead_hold` locator 只是拴绳点) | ⚠️ Java 包没有这两根骨骼,直接转换过来**手持物品不在手上**。移植/修复工具自动补:挂到 `<Left\|Right>HandLocator` 下(缺则回落 `<L\|R>Hand`→`<L\|R>Arm`),主几何 pivot = 父骨骼 pivot(与作者自制的基岩版凋灵娘一致;早先是 z+1,拉弓动画把定位骨骼放大 2 倍时弓会被甩出去,修复工具会把形状完全等于生成物的旧骨骼挪过来),**不带**拴绳 locator(玩家身上的锚点几何 `default_steve` 已有原版 `lead_hold`,几何之间同名不同位置引擎报错丢弃;Java 的拴绳挂点本就是原版固定偏移、与模型无关,修复工具会去掉旧生成物上的);第三人称的持物差由主包按物品类别叠修正动画(工具类 `[0,2,1]`、其余非挂载物 `[0,1,2]`、主手弓/弩另叠)。定位组有多成员时取基名那个(基岩只能一根)。**自己写了 `rightItem`/`leftItem` 的包原样保留**,想微调位置就手写(修正动画照样叠加)。父子关系选定位骨骼是有讲究的:三个参考包的 `carryon.cls.*` 都把手部定位骨骼缩放到 0 来隐藏手持物,挂在它下面才能跟着隐藏(与 Java 同语义)。**`models/arm.json`(第一人称)工具同样补上**,但第一人称的手持物已不经它绑定:主包在第一人称把 `default` 几何键换成原版体型 `geometry.default_steve` 作附着物锚点,原版第一人称动画原样驱动它(网易原版 `empty_hand` 自带 `q.get_default_bone_pivot` 归一),弓/弩/盾/三叉戟与普通物品都落在原版位置;模型手臂的额外摆位与设置里的 `empty_hand_x/y/z` 只在主手空手时生效,不会挪动物品 |
 | **纯中文名的动画** | 名字随便起,`头颅张开（左）`/`右勾拳` 都行 | 资源 ID 必须 ASCII,移植工具转拼音(全角括号等非汉字非 ASCII 转 `uXXXX`) | ⚠️ 移植工具早期把"名字里没有 ASCII 字母数字"当分组标题条目丢弃,**误杀纯中文名的真动画**(2026-09-04 实机:凋灵娘 16 条含两个骷髅头的张开/闭合/待机、持剑奔跑、头发飘动;warden 13 条整套拳击/肘击/防御。名字里恰好带 ASCII 的 `火焰动画A`/`语音13` 侥幸存活)。后果:控制器引用被当死引用剪掉 → 状态变空 → 部件停在绑定姿态、动作全无。现判据 = 名字无字母数字**且**动画体无内容(`bones`/`timeline`/粒子/音效都没有) |
-| **模型渲染的背面剔除** | `RenderType.entityCutoutNoCull`,**不剔除背面**,作者据此建模(火焰/飘带/裙摆的单面片两侧都可见) | 基岩 `entity` 材质默认剔除背面 → 这些部件只有从正面看才显示,侧背面透明 | JSON 包(Java 模式)未显式声明 `material` 时自动回退 `cutout` 预设(不剔除背面、裁切阈值 0.1 同 Java;原版基岩丢 alpha < 0.5,会吃掉半透明发丝),预览实体的 `default` 材质同步;显式声明 `material` 的包不受影响。早先回退的 `bloom_nocull` 会把 alpha < 0.3 的像素当发光 |
+| **模型渲染的背面剔除** | `RenderType.entityCutoutNoCull`,**不剔除背面**,作者据此建模(火焰/飘带/裙摆的单面片两侧都可见) | 基岩 `entity` 材质默认剔除背面 → 这些部件只有从正面看才显示,侧背面透明 | JSON 包(Java 模式)未显式声明 `material` 时自动回退 `cutout` 预设(不剔除背面、裁切阈值 0.1 同 Java;原版基岩丢 alpha < 0.5,会吃掉半透明发丝),预览实体的 `default` 材质同步;显式声明 `material` 的包不受影响。早先回退的 `bloom_nocull` 会把 alpha < 0.3 的像素当发光。Java 的 `properties.all_cutout: true`(负尺寸描边)照读:全部预设换剔除背面版 |
+| **负尺寸方块** | 缺省(`all_cutout` 关)按普通方块显示,不剔除;`all_cutout` 打开时逐面剔除,反向的面从外面看被剔掉 → 描边外壳 | 几何照样加载,剔不剔看材质 | 照 Java:`all_cutout` 关时不剔除(官方酒狐 6 个包带负尺寸方块,全是关),开时换剔除背面材质。Java 包没开却用负尺寸做了描边的,在转换器"背面剔除"列选"剔除"(写顶级 `cull: true`);转换日志会列出几何里的负尺寸方块数 |
 | **发光组 `ysmGlow*`** | 骨骼名前缀约定,多数光影下发光,只作用于当前组 | 基岩没有这个约定,早先移植后发光部件(萨赫梅特的眼睛)不亮 | 主包渲染控制器按骨骼名通配给它们挂 `ysm_glow` 材质键,缺省 `emissive`(不受光照 + 泛光,夜里也亮);可在 `material` 里改 |
 | **PBR 贴图** | 只交给 Oculus/Iris 光影包(LabPBR),没装光影不起作用 | 网易没有光影包接口 | 主包 `pbr` 预设按前向光照近似(法线图调制原版明暗、日月方向高光、高光图 alpha 自发光),**恒生效**;洞里火把旁也会有日月高光(引擎不区分天空光与方块光);选择界面卡片不显示 PBR |
 | **"隐藏基线 + 条件显示"的装饰件**(火焰/表情/嘴型:pre 通道 `scale 0` 隐藏,变体动画设回 1) | parallel 通道对 position/scale 是覆盖 → 当前变体可见 | ❌ 两条动画共写同一通道时**缩放相乘**,0×1 **不可见**(凋灵娘骷髅头的火焰是几何骨骼 `Fires_*`/`ysmGlowFire_*`,不是粒子) | 常量变体:工具 `ReconcileConditionalVariants` 折叠为单一所有者(`scale: ["(v.Emotions==3)?1:0", …]`);关键帧变体(攻击特效逐帧缩放):`ApplyChannelOwnership` 让 pre 那份在攻击状态活跃时让出。**手写包请直接用一条 molang 表达式控制显隐**,不要两条动画共写同一 scale |

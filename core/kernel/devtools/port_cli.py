@@ -12,7 +12,9 @@
       "action": "convert",                       # convert | validate | fix | baseline
       "layout": {"root": "<组件根>", "rp": "<资源包根>", "bpModels": "<行为包>/ysm_models",
                  "refRp": "<java_default 基线所在资源包, 可省>"},
-      "packs": [{"javaDir": "<Java 包目录>", "name": "<包名>", "collection": "<合集目录名或 null>"}],
+      "packs": [{"javaDir": "<Java 包目录>", "name": "<包名>", "collection": "<合集目录名或 null>",
+                 "material": "<可省: 预设名 / 材质名 / '键=材质,...' / [[键, 材质], ...]; 省略 = 自动; 1.3 起>",
+                 "cull": "<可省: true 剔除背面 / false 不剔除; 省略 = 照 Java properties.all_cutout; 1.3 起>"}],
       "collections": {"<合集目录名>": {"name": "...", "description": "...",
                                      "lang": {"zh_cn": {"name": "...", "description": "..."}},
                                      "folder_texture": "<可省: 文件夹封面的资源包纹理路径; 省略时沿用
@@ -54,7 +56,9 @@ import fix_ported_controllers as fix  # noqa: E402
 import validate_rp_animations as validate  # noqa: E402
 import build_rp_index  # noqa: E402
 
-VERSION = "1.2"    # 1.1: molang 事件新增 const / norm / skip / tick 类别; 1.2: options.javaFunctions(实验性开关)
+# 1.1: molang 事件新增 const / norm / skip / tick 类别; 1.2: options.javaFunctions(实验性开关);
+# 1.3: packs[].material / packs[].cull(材质与背面剔除), 发现结果带 materialProfile(Java 包的材质画像)
+VERSION = "1.3"
 _FS_ENCODING = sys.getfilesystemencoding() or "mbcs"
 _PY2 = sys.version_info[0] < 3
 
@@ -251,6 +255,11 @@ def _PackInfo(javaDir, collectionDir):
         info["animationFiles"] = len(player.get("animation") or {})
         info["projectiles"] = len(files.get("projectiles") or {})
         info["vehicles"] = len(files.get("vehicles") or {})
+        try:
+            # 材质画像(all_cutout / PBR 皮肤数 / 负尺寸方块数): 转换器按它展示"自动"会选什么(见 port.DetectMaterialProfile)
+            info["materialProfile"] = port.DetectMaterialProfile(manifest, javaDir)
+        except Exception:  # noqa: BLE001 — 野外包的几何什么都可能坏, 发现阶段只是少一项画像
+            info["materialProfile"] = None
     return info
 
 
@@ -480,7 +489,7 @@ def RunConvert(sink, job):
         molang = Counter()
         try:
             lines = port.PortPack(javaDir, packName, collection, withMods, molangSink=molang,
-                                  javaFunctions=javaFunctions)
+                                  javaFunctions=javaFunctions, material=spec.get("material"), cull=spec.get("cull"))
         except SystemExit as error:  # 内核用 SystemExit 报"不是 Java 包"之类的输入错误
             failCount += 1
             sink.Emit("pack_done", pack=_ToText(packName), ok=False, seconds=round(time.time() - started, 2),

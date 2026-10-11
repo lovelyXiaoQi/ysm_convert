@@ -164,6 +164,7 @@ MC Studio 开发测试和正式游戏都只启用这个组件的资源包，`ysm
 | `priority` | 注册优先级（int，缺省 0，越大越靠前）。主包内置模型为 1000 恒排最前；副包同优先级按包名字典序稳定排序，保证模型列表顺序与存档索引不随组件加载顺序漂移 |
 | `player_scale` / `gui_scale` | 玩家/GUI 缩放，默认 0.8 / 1.0（显式声明时优先于 `height_scale` 换算链） |
 | `material` | 材质：预设名 `"cutout"` / `"translucent"` / `"emissive"` / `"pbr"` …，或按材质键分别指定 `[["default","cutout"],["ysm_glow","translucent"]]`；**通常无需配置**（Java 模式包缺省 `cutout`，带 PBR 贴图的皮肤缺省 `pbr`）。预设表、发光组与 PBR 见下方"材质、发光组与 PBR"；旧式材质名（`bloom`、`nocull` 自动切换、light→tohru）照旧可用 |
+| `cull` | 背面剔除开关（布尔），覆盖 Java `properties.all_cutout`；**通常无需配置**（照 Java 包：`all_cutout: true` 即剔除）。打开时材质预设一律换成剔除背面版，负尺寸方块的描边外壳才显形，见下方"背面剔除与负尺寸描边" |
 | `gui_render_controller` | **通常无需配置**：缺省统一为 `controller.render.ysm_pack_gui`，所有模型共用。`AddActorRenderControllerArray` 改的是**控制器定义本身**（全局），所以共享控制器的数组只由运行层追加一次固定槽位名 `Texture/Geometry.ysm_skin_slot_1..31`，每个预览实体把**自己的**第 i 个可选皮肤注册到槽位 i（没有的槽位回落默认皮肤）；JSON 里的数组必须只留 `default`。声明自定义控制器时沿用旧行为（按皮肤名往该控制器追加数组，多个模型别共用同一个自定义控制器） |
 | `replace_entities` | `{实体ID: {geometry, texture, animations, animate, ...}}` 弹射物/载具替换表，与 `files.projectiles`/`vehicles` 推导结果**逐 ID 字段级浅合并**。内层 `animations`/`animate` 用 `{}` 键值对。**通常无需配置**：几何/贴图推导+共享资源直通+动画路径解析已覆盖常见场景（内置模型都已零补丁），只在推导确实表达不了时用（如替换实体的自定义状态条件覆盖）。载具另自动带根骨骼缩放动画（Java 硬编码 0.7，与玩家同一换算比取 0.8，骑手与载具的相对大小同 Java）与本包音效登记；**载具的写入与存档语义对齐 Java**：第一乘客上车写入该玩家模型、下车不撤、随载具实体存档，直到下一个第一乘客覆盖（船、运输船与矿车是引擎硬编码渲染，直接换上后引擎不再转模型，运行层在根骨骼上补朝向、矿车照 Java 按车底轨道形状定，创作者无感） |
 | `arrow` | ~~箭矢替换直通~~ **已由 `files.projectiles` + `replace_entities` 取代**（Java 原生位置声明抛射物，netease 只补差量）。旧字段仍兼容；`files.projectiles`（或 Java 废弃字段 `files.arrow`）声明 `minecraft:arrow` 时 `arrow` 键自动派生，无需手写。注意区分：这里说的是顶级网易扩展 `arrow`，Java 的 `files.arrow` 已按弹射物正常解析 |
@@ -199,14 +200,23 @@ MC Studio 开发测试和正式游戏都只启用这个组件的资源包，`ysm
 | 预设 | 效果 | 对应 Java |
 |---|---|---|
 | `cutout` | 裁切（丢 alpha < 0.1），不剔除背面 —— **Java 模式包缺省** | `entityCutoutNoCull` |
-| `cutout_cull` | 裁切，剔除背面 | — |
-| `translucent` | 按贴图 alpha 半透明混合，不剔除背面 | `entityTranslucent`（模型含半透明像素时） |
-| `emissive` | 不受光照（夜里照样亮）+ 泛光 | 发光组（见下） |
-| `pbr` | `cutout` + 法线/高光贴图（见下）—— **皮肤带 PBR 贴图时的缺省** | Oculus/Iris 光影包渲染的 PBR |
+| `cutout_cull` | 裁切，剔除背面 | `all_cutout: true` |
+| `translucent` / `translucent_cull` | 按贴图 alpha 半透明混合，不剔除 / 剔除背面 | `entityTranslucent`（模型含半透明像素时） |
+| `emissive` / `emissive_cull` | 不受光照（夜里照样亮）+ 泛光，不剔除 / 剔除背面 | 发光组（见下） |
+| `pbr` / `pbr_cull` | `cutout` + 法线/高光贴图（见下），不剔除 / 剔除背面 —— **皮肤带 PBR 贴图时的缺省** | Oculus/Iris 光影包渲染的 PBR |
 | `bloom` / `bloom_nocull` | 贴图 alpha < 0.3 的像素当发光（基岩 YSM 旧约定）—— **旧版模型缺省** | — |
 
 - **写法**：顶级 `material` 作用于全部皮肤（inherit 皮肤继承），`skins.<皮肤名>.material` 单独覆盖某个皮肤。
   字符串 = 整个模型一种材质；二维数组按**材质键**分别指定，`default` 是模型本体，`ysm_glow` 是发光组。
+- **自定义材质**：写预设以外的名字时原样注册 —— 任一资源包的 `materials/*.material` 里有定义即可（原版材质名如
+  `entity_alphatest_one_sided` 也行）。它不参与 YSM 的描边 / 泛光后处理，背面剔除开关对它不起作用（剔不剔由材质自己定）。
+  转换器的"材质"列可以直接选预设或输入材质名，`default=<材质>, ysm_glow=<材质>` 逐键指定。
+- **背面剔除与负尺寸描边**：Java 的 `properties.all_cutout: true` = "无论贴图情况全部剔除背面"，给负尺寸方块做描边外壳用
+  （反向方块的正面从外面看被剔掉，只剩模型背后露出的一圈轮廓）。主包照读：打开时皮肤与弹射物 / 载具数据带 `cull`，
+  每个预设（缺省回落、发光组、作者写的）换成上表的剔除背面版。缺省关时与 Java 一样不剔除 —— 官方酒狐 08/13/16/18/21/22 号
+  都带负尺寸方块而 `all_cutout` 全是 false，这些方块按普通方块显示，剔除了反而里外翻转。Java 包没开 `all_cutout` 但确实
+  用负尺寸做了描边时，写顶级 `"cull": true`（转换器"背面剔除"列选"剔除"）。主包按注册表里的当前声明取材质与 `cull`，
+  重新转换后已穿戴的玩家不用重选模型（资源包改动照例要重启游戏）。
 - **发光组**：骨骼名以 `ysmGlow` 开头（区分大小写）的骨骼走材质键 `ysm_glow`，缺省 `emissive`；与 Java 一样
   **只作用于这根骨骼本身**，子骨骼要各自以 `ysmGlow` 开头。想让发光组换别的效果，在 material 数组里写
   `["ysm_glow", 预设]`（写 `cutout` 等于关掉发光）。泛光效果要玩家在设置里开着泛光。
@@ -458,8 +468,9 @@ print(comp.AddPlayerAnimation("probe", "animation.<包名>.walk"))
 - **条件动画里的模组专属分类**（`:slashblade`、`:gohei`）：基岩无对应判定，跳过并告警。
 - **`riptide`（激流冲刺）状态**：基岩无对应 query（`is_riptide` / `is_auto_spin_attack`
   实测均不存在）。
-- **渲染标志**：`render_layers_first` / `all_cutout` / `gui_no_lighting` /
-  `thumbnail` / `free`（`gui_foreground` / `gui_background` / `disable_preview_rotation` 已支持，见上表）。
+- **渲染标志**：`render_layers_first` / `gui_no_lighting` /
+  `thumbnail` / `free`（`gui_foreground` / `gui_background` / `disable_preview_rotation` 已支持，见上表；
+  `all_cutout` 已支持，见"材质、发光组与 PBR"的背面剔除）。
 - **等待上游 / 属转换器职责**：音效（`sounds` 与轮盘按钮 `sound`——Java 官方包中该字段
   从未使用，其自身声音打包亦未实现）、自定义函数（`functions/*.molang`）、
   多语言（`lang/*.json`：主包运行期不读；移植工具会把 `zh_cn.json` 的显示文本烘进 ysm.json）、

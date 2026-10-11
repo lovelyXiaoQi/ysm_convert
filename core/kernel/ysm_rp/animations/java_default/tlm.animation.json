@@ -1,6 +1,60 @@
 {
   "format_version": "1.8.0", 
   "animations": {
+    "animation.java_default.beg": {
+      "loop": true, 
+      "bones": {
+        "Head": {
+          "rotation": [
+            0, 
+            0, 
+            -15
+          ], 
+          "position": [
+            0, 
+            -0.5, 
+            0
+          ]
+        }, 
+        "LongHair": {
+          "rotation": [
+            0, 
+            0, 
+            15
+          ]
+        }, 
+        "LeftArm": {
+          "rotation": [
+            -27.81509, 
+            18.15489, 
+            -17.48614
+          ]
+        }, 
+        "LeftForeArm": {
+          "rotation": [
+            -135.10922, 
+            -3.53329, 
+            3.54002
+          ]
+        }, 
+        "RightArm": {
+          "rotation": [
+            -27.81509, 
+            -18.15489, 
+            17.48614
+          ]
+        }, 
+        "RightForeArm": {
+          "rotation": [
+            -135.10922, 
+            3.53329, 
+            -3.54002
+          ]
+        }
+      }, 
+      "animation_length": 1000000.0, 
+      "override_previous_animation": true
+    }, 
     "animation.java_default.gomoku": {
       "loop": true, 
       "bones": {

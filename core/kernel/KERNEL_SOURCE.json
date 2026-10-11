@@ -1,8 +1,8 @@
 ﻿{
     "source":  "D:\\MCStudioDownload\\work\\icegamestudio@163.com\\Cpp\\AddOn\\ysm",
-    "commit":  "453c58455f7f6b7166ca3929d56e06f162462f24",
+    "commit":  "ed75c1bbf93099d844332a905b6c37464ef76e00",
     "dirty":  false,
-    "syncedAt":  "2026-10-10T20:23:30",
+    "syncedAt":  "2026-10-12T01:07:27",
     "modules":  [
                     "devtools\\build_rp_index.py",
                     "devtools\\fix_ported_controllers.py",
@@ -15,6 +15,8 @@
                     "devtools\\script_controller.py",
                     "devtools\\validate_rp_animations.py",
                     "ysm_bp\\ysmModelScripts\\__init__.py",
+                    "ysm_bp\\ysmModelScripts\\core\\__init__.py",
+                    "ysm_bp\\ysmModelScripts\\core\\materialResolver.py",
                     "ysm_bp\\ysmModelScripts\\data\\__init__.py",
                     "ysm_bp\\ysmModelScripts\\data\\baseAnimations.py",
                     "ysm_bp\\ysmModelScripts\\data\\molangBase.py",

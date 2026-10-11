@@ -177,6 +177,7 @@ _CONDITION_PREFIXES = [
 # Java 通道注册顺序(PlayerControllerCollection.init)即应用顺序, 同骨骼**后者覆盖前者**:
 #   pre_parallel → vehicle → main → hold_offhand → hold_mainhand → swing → use
 #   → passenger → carry_on → cap → parallel → armor
+# (女仆 MaidControllerCollection 在 use 与 passenger 之间多一条 maid.misc: 祈求 beg, 由 _BuildConditionalAnimates 排在 use 之后)
 # 同一通道内 Java 只播一条(条件互斥), 故只有**通道之间**的先后需要复刻 —— animate 表
 # 按此排序, 通道内顺序无关。缺席者(自定义前缀)排在已知通道之后, 保持原有相对次序。
 _CONDITION_CHANNEL_ORDER = {
@@ -910,6 +911,24 @@ def RpSafeBaseName(name):
             index += 1
         parts.append(chr(code) if code < 128 else "u{:04x}".format(code))
     return "".join(parts)
+
+
+# ---- 剔除背面开关(Java properties.all_cutout, POJO 字段名 forceCulling) ----
+# Java 原生渲染按方块分区、在 CPU 上逐面剔除(NativeModelState: cutout / cutoutNoCulling / translucent / translucentCulling)。
+# all_cutout = "无论贴图情况全部剔除背面", 给负尺寸方块做描边外壳用: 反向的面从外面看被剔掉, 只剩模型背后露出的一圈轮廓。
+# 缺省关时外观等同不剔除 —— 官方酒狐 08/13/16/18/21/22 号都带负尺寸方块而 all_cutout 全是 false, 剔除了就成了里外翻转。
+# 顶级扩展键 cull(布尔)覆盖它(转换器的"背面剔除"选项写这个键)。打开时皮肤数据与替换实体数据带 cull: True, 运行层把
+# 材质预设(含缺省回落与发光组)换成剔除背面的孪生(materialResolver.CULL_TWINS)
+JAVA_CULL_PROPERTY = "all_cutout"
+CULL_KEY = "cull"
+
+
+def _ModelCull(netease, properties):
+    """模型是否整体剔除背面: 顶级扩展键 cull(布尔)优先, 否则取 Java properties.all_cutout"""
+    override = netease.get(CULL_KEY)
+    if isinstance(override, bool):
+        return override
+    return isinstance(properties, dict) and properties.get(JAVA_CULL_PROPERTY) is True
 
 
 # ---- PBR 附属贴图(Java 版 {uv, normal?, specular?}, LabPBR 编码; 见主包 ysm_rp/shaders/glsl/ysm_pbr.glsl) ----
@@ -2446,6 +2465,15 @@ def _BuildConditionalAnimates(animKeys, warnings, keyPrefix="", extraGate=None,
                 parts.append(extraGate)
             entries.append((keyPrefix + fallbackKey, "&&".join(parts)))
 
+    # 车万女仆的祈求(Java maid.misc 通道 / MaidMiscPredicate: 主人手持诱惑物品(缺省蛋糕)时循环播 beg), 通道在 use 之后、
+    # passenger / carry_on 之前。只在主域合成(第一人称手臂域的 fp.arm.misc 是空谓词); 棋局输赢 game_win / game_lost
+    # 基岩没有棋盘, 不合成。判据由网易版车万女仆的运行层写在女仆身上, 玩家身上恒为缺省 0
+    if javaMode and not keyPrefix and TLM_BEG_KEY in availableKeys:
+        condition = "&&".join(guards + [_TLM_BEGGING_TEST])
+        if extraGate:
+            condition = "{}&&{}".format(condition, extraGate)
+        entries.append((TLM_BEG_KEY, condition))
+
     # vehicle$<实体ID>: 按骑乘实体类型判定(Java ConditionalVehicle)
     head = _VEHICLE_CONDITION_PREFIX + "$"
     for key in animKeys:
@@ -2535,13 +2563,17 @@ _JAVA_RIDING_GROUP_TEST = "query.is_riding"
 # ① 坐下(YsmMaidMainPredicate: sit, HIGH 级 —— 排在 ladder 三态之后、飞行之前; 与骑乘链兜底的 sit 是同一条动画,
 #    合成时两条进入路径并成一个成员, 见 _MergeRepeatedMembers);
 # ② 骑着女仆座位时按娱乐类型播动画(MaidVehiclePredicate: EntitySit 的 joy type), 在 carryon:princess 之后、sit 兜底之前。
-# 判据量由女仆模组的运行层写在女仆实体上(玩家身上恒为主包注册的缺省值 0): 坐下 = Java tlm.is_sitting、座位类型码
-# (TLM_SEAT_CODES)、女仆身份 = Java ysm.is_maid(移植工具把这两个 Java molang 映射到同名 query)。
+# 主链之外还有 misc 通道的祈求 beg(条件动画, 见 _BuildConditionalAnimates)。
+# 判据量由女仆模组的运行层写在女仆实体上(玩家身上恒为主包注册的缺省值 0): 坐下 = Java tlm.is_sitting、祈求 = Java
+# tlm.is_begging、座位类型码(TLM_SEAT_CODES)、女仆身份 = Java ysm.is_maid(移植工具把这些 Java molang 映射到同名 query)。
 QUERY_TLM_IS_SITTING = "query.mod.ysm_tlm_is_sitting"
+QUERY_TLM_IS_BEGGING = "query.mod.ysm_tlm_is_begging"
 QUERY_TLM_SEAT = "query.mod.ysm_tlm_seat"
 QUERY_IS_MAID = "query.mod.ysm_is_maid"
 TLM_SEAT_CODES = OrderedDict([("gomoku", 1), ("bookshelf", 2), ("computer", 3), ("keyboard", 4), ("picnic", 5)])
+TLM_BEG_KEY = "beg"
 _TLM_SITTING_TEST = QUERY_TLM_IS_SITTING + ">0.5"
+_TLM_BEGGING_TEST = QUERY_TLM_IS_BEGGING + ">0.5"
 _JAVA_STATE_GROUPS = [
     ("query.death_ticks>0", [("death", None)]),
     # 骑乘链(Java VehiclePredicate): vehicle$ 条件动画(动态成员, 见
@@ -4228,6 +4260,10 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
         defaultSkin["gui_animation"] = guiAnimation
     if netease.get("material"):
         defaultSkin["material"] = netease.get("material")
+    # 剔除背面开关(见 _ModelCull 注): inherit 皮肤经 modelNormalizer 继承, 替换实体在下方合并完补上
+    modelCull = _ModelCull(netease, properties)
+    if modelCull:
+        defaultSkin[CULL_KEY] = True
     # PBR 贴图按皮肤(见 _DerivePbrMaps 注); 没显式写 material 的皮肤由运行层换 pbr 材质预设
     pbrBySkin = _DerivePbrMaps(jsonDict, netease, packName, textureMap)
     if pbrBySkin.get("default"):
@@ -4248,6 +4284,11 @@ def ParseYsmJson(jsonDict, packName, readTextFunc=None):
                 replaceEntities[entityId] = merged
             else:
                 replaceEntities[entityId] = patch
+    if modelCull:
+        # Java 的 all_cutout 按模型生效(弹射物 / 载具与玩家同一套烘焙选项); 逐实体写了 cull 的(replace_entities 补丁)照写的
+        for replace in list(replaceEntities.values()) + [defaultSkin.get("arrow")]:
+            if isinstance(replace, dict) and CULL_KEY not in replace:
+                replace[CULL_KEY] = True
     if replaceEntities:
         defaultSkin["replace_entities"] = replaceEntities
         # 箭矢沿用既有专用链路: 推导出的 minecraft:arrow 条目同步派生旧 arrow 键

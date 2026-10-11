@@ -285,7 +285,7 @@ Java 的 `#minecraft:swords` 这类原版 tag **在基岩不存在**(基岩是�
 
 | Java 写法 | 处理 |
 |------|------|
-| `tlm.*`(车万女仆联动值) / `args.*`(自定义函数参数) | Java CustomMolangParser 注册 `ysm/ctrl/fn/tlm/args` 五个前缀,全部拦截(漏一处整份文件作废):`tlm.is_sitting`(builtin 13_matured 48 处)→ `query.mod.ysm_tlm_is_sitting`(网易版车万女仆的运行层写在坐下的女仆身上,玩家恒 0);其余 `tlm.x` 取 Java 没装女仆模组时的缺省绑定(`is_entity` 1、`gomoku_rank` 1、`task_id`/`schedule`/`activity`/`game_statue`/`backpack_type`/`show_item` 为 `''`,其余 0,`port_java_pack._TLM_NAME_MAP`);表外的 `tlm.x`、`args.x` 置零,`tlm.f()` 同 `fn.*` 置零告警 |
+| `tlm.*`(车万女仆联动值) / `args.*`(自定义函数参数) | Java CustomMolangParser 注册 `ysm/ctrl/fn/tlm/args` 五个前缀,全部拦截(漏一处整份文件作废):`tlm.is_sitting`(builtin 13_matured 48 处)→ `query.mod.ysm_tlm_is_sitting`(网易版车万女仆的运行层写在坐下的女仆身上,玩家恒 0),`tlm.is_begging` → `query.mod.ysm_tlm_is_begging`(同上, 主人拿着蛋糕时为 1);其余 `tlm.x` 取 Java 没装女仆模组时的缺省绑定(`is_entity` 1、`gomoku_rank` 1、`task_id`/`schedule`/`activity`/`game_statue`/`backpack_type`/`show_item` 为 `''`,其余 0,`port_java_pack._TLM_NAME_MAP`);表外的 `tlm.x`、`args.x` 置零,`tlm.f()` 同 `fn.*` 置零告警 |
 | `true` / `false` 关键字 | Java 词法分析器当关键字(=1/0);基岩是否认无证据(原版资源零使用)→ `1.0`/`0.0`(只改 JSON 字符串内、molang 单引号串外) |
 | `(a)(b)` / `2(b)` | Java 解析器 LPAREN 分支 = **隐式乘法**;基岩当非法调用 → 补显式 `*` |
 | `{表达式}` 当值用 | Java 解析器 LBRACE 分支 = **执行域**(`ExecutionScopeExpression`),求值返回最后一条表达式的值 —— 作者拿它当括号用(末影龙娘拉弓控制器的松弦转移 `{A}&&{B}&&v.bow_charge==1`);基岩的块只收以 `;` 结尾的语句,整条拒载(早先被守卫落成 0,松弦动画永远不播)→ 块里(连同嵌套块)既无 `;` 也无赋值时换成圆括号(`port_java_pack.RewriteValueScopes`),带语句的块(`q.x ? {v.a = 1;}`、循环体)原样 |
