@@ -542,6 +542,7 @@ public class WarningCatalogTests
     [InlineData("map", "is_maid -> query.mod.ysm_is_maid", "车万女仆运行层提供")]
     [InlineData("map", "entity_type -> (query.mod.ysm_is_maid>0.5?'maid':'player')", "车万女仆运行层提供")]
     [InlineData("map", "tlm.is_sitting -> query.mod.ysm_tlm_is_sitting", "车万女仆运行层提供")]
+    [InlineData("map", "tlm.is_begging -> query.mod.ysm_tlm_is_begging", "车万女仆运行层提供")]
     [InlineData("const", "tlm.is_entity -> 1.0", "车万女仆联动按未安装处理")]
     [InlineData("const", "tlm.task_id -> ''", "车万女仆联动按未安装处理")]
     [InlineData("map", "weather -> query.mod.ysm_weather", "主组件运行层提供")]

@@ -47,7 +47,7 @@ public static class WarningCatalog
                 if (IsConstantReplacement(label))
                     return ExplainConstant(label);
                 if (IsMaidRuntimeMapping(label))
-                    return new("车万女仆运行层提供", "女仆身份(ysm.is_maid / is_player / entity_type)与女仆坐下(tlm.is_sitting)由网易版车万女仆写在套着这个模型的女仆身上; 玩家身上恒为缺省值(不是女仆、没坐下), 与 Java 玩家侧一致, 无需处理。", MolangMappingDoc);
+                    return new("车万女仆运行层提供", "女仆身份(ysm.is_maid / is_player / entity_type)、女仆坐下(tlm.is_sitting)与祈求(tlm.is_begging, 主人拿着蛋糕时)由网易版车万女仆写在套着这个模型的女仆身上; 玩家身上恒为缺省值(不是女仆、没坐下、没在祈求), 与 Java 玩家侧一致, 无需处理。", MolangMappingDoc);
                 if (IsRuntimeMapping(label))
                     return new("主组件运行层提供", "这个 Java 量由 YSM 主组件运行时逐帧/逐 tick 提供真值(视角/运动量/天气/血量/露天/roaming 存档同步/药水附魔探针/骨骼旋转回读等), 无需处理; 产物要与同期或更新的 YSM 主组件一起使用。", MolangMappingDoc);
                 return new("molang 映射", "按映射表完成的等价替换, 无需处理。", MolangMappingDoc);
@@ -102,7 +102,7 @@ public static class WarningCatalog
         if (Has(label, "ctrl."))
             return new("模组联动按未安装处理", "这是 Java 端某个模组(跑酷/拔刀剑/背包/乐器等)的联动变量, 按\"该模组没装\"的缺省值处理(字符串 ''、数值 0); 基岩没有这个模组, 对应动画不会触发。", MolangMappingDoc);
         if (label.StartsWith("tlm.", StringComparison.Ordinal))
-            return new("车万女仆联动按未安装处理", "tlm.* 里网易版车万女仆没有对应数据的量(好感度、任务、日程、背包、棋局等)按 Java 没装女仆模组时的缺省值处理(is_entity 为真、gomoku_rank 为 1、字符串 ''、其余 0); 女仆坐下 tlm.is_sitting 另由女仆运行层提供。", MolangMappingDoc);
+            return new("车万女仆联动按未安装处理", "tlm.* 里网易版车万女仆没有对应数据的量(好感度、任务、日程、背包、棋局等)按 Java 没装女仆模组时的缺省值处理(is_entity 为真、gomoku_rank 为 1、字符串 ''、其余 0); 女仆坐下 tlm.is_sitting、祈求 tlm.is_begging 另由女仆运行层提供。", MolangMappingDoc);
         if (Has(label, "particle"))
             return new("molang 中性常量", "通道表达式里的 ysm.particle 基岩没有对应, 按 0 处理; 只有 timeline 里的 particle 调用会转成基岩 particle_effects 关键帧。", MolangMappingDoc);
         if (Has(label, "sound"))
