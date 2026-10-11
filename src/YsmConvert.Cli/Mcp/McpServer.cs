@@ -221,6 +221,10 @@ internal sealed class McpServer
                    ("renames", "object", "逐包指定包名: {\"<Java 文件夹名>\": \"<包名>\"}", false),
                    ("withMods", "boolean", "携带第三方模组联动动画, 缺省 false", false),
                    ("javaFunctions", "boolean", "转换 Java 自定义函数(实验性, 缺省 false: fn.* 与音效调用按 0 处理)", false),
+                   ("material", "string", "全部包的模型材质, 写进产物 ysm.json 顶级 material(缺省自动: YSM 主组件按 Java 包判定 —— properties.all_cutout 打开则剔除背面, 皮肤带 PBR 贴图用 pbr, 其余 cutout)。预设名 cutout / translucent / emissive / pbr / bloom 及剔除背面版 *_cull、自定义材质名(要在资源包 materials 里有定义, 不参与描边泛光), 或 \"default=<材质>,ysm_glow=<材质>\" 逐个材质键指定", false),
+                   ("materials", "object", "逐包材质: {\"<Java 文件夹名>\": \"<材质>\"}, 覆盖 material", false),
+                   ("cull", "string", "背面剔除: auto(缺省, 照 Java properties.all_cutout) / on(剔除, 负尺寸描边要它) / off", false),
+                   ("culls", "object", "逐包背面剔除: {\"<Java 文件夹名>\": \"auto|on|off\"}, 覆盖 cull", false),
                    ("validate", "boolean", "转换后跑资源包体检, 缺省 true", false),
                    ("pretty", "boolean", "产物 JSON 按 2 空格缩进(缺省 false = 压成一行, 体积约省 70%; 要逐行读产物、手工改 bug 时设 true)", false),
                    ("jobs", "integer", "同时转换的包数(缺省自动; 多个包总是每包一个内核进程)", false),
@@ -363,7 +367,16 @@ internal sealed class McpServer
         if (args["renames"] is JsonObject renameObj)
             foreach (var kv in renameObj)
                 if (kv.Value is not null) renames[kv.Key] = kv.Value.GetValue<string>();
-        var packs = ConvertPlan.BuildPacks(discovered, args["prefix"]?.GetValue<string>(), args["collection"]?.GetValue<string>(), renames);
+        var materials = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (args["materials"] is JsonObject materialObj)
+            foreach (var kv in materialObj)
+                if (kv.Value is not null) materials[kv.Key] = kv.Value.GetValue<string>();
+        var culls = new Dictionary<string, bool?>(StringComparer.OrdinalIgnoreCase);
+        if (args["culls"] is JsonObject cullObj)
+            foreach (var kv in cullObj)
+                if (kv.Value is not null) culls[kv.Key] = MaterialOptions.ParseCull(kv.Value.ToString());
+        var packs = ConvertPlan.BuildPacks(discovered, args["prefix"]?.GetValue<string>(), args["collection"]?.GetValue<string>(), renames,
+            args["material"]?.GetValue<string>(), MaterialOptions.ParseCull(args["cull"]?.ToString()), materials, culls);
         var collections = new List<CollectionSpec>();
         if (args["collection"]?.GetValue<string>() is { } dir)
         {

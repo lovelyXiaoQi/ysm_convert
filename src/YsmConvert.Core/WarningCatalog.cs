@@ -169,6 +169,10 @@ public static class WarningCatalog
             return new("脚本控制器未转换", "Java 每帧脚本控制器属于 main/use/swing 等带内置状态机的通道(尚未支持), 或 set_animation 的动画名 / 循环类型不是常量, 内核放弃转换; 该通道姿态需手工写成基岩动画控制器。纯决策树的脚本总会展开成基岩控制器; 其余空白通道与并行通道的脚本要勾选「转换自定义函数(实验性)」才会编进逐帧执行体。", FunctionsDoc);
         if (t.Contains("自定义函数", StringComparison.Ordinal) && t.Contains("实验性", StringComparison.Ordinal))
             return new("自定义函数未转换(实验性)", "包里带 functions/*.molang 自定义函数, 这是实验性功能、缺省不转换: fn.* / 音效 / ysm.sync 调用按 0 处理, @player_init / @player_update / @sync 事件不执行。依赖它的效果(函数驱动的音效、计数器、脚本控制器等)需要时勾选「转换自定义函数(实验性)」重新转换(命令行 --java-functions)。", FunctionsDoc);
+        if (t.Contains("自定义材质", StringComparison.Ordinal))
+            return new("自定义材质", "这个材质名不是 YSM 的材质预设, YSM 主组件原样注册: 某个资源包的 materials/*.material 里要有它的定义(原版材质名如 entity_alphatest_one_sided 也行), 否则模型画不出来; 它不参与 YSM 的描边 / 泛光后处理, “背面剔除”选项对它不起作用。只想让负尺寸描边显形, 材质留“自动”(或选预设)再把“背面剔除”设为剔除即可。", PackGuideDoc);
+        if (t.Contains("选项写得不对", StringComparison.Ordinal))
+            return new("材质选项无效", "材质 / 背面剔除选项写法不对, 这个包按“自动”转换了(YSM 主组件按 Java 包判定)。材质名只能用英文字母、数字、_ 和 .; 逐键指定写成 键=材质, 多个用逗号隔开(default = 模型本体, ysm_glow = 发光组); 背面剔除只认 自动 / 剔除 / 不剔除。改好后重新转换。", PackGuideDoc);
         if (t.Contains("PBR", StringComparison.Ordinal) && t.Contains("缺失", StringComparison.Ordinal))
             return new("PBR 贴图缺失", "ysm.json 声明的 PBR 法线/高光贴图在 Java 包里找不到(Java 光影包同样拿不到), 这项声明已从产物 ysm.json 去掉, 按没有这张图处理; 补上文件后重新转换。", PackGuideDoc);
         if (t.Contains("滑铲动画缺失", StringComparison.Ordinal))

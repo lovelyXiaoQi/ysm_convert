@@ -28,6 +28,8 @@ public sealed class MainViewModel : ObservableObject
     private System.Windows.Threading.DispatcherTimer? _timer;
     private PackItem? _selectedPack;
     private int _selectedTab;
+    private string _batchMaterial = MaterialOptions.Auto;
+    private string _batchCull = MaterialOptions.Auto;
 
     public MainViewModel()
     {
@@ -51,6 +53,7 @@ public sealed class MainViewModel : ObservableObject
         BrowseCoverCommand = new RelayCommand(BrowseCover, () => !IsRunning);
         ClearCoverCommand = new RelayCommand(() => CollectionCover = "", () => !IsRunning);
         ApplyCollectionCommand = new RelayCommand(ApplyCollection, () => !IsRunning);
+        ApplyMaterialCommand = new RelayCommand(ApplyMaterial, () => !IsRunning);
         CopyAttentionCommand = new RelayCommand(CopyAttention, () => Attention.Count > 0);
 
         KernelReady = InitKernelAsync();
@@ -105,7 +108,7 @@ public sealed class MainViewModel : ObservableObject
         private set
         {
             if (!SetProperty(ref _isRunning, value)) return;
-            foreach (var c in new[] { AddPacksCommand, RemoveSelectedCommand, ClearCommand, BrowseOutputCommand, RunCommand, CancelCommand, ValidateCommand, FixCommand, ApplyCollectionCommand, BrowseCoverCommand, ClearCoverCommand })
+            foreach (var c in new[] { AddPacksCommand, RemoveSelectedCommand, ClearCommand, BrowseOutputCommand, RunCommand, CancelCommand, ValidateCommand, FixCommand, ApplyCollectionCommand, ApplyMaterialCommand, BrowseCoverCommand, ClearCoverCommand })
                 c.RaiseCanExecuteChanged();
         }
     }
@@ -118,6 +121,9 @@ public sealed class MainViewModel : ObservableObject
     public PackItem? SelectedPack { get => _selectedPack; set => SetProperty(ref _selectedPack, value); }
     public int SelectedTab { get => _selectedTab; set => SetProperty(ref _selectedTab, value); }
     public int AttentionCount => Attention.Count;
+    /// <summary>"应用到全部包"用的材质与背面剔除(不存设置: 逐包的值在列表里, 新加的包从"自动"开始)。</summary>
+    public string BatchMaterial { get => _batchMaterial; set => SetProperty(ref _batchMaterial, string.IsNullOrWhiteSpace(value) ? MaterialOptions.Auto : value.Trim()); }
+    public string BatchCull { get => _batchCull; set => SetProperty(ref _batchCull, value); }
 
     // ---------------------------------------------------------------- commands
     public RelayCommand AddPacksCommand { get; }
@@ -133,6 +139,7 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand OpenWikiCommand { get; }
     public RelayCommand OpenRepoCommand { get; }
     public RelayCommand ApplyCollectionCommand { get; }
+    public RelayCommand ApplyMaterialCommand { get; }
     public RelayCommand CopyAttentionCommand { get; }
     public RelayCommand BrowseCoverCommand { get; }
     public RelayCommand ClearCoverCommand { get; }
@@ -234,6 +241,21 @@ public sealed class MainViewModel : ObservableObject
         StatusText = UseCollection ? $"全部包归入合集 {dir}" : "全部包改为平铺(不归入合集)";
     }
 
+    private void ApplyMaterial()
+    {
+        if (MaterialOptions.Problem(BatchMaterial) is { } problem)
+        {
+            MessageBox.Show(problem, "材质写法有问题", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        foreach (var p in Packs)
+        {
+            p.Material = BatchMaterial;
+            p.CullMode = BatchCull;
+        }
+        StatusText = $"全部包: 材质 {BatchMaterial}, 背面剔除 {BatchCull}";
+    }
+
     // ---------------------------------------------------------------- output
     private void BrowseOutput()
     {
@@ -302,12 +324,23 @@ public sealed class MainViewModel : ObservableObject
         }
         var layout = ResolveLayout(allowCreate: true);
         if (layout is null) return;
-        var packs = enabled.Select(p => new PackSpec { JavaDir = p.JavaDir, Name = p.Name.Trim(), Collection = p.CollectionOrNull }).ToList();
+        var packs = enabled.Select(p => new PackSpec
+        {
+            JavaDir = p.JavaDir, Name = p.Name.Trim(), Collection = p.CollectionOrNull,
+            Material = p.MaterialOrNull, Cull = p.CullValue,
+        }).ToList();
         var problems = PackNameRules.Validate(packs);
         if (problems.Count > 0)
         {
             MessageBox.Show(string.Join("\n", problems), "包名有问题", MessageBoxButton.OK, MessageBoxImage.Warning);
             StatusText = "请先修正包名";
+            return;
+        }
+        var materialProblems = MaterialOptions.Validate(packs);
+        if (materialProblems.Count > 0)
+        {
+            MessageBox.Show(string.Join("\n", materialProblems), "材质写法有问题", MessageBoxButton.OK, MessageBoxImage.Warning);
+            StatusText = "请先修正“材质”列";
             return;
         }
         var collections = new List<CollectionSpec>();

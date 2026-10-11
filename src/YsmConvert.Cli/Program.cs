@@ -29,6 +29,12 @@ internal static class Program
           --rename <文件夹>=<包名>  逐包指定包名(可多次)
           --with-mods               携带第三方模组联动动画(slashblade/parcool/...; 枪械 tacz 动画缺省就带)
           --java-functions          转换 Java 自定义函数(实验性, 缺省不转: fn.* 与音效调用按 0 处理)
+          --material <材质>         全部包的模型材质(缺省自动: 按 Java 包的 all_cutout / PBR 贴图判定): 预设名
+                                    cutout / translucent / emissive / pbr / bloom(及 *_cull 剔除背面版)、自定义材质名,
+                                    或 "default=<材质>,ysm_glow=<材质>" 逐个材质键指定(default 本体, ysm_glow 发光组)
+          --material-for <文件夹>=<材质>  逐包指定材质(可多次; 文件夹 = Java 包目录名)
+          --cull <auto|on|off>      背面剔除(缺省 auto = 照 Java properties.all_cutout; on = 负尺寸描边要的剔除背面)
+          --cull-for <文件夹>=<auto|on|off>  逐包指定背面剔除(可多次)
           --no-validate             转换后不跑资源包体检
           --pretty                  产物 JSON 按 2 空格缩进(缺省压成一行: 体积约省 70%, 转换也更快)
           --jobs <N>                同时转换的包数(缺省自动: 逻辑核数的一半、最多 8, 再按可用内存封顶);
@@ -181,6 +187,9 @@ internal static class Program
             }
             Console.WriteLine($"{p.SuggestedName,-40} {p.DisplayName}{(p.CollectionFolder is null ? "" : $"  [合集 {p.CollectionFolder}]")}");
             Console.WriteLine($"    {p.JavaDir}");
+            if (p.MaterialProfile is { } profile)
+                Console.WriteLine($"    材质(自动): {MaterialOptions.DescribeAuto(profile)}" +
+                                  (MaterialOptions.NegativeCubeHint(profile, null) is { } hint ? $"; {hint}" : ""));
         }
         Console.WriteLine($"共 {packs.Count(p => p.Error is null)} 个 Java 包");
         return 0;
@@ -207,7 +216,22 @@ internal static class Program
             if (eq <= 0) throw new ArgumentException($"--rename 格式是 <文件夹>=<包名>: {r}");
             renames[r[..eq]] = r[(eq + 1)..];
         }
-        var packs = ConvertPlan.BuildPacks(discovered, a.Get("prefix"), a.Get("collection"), renames);
+        var materials = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in a.GetAll("material-for"))
+        {
+            var eq = m.IndexOf('=');
+            if (eq <= 0) throw new ArgumentException($"--material-for 格式是 <文件夹>=<材质>: {m}");
+            materials[m[..eq]] = m[(eq + 1)..];
+        }
+        var culls = new Dictionary<string, bool?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in a.GetAll("cull-for"))
+        {
+            var eq = c.IndexOf('=');
+            if (eq <= 0) throw new ArgumentException($"--cull-for 格式是 <文件夹>=<auto|on|off>: {c}");
+            culls[c[..eq]] = MaterialOptions.ParseCull(c[(eq + 1)..]);
+        }
+        var packs = ConvertPlan.BuildPacks(discovered, a.Get("prefix"), a.Get("collection"), renames,
+            a.Get("material"), MaterialOptions.ParseCull(a.Get("cull")), materials, culls);
         var collections = new List<CollectionSpec>();
         if (a.Get("collection") is { } dir)
         {

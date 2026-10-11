@@ -20,6 +20,13 @@ public sealed class PackSpec
     public required string Name { get; set; }
     /// <summary>合集目录名(ysm_models/&lt;合集&gt;/&lt;包名&gt;); null = 平铺。</summary>
     public string? Collection { get; set; }
+    /// <summary>
+    /// 模型材质(写进产物 ysm.json 顶级 material): 预设名 / 材质名, 或 "键=材质, 键=材质" 逐键指定; null = 自动
+    /// (YSM 主组件按 Java 包判定)。写法见 <see cref="MaterialOptions"/>。
+    /// </summary>
+    public string? Material { get; set; }
+    /// <summary>背面剔除(写进产物 ysm.json 顶级 cull): true 剔除 / false 不剔除; null = 照 Java properties.all_cutout。</summary>
+    public bool? Cull { get; set; }
 }
 
 /// <summary>
@@ -109,12 +116,16 @@ public sealed class JobSpec
         var packs = new JsonArray();
         foreach (var p in Packs)
         {
-            packs.Add(new JsonObject
+            var pack = new JsonObject
             {
                 ["javaDir"] = p.JavaDir,
                 ["name"] = p.Name,
                 ["collection"] = p.Collection is null ? null : JsonValue.Create(p.Collection),
-            });
+            };
+            // 材质 / 背面剔除只在不是"自动"时写(内核 1.3 起认; 缺省时内核不改 ysm.json)
+            if (MaterialOptions.Normalize(p.Material) is { } material) pack["material"] = material;
+            if (p.Cull is { } cull) pack["cull"] = cull;
+            packs.Add(pack);
         }
         var collections = new JsonObject();
         foreach (var c in Collections)
@@ -154,6 +165,8 @@ public sealed class DiscoveredPack
     public int? AnimationFiles { get; set; }
     public int? Projectiles { get; set; }
     public int? Vehicles { get; set; }
+    /// <summary>材质画像(all_cutout / PBR 皮肤数 / 负尺寸方块数); 旧内核或几何读不了时为 null。</summary>
+    public MaterialProfile? MaterialProfile { get; set; }
 
     [JsonIgnore]
     public string DisplayName => MetadataString("name") ?? Folder ?? Path.GetFileName(JavaDir);

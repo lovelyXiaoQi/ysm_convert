@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:YsmConvert.App.ViewModels"
         xmlns:conv="clr-namespace:YsmConvert.App.Converters"
+        xmlns:core="clr-namespace:YsmConvert.Core;assembly=YsmConvert.Core"
         Title="YSM模型网易基岩版转换器"
         Width="1280" Height="820" MinWidth="1000" MinHeight="640"
         WindowStartupLocation="CenterScreen"
@@ -56,6 +57,13 @@
         <Style x:Key="OptionText" TargetType="TextBlock">
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
+        <!-- 材质下拉项: 值(写进 ysm.json) + 说明; 可编辑, 输入框里只显示值 -->
+        <DataTemplate x:Key="MaterialChoiceTemplate" DataType="{x:Type core:MaterialChoice}">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="{Binding Value}" FontWeight="SemiBold" MinWidth="110" />
+                <TextBlock Text="{Binding Label}" Opacity="0.7" Margin="8,0,0,0" />
+            </StackPanel>
+        </DataTemplate>
     </Window.Resources>
 
     <DockPanel Margin="12">
@@ -111,6 +119,25 @@
                             <DataGridTextColumn Header="模型名" Binding="{Binding DisplayName}" IsReadOnly="True" Width="190" />
                             <DataGridTextColumn Header="包名 (可改)" Binding="{Binding Name, UpdateSourceTrigger=LostFocus}" Width="230" />
                             <DataGridTextColumn Header="合集 (可改)" Binding="{Binding Collection, UpdateSourceTrigger=LostFocus}" Width="120" />
+                            <DataGridTemplateColumn Header="材质" Width="130">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ComboBox IsEditable="True" Text="{Binding Material, UpdateSourceTrigger=LostFocus}"
+                                                  ItemsSource="{x:Static core:MaterialOptions.Choices}" TextSearch.TextPath="Value"
+                                                  ItemTemplate="{StaticResource MaterialChoiceTemplate}"
+                                                  ToolTip="{Binding MaterialTip}" ToolTipService.ShowDuration="30000" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="背面剔除" Width="90">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ComboBox SelectedItem="{Binding CullMode, UpdateSourceTrigger=PropertyChanged}"
+                                                  ItemsSource="{x:Static core:MaterialOptions.CullChoices}"
+                                                  ToolTip="{Binding MaterialTip}" ToolTipService.ShowDuration="30000" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                             <DataGridTextColumn Header="状态" Binding="{Binding Status}" IsReadOnly="True" Width="150" />
                             <DataGridTextColumn Header="待过目" Binding="{Binding AttentionCount}" IsReadOnly="True" Width="72" />
                             <DataGridTextColumn Header="概况" Binding="{Binding Summary}" IsReadOnly="True" Width="*" />
@@ -184,6 +211,30 @@
                                            Text="PNG, 不超过 1MB。游戏里按 Java 文件夹卡片 52x90 的比例等比铺满, 底部一截是名字区。不选则用 Java 合集自带的 ysm-pack.png, 都没有就是默认封面。贴图改动要重启游戏才会加载。" />
                             </DockPanel>
                             <Button Grid.Row="4" Grid.Column="1" Content="应用到列表里全部包的“合集”列" Command="{Binding ApplyCollectionCommand}" Padding="8,3" HorizontalAlignment="Left" />
+                        </Grid>
+
+                        <Separator Margin="0,12,0,8" />
+                        <TextBlock Style="{StaticResource OptionText}" Text="模型材质 (每个包在列表的“材质”“背面剔除”两列里单独改)" Margin="0,0,0,4" />
+                        <Grid Margin="0,2,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Text="材质" VerticalAlignment="Center" Margin="0,0,8,4" />
+                            <ComboBox Grid.Row="0" Grid.Column="1" IsEditable="True" Margin="0,0,0,4"
+                                      Text="{Binding BatchMaterial, UpdateSourceTrigger=LostFocus}"
+                                      ItemsSource="{x:Static core:MaterialOptions.Choices}" TextSearch.TextPath="Value"
+                                      ItemTemplate="{StaticResource MaterialChoiceTemplate}"
+                                      ToolTip="选预设或直接输入材质名; 也可以写 default=材质, ysm_glow=材质 分别指定模型本体和发光组(ysmGlow 开头的骨骼)" />
+                            <TextBlock Grid.Row="1" Text="背面剔除" VerticalAlignment="Center" Margin="0,0,8,4" />
+                            <ComboBox Grid.Row="1" Grid.Column="1" Margin="0,0,0,4" SelectedItem="{Binding BatchCull}"
+                                      ItemsSource="{x:Static core:MaterialOptions.CullChoices}" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Opacity="0.7" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"
+                                       Text="自动 = 读 Java 包: properties.all_cutout 打开(负尺寸描边模型)就剔除背面, 皮肤带 PBR 贴图用 pbr, 其余 cutout(和 Java 缺省一样不剔除背面, 单面的火焰、飘带两面都看得见)。用负尺寸方块做描边外壳、Java 包却没开 all_cutout 时, 把背面剔除设为“剔除”。自定义材质直接输入材质名(资源包 materials 里定义的或原版材质名), 它不参与描边 / 泛光后处理。" />
+                            <Button Grid.Row="3" Grid.Column="1" Content="应用到列表里全部包的“材质”“背面剔除”列" Command="{Binding ApplyMaterialCommand}" Padding="8,3" HorizontalAlignment="Left" />
                         </Grid>
 
                         <Separator Margin="0,12,0,8" />

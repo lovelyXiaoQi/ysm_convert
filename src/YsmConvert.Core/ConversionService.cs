@@ -49,6 +49,7 @@ public sealed class ConversionService
         Action<string>? onStderr = null, CancellationToken ct = default)
     {
         var problems = PackNameRules.Validate(request.Packs);
+        problems.AddRange(MaterialOptions.Validate(request.Packs));
         if (request.Packs.Count == 0) problems.Insert(0, "没有要转换的 Java 包");
         foreach (var collection in request.Collections)
             if (collection.CoverProblem() is { } coverProblem) problems.Add(coverProblem);
@@ -336,11 +337,15 @@ public sealed class ConversionService
     }
 }
 
-/// <summary>把发现结果整理成转换任务: 包名(建议名 / 统一前缀 / 逐包改名)、合集归属。</summary>
+/// <summary>把发现结果整理成转换任务: 包名(建议名 / 统一前缀 / 逐包改名)、合集归属、材质与背面剔除(整批 / 逐包)。</summary>
 public static class ConvertPlan
 {
+    /// <param name="material">全部包的材质(null = 自动); <paramref name="materials"/> 按 Java 文件夹名或目录逐包覆盖。</param>
+    /// <param name="cull">全部包的背面剔除(null = 照 Java all_cutout); <paramref name="culls"/> 逐包覆盖。</param>
     public static List<PackSpec> BuildPacks(IEnumerable<DiscoveredPack> discovered, string? prefix = null,
-        string? collectionOverride = null, IReadOnlyDictionary<string, string>? renames = null)
+        string? collectionOverride = null, IReadOnlyDictionary<string, string>? renames = null,
+        string? material = null, bool? cull = null,
+        IReadOnlyDictionary<string, string>? materials = null, IReadOnlyDictionary<string, bool?>? culls = null)
     {
         var packs = new List<PackSpec>();
         foreach (var d in discovered)
@@ -354,11 +359,19 @@ public static class ConvertPlan
                 name = PackNameRules.Sanitize(prefix) + "_" + PackNameRules.Sanitize(d.SuggestedName ?? folder).TrimStart('_');
             else
                 name = d.SuggestedName ?? PackNameRules.Sanitize(folder);
+            var packMaterial = material;
+            if (materials is not null && (materials.TryGetValue(folder, out var own) || materials.TryGetValue(d.JavaDir, out own)))
+                packMaterial = own;
+            var packCull = cull;
+            if (culls is not null && (culls.TryGetValue(folder, out var ownCull) || culls.TryGetValue(d.JavaDir, out ownCull)))
+                packCull = ownCull;
             packs.Add(new PackSpec
             {
                 JavaDir = d.JavaDir,
                 Name = name,
                 Collection = collectionOverride ?? d.CollectionFolder,
+                Material = MaterialOptions.Normalize(packMaterial),
+                Cull = packCull,
             });
         }
         return packs;

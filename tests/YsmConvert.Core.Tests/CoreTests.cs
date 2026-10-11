@@ -686,3 +686,125 @@ public class MolangPresentationTests
         Assert.Equal("[i] molang/lower: 1 个动画名改成小写: B→b", buffer.Flush("b"));
     }
 }
+
+public class MaterialOptionTests
+{
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("自动")]
+    [InlineData("auto")]
+    [InlineData("cutout_cull")]
+    [InlineData("entity_alphatest_one_sided")]
+    [InlineData("my_toon.v2")]
+    [InlineData("default=cutout, ysm_glow=translucent")]
+    [InlineData("default = pbr；ysm_glow=emissive")]
+    public void AcceptsKernelMaterialSyntax(string? text) => Assert.Null(MaterialOptions.Problem(text));
+
+    // 与内核 port_java_pack.NormalizeMaterialOption 同一规则(devtools/test_port_cli.py 的同名用例)
+    [Theory]
+    [InlineData("bad name")]
+    [InlineData("default=cut=out")]
+    [InlineData("default=cutout,default=pbr")]
+    [InlineData("中文材质")]
+    [InlineData("default=")]
+    public void RejectsWhatKernelRejects(string text) => Assert.NotNull(MaterialOptions.Problem(text));
+
+    [Fact]
+    public void AutoIsNotWrittenToJob()
+    {
+        var job = new JobSpec
+        {
+            Layout = new OutputLayout(@"C:\out", @"C:\out\x_bp", @"C:\out\x_rp"),
+            Packs =
+            {
+                new PackSpec { JavaDir = @"C:\java\a", Name = "a", Material = "自动" },
+                new PackSpec { JavaDir = @"C:\java\b", Name = "b", Material = "default=my_toon", Cull = true },
+                new PackSpec { JavaDir = @"C:\java\c", Name = "c", Cull = false },
+            },
+        };
+        var packs = JsonNode.Parse(job.ToJson())!["packs"]!;
+        Assert.Null(packs[0]!["material"]);      // 自动: 不写, 内核不改 ysm.json, YSM 主组件按 Java 包判定
+        Assert.Null(packs[0]!["cull"]);
+        Assert.Equal("default=my_toon", packs[1]!["material"]!.GetValue<string>());
+        Assert.True(packs[1]!["cull"]!.GetValue<bool>());
+        Assert.Null(packs[2]!["material"]);
+        Assert.False(packs[2]!["cull"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void ParsesCullWords()
+    {
+        foreach (var auto in new[] { null, "", "auto", "自动", " AUTO " })
+            Assert.Null(MaterialOptions.ParseCull(auto));
+        foreach (var on in new[] { "on", "剔除", "true", "ON" })
+            Assert.True(MaterialOptions.ParseCull(on));
+        foreach (var off in new[] { "off", "不剔除", "false" })
+            Assert.False(MaterialOptions.ParseCull(off));
+        Assert.Throws<ArgumentException>(() => MaterialOptions.ParseCull("maybe"));
+        Assert.Equal(MaterialOptions.CullOn, MaterialOptions.CullText(true));
+        Assert.Equal(MaterialOptions.Auto, MaterialOptions.CullText(null));
+    }
+
+    [Fact]
+    public void FlagsCustomMaterials()
+    {
+        Assert.False(MaterialOptions.IsCustom("自动"));
+        Assert.False(MaterialOptions.IsCustom("cutout"));
+        Assert.False(MaterialOptions.IsCustom("default=pbr_cull, ysm_glow=emissive"));
+        Assert.True(MaterialOptions.IsCustom("my_toon"));
+        Assert.True(MaterialOptions.IsCustom("default=cutout, ysm_glow=my_glow"));
+        Assert.False(MaterialOptions.IsCustom("bad name"));     // 写错的先按写法报, 不算自定义
+        // 下拉框里的预设(除"自动")都是 YSM 主组件认的预设名
+        Assert.All(MaterialOptions.Choices.Skip(1), c => Assert.False(MaterialOptions.IsCustom(c.Value)));
+        Assert.Equal(MaterialOptions.Auto, MaterialOptions.Choices[0].Value);
+    }
+
+    [Fact]
+    public void DiscoveredPackCarriesMaterialProfile()
+    {
+        const string line = """{"event": "pack", "javaDir": "C:/j/p", "folder": "p", "suggestedName": "p", "materialProfile": {"allCutout": true, "pbrSkins": 2, "pbrVehicles": 0, "negativeCubes": 13}}""";
+        var pack = JsonSerializer.Deserialize<DiscoveredPack>(line, KernelJson.Options)!;
+        Assert.NotNull(pack.MaterialProfile);
+        Assert.True(pack.MaterialProfile!.AllCutout);
+        Assert.Equal(13, pack.MaterialProfile.NegativeCubes);
+        Assert.Equal("PBR · 负尺寸描边·剔除背面", MaterialOptions.DescribeAuto(pack.MaterialProfile));
+        Assert.Equal("普通", MaterialOptions.DescribeAuto(new MaterialProfile()));
+        Assert.Contains("描边外壳", MaterialOptions.NegativeCubeHint(pack.MaterialProfile, null));
+        Assert.Contains("不剔除背面", MaterialOptions.NegativeCubeHint(pack.MaterialProfile, false));
+        Assert.Null(MaterialOptions.NegativeCubeHint(new MaterialProfile(), true));
+        var old = JsonSerializer.Deserialize<DiscoveredPack>("""{"event": "pack", "javaDir": "C:/j/q"}""", KernelJson.Options)!;
+        Assert.Null(old.MaterialProfile);                          // 旧内核不给画像
+    }
+
+    [Fact]
+    public void ConvertPlanAppliesMaterialAndCull()
+    {
+        var discovered = new[]
+        {
+            new DiscoveredPack { JavaDir = @"C:\j\01", Folder = "01", SuggestedName = "p01" },
+            new DiscoveredPack { JavaDir = @"C:\j\02", Folder = "02", SuggestedName = "p02" },
+        };
+        var packs = ConvertPlan.BuildPacks(discovered, material: "translucent", cull: true,
+            materials: new Dictionary<string, string> { ["02"] = "自动" },
+            culls: new Dictionary<string, bool?> { ["02"] = null });
+        Assert.Equal("translucent", packs[0].Material);
+        Assert.True(packs[0].Cull);
+        Assert.Null(packs[1].Material);
+        Assert.Null(packs[1].Cull);
+        Assert.All(ConvertPlan.BuildPacks(discovered), p => Assert.True(p.Material is null && p.Cull is null));
+        var bad = new List<PackSpec> { new() { JavaDir = @"C:\j\01", Name = "p01", Material = "bad name" } };
+        Assert.Single(MaterialOptions.Validate(bad));
+    }
+
+    [Fact]
+    public void ExplainsKernelMaterialLines()
+    {
+        var custom = WarningCatalog.ExplainLog("notice",
+            "[!] 自定义材质 my_toon: 不是 YSM 材质预设, 主组件原样注册 —— 资源包的 materials/*.material 里要有它的定义");
+        Assert.Equal("自定义材质", custom.Category);
+        Assert.Equal(WarningCatalog.PackGuideDoc, custom.Doc);
+        var invalid = WarningCatalog.ExplainLog("warn", "[WARN] 材质选项写得不对, 按自动处理: 材质名只能用英文字母、数字、_ 和 .: a b");
+        Assert.Equal("材质选项无效", invalid.Category);
+    }
+}
