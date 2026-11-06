@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """转换器宿主入口(Python 2.7): 批处理移植 + 结构化事件流(JSON Lines)。
 
-供独立转换器 ysm_convert(C# 壳: GUI / CLI / MCP 服务器)调用; 人工命令行用法仍见 port_java_pack.py。
+供独立转换器 ysm_convert(Rust 壳: GUI / CLI / MCP 服务器)调用; 人工命令行用法仍见 port_java_pack.py。
 
     python port_cli.py --job <job.json>            按任务单执行(convert / validate / fix / baseline)
     python port_cli.py --discover <目录 | 列表.json>  发现 Java 模型包(单包 / 合集目录 / 上级目录)
@@ -373,7 +373,7 @@ def _ApplyLayout(layout):
 
 
 # 网易按有没有 entities 文件夹识别行为包: 没有就不挂载(MC Studio 测试与正式游戏都只启用资源包), ysm_models 里的
-# ysm.json 扫不到; MCDK 按 manifest 建目录联接, 测不出来。与转换器壳 OutputTarget.EnsureBehaviorPackMarker 同一口径:
+# ysm.json 扫不到; MCDK 按 manifest 建目录联接, 测不出来。与转换器壳 output::ensure_behavior_pack_marker 同一口径:
 # 缺就补一个带 .gitkeep 的空文件夹(git 与打包脚本都不保留空目录), 已有的不动
 _BEHAVIOR_PACK_MARKER_DIR = "entities"
 _BEHAVIOR_PACK_MARKER_FILE = ".gitkeep"

@@ -7473,7 +7473,7 @@ def ExplicitPackPrecedence(packName):
     return _RewritePackMolang(packName, ExplicitAnimationPrecedence, ExplicitControllerPrecedence)
 
 
-# 同类项合并缺陷的留痕(转换器 WarningCatalog 按"引擎同类项合并"前缀认)
+# 同类项合并缺陷的留痕(转换器告警说明表 catalog.rs 按"引擎同类项合并"前缀认)
 LIKE_TERM_REPORT = (u"引擎同类项合并缺陷规避 {} 条表达式: 同一个变量跟不同常量比较的项在加法里会被引擎当成同一项合并"
                     u"(连段写法 (v.qh==1?(a)) + (v.qh==2?(a)) 第一段翻倍、第二段归零), 比较改写成等价的 (x-常量)==0")
 

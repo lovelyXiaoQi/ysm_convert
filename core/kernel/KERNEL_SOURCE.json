@@ -1,8 +1,8 @@
 ﻿{
     "source":  "D:\\MCStudioDownload\\work\\icegamestudio@163.com\\Cpp\\AddOn\\ysm",
-    "commit":  "9cb29fcb726467ba7cdce46952f067a1c0526402",
+    "commit":  "5e3064de0cb50f74e93198b821259851e271c372",
     "dirty":  false,
-    "syncedAt":  "2026-11-01T14:26:48",
+    "syncedAt":  "2026-11-06T12:14:46",
     "modules":  [
                     "devtools\\build_rp_index.py",
                     "devtools\\fix_ported_controllers.py",
