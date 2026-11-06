@@ -33,12 +33,15 @@ core/python/python.exe          便携 Python 2.7        —— 与游戏内解�
 - 产物路径一律走 Windows 长路径(`\\?\` 前缀), 完整路径超过 260 字符也能写。
 - MCP 服务器: stdio、JSON-RPC 2.0、每行一条消息, 不依赖 SDK(手写 `initialize / ping / tools/list / tools/call`)。
 
+便携 Python 的标准库与 pypinyin 全部预编译成 `.pyc` 打进 `python27.zip`(`build/pyzip.py`): 内核进程启动从约 1 秒降到约 0.3 秒,
+每个包一个进程, 包多时省得明显。`Lib\os.py` 只是地标(解释器按它把自身目录当 prefix, 不去读注册表里别的 Python 安装)。
+
 ## 构建
 
-前置: .NET 10 SDK; 本机 Python 2.7(`C:\Python27`, 装了 `pypinyin`)只在生成便携运行时时需要。
+前置: .NET 10 SDK; 本机 Python 2.7(`C:\Python27`, 装了 `pypinyin` 与 `enum34`)只在生成便携运行时时需要。
 
 ```powershell
-.\build\make-python.ps1 -Force   # 生成 core/python(便携 2.7 + 私有 VC++ 2008 运行库, 约 18 MB, 不入库)
+.\build\make-python.ps1 -Force   # 生成 core/python(便携 2.7: 预编译标准库 python27.zip + 私有 VC++ 2008 运行库, 约 7.6 MB, 不入库)
 dotnet build                     # 开发构建(exe 在 src/*/bin/Debug, 跑的是工程的 devtools)
 dotnet test                      # 单元测试
 .\build\publish.ps1              # 发布到 dist/YsmConvert(自包含; 会先跑 sync-core 把当前 devtools 快照进 core/)
@@ -76,7 +79,7 @@ py -3 -c "from PIL import Image; Image.open('icon.png').convert('RGBA').save('ic
 ## 目录
 
 ```text
-build/        sync-core.ps1 / make-python.ps1 / publish.ps1
+build/        sync-core.ps1 / make-python.ps1 + pyzip.py / publish.ps1
 .github/      workflows/release.yml(一键发版)
 core/kernel   内核快照(入库, 只为发布包)  core/docs 文档快照(入库)  core/python 便携运行时(生成, 不入库)
 src/YsmConvert.Core   任务模型、内核进程、事件解析、报告聚合、告警解释、组件脚手架
