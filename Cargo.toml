@@ -1,0 +1,27 @@
+# YSM Convert: Rust 壳(GUI / CLI / MCP) + 便携 Python 2.7 内核。架构见 DEVELOPMENT.md。
+[workspace]
+resolver = "3"
+members = ["crates/ysmconv-core", "crates/ysmconv-cli", "crates/ysmconv-gui"]
+
+[workspace.package]
+# 发版流水线按 tag 递增出版本号, 经环境变量 YSMCONV_VERSION 写进两个 exe(见 build/publish.ps1), 不回写这里;
+# 这里的版本比递增结果高时用这里的(想直接发 1.0.0 就改成 1.0.0)
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+authors = ["YSM"]
+publish = false
+
+[workspace.dependencies]
+ysmconv-core = { path = "crates/ysmconv-core" }
+serde = { version = "1", features = ["derive"] }
+# preserve_order: 报告 / 任务单 / MCP 回包的键按写入顺序输出, 与内核和旧版一致, 人读也顺
+serde_json = { version = "1", features = ["preserve_order"] }
+windows-sys = "0.61"
+winresource = "0.1"
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"

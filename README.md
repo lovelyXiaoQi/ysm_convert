@@ -15,11 +15,12 @@
 1. 到 [Releases](https://github.com/lovelyXiaoQi/ysm_convert/releases) 下载最新的 `YsmConvert-vX.Y.Z-win-x64.zip`。
 2. 解压到任意目录(路径可以含中文和空格), 双击 `YsmConvert.exe`。
 
-.NET 运行时和内核用的 Python 都在包里, 不用另装。
+转换内核用的 Python 在包里, 不用另装(也不需要 .NET 之类的运行库), 整包 zip 不到 9 MB。
 
 - exe 没有代码签名, 首次运行弹出"Windows 已保护你的电脑"时, 点"更多信息"再点"仍要运行"。
 - 提示转换内核无法启动时, 装一次 [VC++ 2008 SP1 运行库(x64)](https://www.microsoft.com/download/details.aspx?id=26368)。
-- 解压出来的目录要保持完整: `core/` 是转换内核, `*.deps.json`、`*.runtimeconfig.json` 是程序启动必需的文件, 都不要删。
+- 解压出来的目录要保持完整: `core/` 是转换内核, 不要删。
+- 图形界面需要支持 OpenGL 2.0 的显卡驱动; 在不带显卡的远程桌面 / 虚拟机里起不来时会弹框说明, 改用同目录的命令行 `ysmconv.exe`, 功能相同。
 
 ## 图形界面
 
@@ -29,7 +30,7 @@
 
 点 **添加目录…**(可多选), 或者直接把文件夹拖进窗口、拖到 `YsmConvert.exe` 图标上。单个模型包目录、带 `ysm-pack.json` 的合集目录、装着若干包的上级目录都可以, 程序会自动找出里面的包。
 
-列表里一个包一行:
+列表里一个包一行; 点行选中(Ctrl 多选、Shift 连选), **移除选中** 或按 Delete 从列表里去掉:
 
 - **启用**: 取消勾选的包不参与转换。
 - **包名(可改)**: 模型 ID 和全部资源 ID 的词根, 只能用小写英文、数字、下划线, 以字母或数字开头, 最长 64 个字符。默认是自动生成的建议名(中文转拼音); 建议加上作者前缀, 免得和别人的模型重名。
@@ -132,7 +133,7 @@
 | `--jobs <N>` | 同时转换的包数(默认自动) |
 | `--json`、`--report <文件>` | 输出 / 另存机器可读的 JSON 报告 |
 
-全部选项见 `ysmconv --help`。示例:
+全部选项见 `ysmconv --help`, 版本号用 `ysmconv --version` 查看。示例:
 
 ```powershell
 # 看看目录里有哪些包

@@ -1,11 +1,8 @@
-# .NET
-bin/
-obj/
-*.user
-*.suo
-.vs/
+# Rust 构建产物
+target/
+
+# 发布目录(build/publish.ps1 生成)
 dist/
-TestResults/
 
 # 生成物: 便携 Python 内核运行时(由 build/make-python.ps1 生成, 不入库)
 core/python/

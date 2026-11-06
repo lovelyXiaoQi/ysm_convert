@@ -5,7 +5,7 @@
 .DESCRIPTION
   转换规则的唯一真源是 YSM 工程的 devtools/ 与 ysm_bp/ysmModelScripts/packLoader/(游戏内解析器共用同一份代码)。
   **开发时不用跑这个脚本**: 转换器住在工程里(<工程>/ysm_convert), 开发构建直接跑工程的 devtools(见
-  src/YsmConvert.Core/KernelLocator.cs), 改了规则立刻生效。快照只有发布包需要 —— 用户机上没有 YSM 工程;
+  crates/ysmconv-core/src/locator.rs), 改了规则立刻生效。快照只有发布包需要 —— 用户机上没有 YSM 工程;
   build/publish.ps1 会自动先调用本脚本, 手工执行一般只在"要把快照提交进 git 给 Actions 发版"时。
   本脚本只做"快照拷贝", 不改任何内容; 同步后 core/kernel/KERNEL_SOURCE.json 记录来源提交与文件清单。
   内核目录布局必须保持 <kernel>/devtools、<kernel>/ysm_bp/ysmModelScripts、<kernel>/ysm_rp/animations/java_default:

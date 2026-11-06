@@ -3,26 +3,23 @@
   发布可分发目录 dist/YsmConvert/: GUI(YsmConvert.exe) + CLI/MCP(ysmconv.exe) + core/(内核快照 + 便携 Python + 文档)。
 
 .DESCRIPTION
-  两个 exe 以自包含方式发布到同一目录, 共享一份 .NET 运行时(不装 .NET 也能跑); 不用单文件打包, 否则两个 exe 各带一份运行时。
+  两个 exe 由 cargo 以 release 配置构建(静态链接, 不依赖任何运行时), 拷到同一目录。
   core/python 必须先由 build/make-python.ps1 生成, core/kernel 与 core/docs 由 build/sync-core.ps1 同步。
   旧 dist 先整目录改名再删除: 目录里有文件被占用(GUI / CLI 正在运行)时改名会失败, 于是在删掉任何东西之前就中止 ——
-  2026-09-18 曾在 GUI 运行中直接 Remove-Item, 删到被锁的 DLL 才报错, dist 只剩半截。
+  2026-09-18 曾在 GUI 运行中直接 Remove-Item, 删到被锁的文件才报错, dist 只剩半截。
 
-.PARAMETER SelfContained
-  缺省 $true。设为 $false 则发布框架依赖版(体积小, 需要目标机装 .NET 10 桌面运行时)。
 .PARAMETER Version
-  写进两个 exe 的版本号(文件属性里的版本、MCP 的 serverInfo)。缺省取 Directory.Build.props 的 <Version>;
-  发版流水线 .github/workflows/release.yml 按 tag 递增出版本号后从这里传入。
+  写进两个 exe 的版本号(文件属性里的版本、MCP 的 serverInfo、ysmconv --version)。缺省取 Cargo.toml 的
+  [workspace.package] version; 发版流水线 .github/workflows/release.yml 按 tag 递增出版本号后从这里传入
+  (经环境变量 YSMCONV_VERSION 交给构建)。
 .PARAMETER KernelOnly
-  只把 core/(kernel / docs / python)重新拷进已有的 dist, 不重新发布 exe —— 改了内核、GUI 又开着的时候用。
+  只把 core/(kernel / docs / python)重新拷进已有的 dist, 不重新构建 exe —— 改了内核、GUI 又开着的时候用。
 .PARAMETER SkipSync
   不先同步 core/kernel 快照。缺省行为: 上一级是 YSM 工程时先跑 build/sync-core.ps1, 保证发布包带的是当前 devtools
   (开发构建直接跑工程的 devtools, 只有发布包吃快照 —— 不自动同步就会发出旧内核)。Actions 发版的 runner 上没有工程,
   自动跳过, 发的是仓库里提交的那份快照。
 #>
 param(
-    [bool]$SelfContained = $true,
-    [string]$Runtime = "win-x64",
     [string]$Version,
     [switch]$KernelOnly,
     [switch]$SkipSync
@@ -42,7 +39,7 @@ if (-not $SkipSync) {
     }
 }
 
-foreach ($required in @("core\kernel\devtools\port_cli.py", "core\python\python.exe")) {
+foreach ($required in @("core\kernel\devtools\port_cli.py", "core\python\python.exe", "core\python\python27.zip")) {
     if (-not (Test-Path (Join-Path $repoRoot $required))) {
         throw "缺 $required —— 先跑 build\sync-core.ps1 与 build\make-python.ps1"
     }
@@ -55,7 +52,8 @@ function Copy-Core([string]$target) {
         if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
         Copy-Item -Recurse (Join-Path $repoRoot "core\$sub") $dst
     }
-    Get-ChildItem -Recurse $coreDst -Include *.pyc, __pycache__ | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Recurse $coreDst -Include *.pyc, __pycache__ | Where-Object { $_.FullName -notlike "*python27.zip*" } |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     # 内核来源记录里带着开发机的绝对路径, 发布包里只留仓库目录名与提交号
     $srcInfo = Join-Path $coreDst "kernel\KERNEL_SOURCE.json"
     if (Test-Path $srcInfo) {
@@ -75,6 +73,27 @@ if ($KernelOnly) {
     exit 0
 }
 
+# 先构建: 编译失败时旧 dist 原样保留。PATH 里没有 cargo 时(rustup 装的时候没改 PATH)用用户目录下的那份
+$cargo = (Get-Command cargo -ErrorAction SilentlyContinue).Source
+if (-not $cargo) {
+    $cargo = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
+    if (-not (Test-Path $cargo)) { throw "找不到 cargo: 先装 Rust(https://rustup.rs), 或把 %USERPROFILE%\.cargo\bin 加进 PATH" }
+}
+if ($Version) { $env:YSMCONV_VERSION = $Version } else { Remove-Item Env:YSMCONV_VERSION -ErrorAction SilentlyContinue }
+Push-Location $repoRoot
+# cargo 把进度写到 stderr; Windows PowerShell 5.1 在输出被重定向时会把 stderr 行当成错误记录, 遇上 Stop 就中断 ——
+# 构建期间放宽, 并把它的 stderr 转成普通文本行; 成败只看退出码
+$savedPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    & $cargo build --release --locked -p ysmconv -p ysmconvert-gui 2>&1 | ForEach-Object { "$_" }
+    $buildExit = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedPreference
+    Pop-Location
+}
+if ($buildExit) { throw "cargo build 失败(退出码 $buildExit)" }
+
 if (Test-Path $dist) {
     $old = "$dist.old"
     if (Test-Path $old) { Remove-Item -Recurse -Force $old }
@@ -86,15 +105,9 @@ if (Test-Path $dist) {
     Remove-Item -Recurse -Force $old
 }
 New-Item -ItemType Directory -Force $dist | Out-Null
-
-$sc = if ($SelfContained) { "true" } else { "false" }
-$common = @("-c", "Release", "-r", $Runtime, "--self-contained", $sc, "-o", $dist, "-p:PublishSingleFile=false", "-p:DebugType=none")
-if ($Version) { $common += "-p:Version=$Version" }
-dotnet publish (Join-Path $repoRoot "src\YsmConvert.App") @common
-if ($LASTEXITCODE -ne 0) { throw "发布 GUI 失败" }
-dotnet publish (Join-Path $repoRoot "src\YsmConvert.Cli") @common
-if ($LASTEXITCODE -ne 0) { throw "发布 CLI 失败" }
-
+foreach ($exe in @("YsmConvert.exe", "ysmconv.exe")) {
+    Copy-Item (Join-Path $repoRoot "target\release\$exe") $dist
+}
 Copy-Core $dist
 Copy-Item (Join-Path $repoRoot "README.md") $dist
 

@@ -1,8 +1,8 @@
 # 一键发版: 仓库页 Actions → Release → Run workflow, 选版本递增位后运行。
 # 算版本号 → 生成便携 Python 2.7(core/python) → 单元测试 → build/publish.ps1 → 打 zip → 建 tag 与 Release 并上传 zip。
-# 版本号以 tag 为准: 在最新的 vX.Y.Z 上按所选位递增, 还没有 tag 时用 Directory.Build.props 的 <Version>;
-# props 的版本比递增结果高时用 props 的(想直接发 1.0.0 就把 props 改成 1.0.0)。经 -p:Version 写进 exe, 不回写仓库。
-# Release 附件单个文件上限 2 GiB、总量不限, 整包 zip(约 64 MB)直接上传。
+# 版本号以 tag 为准: 在最新的 vX.Y.Z 上按所选位递增, 还没有 tag 时用 Cargo.toml [workspace.package] 的 version;
+# 那里的版本比递增结果高时用那里的(想直接发 1.0.0 就把它改成 1.0.0)。经环境变量 YSMCONV_VERSION 写进 exe, 不回写仓库。
+# 整包 zip(Rust 壳 + 便携 Python + 内核快照, 约 9 MB)直接上传。
 name: Release
 
 on:
@@ -48,8 +48,10 @@ jobs:
         run: |
           $released = git tag --points-at HEAD --list 'v*'
           if ($released) { throw "当前提交已经发布为 $released, 有新提交再发版" }
-          $props = [version]([xml](Get-Content -Raw Directory.Build.props)).SelectSingleNode('//Version').InnerText
-          $props = [version]::new($props.Major, $props.Minor, [math]::Max($props.Build, 0))
+          # [workspace.package] 段里的 version = "x.y.z"
+          $cargo = Get-Content -Raw Cargo.toml
+          if ($cargo -notmatch '(?ms)^\[workspace\.package\].*?^version\s*=\s*"(\d+\.\d+\.\d+)"') { throw "Cargo.toml 里找不到 [workspace.package] version" }
+          $props = [version]$Matches[1]
           $last = git tag --list 'v*' | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } |
                   ForEach-Object { [version]$_.Substring(1) } | Sort-Object -Descending | Select-Object -First 1
           if (-not $last) {
@@ -66,9 +68,11 @@ jobs:
           "PREV_TAG=$(if ($last) { "v$last" })" >> $env:GITHUB_ENV
           Write-Host "本次发布 v$next, 上一版 $(if ($last) { "v$last" } else { '(无)' })"
 
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: 10.0.x
+      - name: 安装 Rust 工具链
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version; cargo --version
 
       - name: 生成便携 Python 2.7(core/python)
         run: |
@@ -93,7 +97,7 @@ jobs:
           if (-not (Test-Path core/python/Microsoft.VC90.CRT/msvcr90.dll)) { throw "core/python 缺私有 VC++ 2008 运行库" }
 
       - name: 单元测试
-        run: dotnet test YsmConvert.slnx -c Release
+        run: cargo test --workspace --locked
 
       - name: 发布到 dist/YsmConvert
         run: ./build/publish.ps1 -Version $env:VERSION
@@ -102,7 +106,7 @@ jobs:
         run: |
           $zip = "YsmConvert-v$env:VERSION-win-x64.zip"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          # 带顶层目录 YsmConvert/: 解压出来是一个文件夹, 而不是散开的 700 多个文件
+          # 带顶层目录 YsmConvert/: 解压出来是一个文件夹, 而不是散开的一堆文件
           [IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path dist/YsmConvert).Path, (Join-Path $pwd $zip),
                                                          [IO.Compression.CompressionLevel]::Optimal, $true)
           "ZIP=$zip" >> $env:GITHUB_ENV
@@ -122,7 +126,7 @@ jobs:
           }
           $notes += '', '## 下载与运行', '',
             ('下载 `{0}`, 解压到任意目录, 运行 `YsmConvert.exe`(图形界面)或 `ysmconv.exe`(命令行 / MCP)。' -f $env:ZIP),
-            '.NET 运行时与便携 Python 2.7 都在包里, 不用另装。exe 没有代码签名, 首次运行被 SmartScreen 拦下时点"更多信息"再点"仍要运行"。'
+            '转换内核用的便携 Python 2.7 在包里, 不用另装。exe 没有代码签名, 首次运行被 SmartScreen 拦下时点"更多信息"再点"仍要运行"。'
           $notes | Set-Content -Encoding utf8 notes.md
 
           # 建草稿 → 传 zip → 转正式, 每步失败都重试。一步到位的 gh release create 在"转正式"时碰上 GitHub 偶发的 HTTP 500 就整步
