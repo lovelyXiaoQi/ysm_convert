@@ -66,6 +66,8 @@ port_java_pack.py 后补的三条转换规则只对"再跑一次移植"生效, �
    顶层语句只在世界那一遍执行 —— 界面那份状态机会先把一次性信号消费掉(三段挥砍潜行 / 疾跑时本体不出招)。
 15. (2026-10-10) 骨骼名按引擎命名规则同表改名(port.SanitizePackBoneNames): 动画文件 bones 下的键只认 [A-Za-z0-9_.-],
    一个不合规(空格 / 中文等)就作废整份文件 —— 几何与全部动画用同一张表改。
+16. (2026-11-19) ysm.json 轮盘(根 + 各分类)补顺序数组 extra_animation_order(port.BackfillWheelOrders): 发布到网易后
+   JSON 对象的成员顺序会被重排, 解析器按数组排格子; 移植期已经写, 这里给早先的产物补。
 
 用法: python fix_ported_controllers.py [包名 ...]   (缺省修全部 JSON 包)
 """
@@ -331,7 +333,7 @@ _OBSOLETE_NETEASE_KEYS = ("animate_remove", "java_state_driver")
 
 def _FixManifest(packName, referencedParallels, report):
     """ysm.json 精简迁移: initialize 提到顶层, 删掉可自动推导的字段与空 netease 段,
-    properties 与 initialize 里的 v.roaming.* / 结构体成员扁平化"""
+    properties 与 initialize 里的 v.roaming.* / 结构体成员扁平化, 轮盘补顺序数组"""
     path = port.PackManifestPath(packName)
     if not os.path.isfile(path):
         return
@@ -378,6 +380,12 @@ def _FixManifest(packName, referencedParallels, report):
         changed = True
         report.append(u"  ysm.json: 动画声明的文件名改成资源包里的槽位文件 <槽位>.animation.json {} 处(旧产物按 Java 原文件名"
                       u"声明, 文件名不是槽位名时主包找不到文件、这一槽位的动画全没注册)".format(slotDecls))
+    # 排在上面的字符串改写之后: 顺序数组引用轮盘条目键, 与移植期 PortPack 最后才写同理
+    wheelOrders = port.BackfillWheelOrders(manifest)
+    if wheelOrders:
+        changed = True
+        report.append(u"  ysm.json: 轮盘补顺序数组 extra_animation_order {} 层(发布到网易后 JSON 对象的成员顺序会被重排, "
+                      u"没有它轮盘格子就乱序)".format(wheelOrders))
     if changed:
         port.DumpJson(path, manifest)
     else:

@@ -5895,6 +5895,30 @@ def _RouletteAnimationKeys(manifest):
     return keys
 
 
+def BackfillWheelOrders(manifest):
+    """ysm.json 轮盘(根 + 各分类)补 / 修 extra_animation_order(修复工具迁移旧产物用; 幂等)。
+
+    发布到网易后 JSON 对象的成员顺序不保证(发布端会重排), 解析器按这个数组排格子(packParser.WheelEntryKeys);
+    移植期 PortPack 已经写, 早先的产物没有。口径同 WheelEntryKeys: 已有且恰好覆盖全部键的数组原样保留,
+    缺的 / 对不上的(键改过名)按 extra_animation 现有的键序重写 —— 修复工具只在未发布的源码目录上跑, 那里的键序
+    就是作者顺序。返回改动的轮盘层数。"""
+    properties = (manifest or {}).get("properties")
+    if not isinstance(properties, dict):
+        return 0
+    sections = [properties] + [classify for classify in (properties.get("extra_animation_classify") or [])
+                               if isinstance(classify, dict)]
+    changed = 0
+    for section in sections:
+        extraDict = section.get("extra_animation")
+        if not isinstance(extraDict, dict) or not extraDict:
+            continue
+        order = list(WheelEntryKeys(extraDict, section.get("extra_animation_order")))
+        if section.get("extra_animation_order") != order:
+            section["extra_animation_order"] = order
+            changed += 1
+    return changed
+
+
 class _OwnershipOccurrence(object):
     """一条动画在某个宿主(作者控制器 / ysm_state 主链 / 裸并行直挂)里的一次出现"""
     __slots__ = ("key", "rank", "host", "state", "stateIndex", "condition",
