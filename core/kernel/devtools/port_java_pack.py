@@ -69,7 +69,7 @@ from ysmModelScripts.packLoader.packParser import (  # noqa: E402
     PASSENGER_LOCATOR_KEY, ReplacedModelDecl, QUERY_IS_MAID, QUERY_TLM_IS_SITTING, QUERY_TLM_IS_BEGGING,
     TLM_BEG_KEY, TLM_SEAT_CODES,
     ReplacedTargets, TacAnimationRole, _ONESHOT_TAC_FIRE_KEY, _TacFireMembers, _BuildTacHoldAnimates,
-    RpSafeBaseName, AVATAR_FILE_PATTERN, ROULETTE_TWIN_SUFFIX,
+    RpSafeBaseName, AVATAR_FILE_PATTERN, ROULETTE_TWIN_SUFFIX, WheelEntryKeys,
     StripJsonComments, _BuildConditionalAnimates, _BuildJavaStateAnimates, _CLASSIFY_TESTS,
     _ClassifySelfTest,
     _CONDITION_FALLBACK_KEYS, _OWNERSHIP_COMPANION_PATTERN, _OWNERSHIP_VARIABLE_PATTERN,
@@ -8961,11 +8961,14 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
     # 轮盘键/预览动画写的是动画短名; 动画侧改了名(转拼音、统一小写)这里不同步,
     # 轮盘就会播一个不存在的键(实机无报错, 只是不动)。"#" 开头的是分类/按钮引用, 不是动画名。
     renamedRefs = []
+    wheelOrders = []
 
-    def _SyncAnimRefs(extraDict):
-        if not isinstance(extraDict, dict):
-            return extraDict
+    def _SyncAnimRefs(section):
+        extraDict = section.get("extra_animation")
+        if not isinstance(extraDict, dict) or not extraDict:
+            return
         synced = OrderedDict()
+        renamed = {}
         for key in extraDict:
             # 非 "#" 键会被解析器注册成动画键并进 /playanimation 指令, 必须 ASCII 化;
             # 用 Convert 而非 Lookup —— 纯占位的按钮宿主键(如 "模型配置": "#模型配置")
@@ -8973,16 +8976,18 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
             newKey = key if key.startswith("#") else nameMapper.Convert(key)
             if newKey != key:
                 renamedRefs.append((key, newKey))
+                renamed[key] = newKey
             synced[newKey] = extraDict[key]
-        return synced
+        order = WheelEntryKeys(extraDict, section.get("extra_animation_order"))
+        section["extra_animation"] = synced
+        wheelOrders.append((section, [renamed.get(key, key) for key in order]))
 
     properties = manifest.get("properties")
     if isinstance(properties, dict):
-        if "extra_animation" in properties:
-            properties["extra_animation"] = _SyncAnimRefs(properties["extra_animation"])
+        _SyncAnimRefs(properties)
         for classify in (properties.get("extra_animation_classify") or []):
-            if isinstance(classify, dict) and "extra_animation" in classify:
-                classify["extra_animation"] = _SyncAnimRefs(classify["extra_animation"])
+            if isinstance(classify, dict):
+                _SyncAnimRefs(classify)
         preview = properties.get("preview_animation")
         if isinstance(preview, (str, unicode)):  # noqa: F821
             newPreview = nameMapper.Convert(preview)
@@ -9056,6 +9061,9 @@ def PortPack(javaDir, packName, collection=None, withMods=False, molangSink=None
 
     if not manifest.get("netease"):
         manifest.pop("netease", None)     # 空的兼容段不落盘
+    # 顺序数组引用轮盘条目键，等 Molang 字符串改写完成再写入。
+    for section, order in wheelOrders:
+        section["extra_animation_order"] = order
     DumpJson(os.path.join(bpDir, "ysm.json"), manifest)
     report.append(u"声明 → {}".format(_DisplayPath(os.path.join(bpDir, "ysm.json"))))
 

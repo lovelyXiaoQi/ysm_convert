@@ -3717,6 +3717,15 @@ def _OrderedKeys(mapping):
     return keys
 
 
+def WheelEntryKeys(mapping, order):
+    """轮盘优先使用覆盖全部条目的显式顺序，兼容只声明对象的旧副包。"""
+    if (isinstance(order, list) and len(order) == len(mapping)
+            and all(isinstance(key, _STRING_TYPES) for key in order)
+            and set(order) == set(mapping)):
+        return order
+    return _OrderedKeys(mapping)
+
+
 # 轮盘条目指令(extra 条目第二项; 第三项可选附加信息 dict)。"/..." 斜杠指令发服务端执行,
 # "$分类id" 进入子轮盘, "#按钮id" 打开 config_forms 表单页, "@return" 返回上一级(根级关闭界面)。
 # 界面侧同名常量在 ysmModelCoreScripts/client/ui/rouletteMenu.py(测试守护两边一致)
@@ -3755,7 +3764,7 @@ def _NormalizeRouletteButton(button):
 def _BuildRoulette(properties, netease, warnings):
     """Java 轮盘三件套 → 网易皮肤级 extra / extra_animation_classify / extra_animation_buttons。
 
-    **一个 Java 条目占一格**, 格序 = 声明序(权威定义 ysm-java-src pojo/manifest/settings +
+    **一个 Java 条目占一格**, 格序优先取 extra_animation_order，缺省使用声明序(ysm-java-src pojo/manifest/settings +
     AnimationRouletteScreen; 翻页与根级 8 个热键都按这个序号):
     - "动画键": "显示名"  → (显示名, 播放指令); 显示名为空时 Java 显示条目序号
     - "#分类id": "显示名" → (显示名, "$分类id"); 分类未定义时保留格子(Java 点击无反应)
@@ -3806,11 +3815,11 @@ def _BuildRoulette(properties, netease, warnings):
         button = buttonMap.get(label[1:]) if label.startswith("#") else None
         return (button.get("name") or None) if button is not None else None
 
-    def _BuildEntries(animDict):
+    def _BuildEntries(animDict, order):
         entries = []
         if not isinstance(animDict, dict):
             return entries
-        for index, key in enumerate(_OrderedKeys(animDict)):
+        for index, key in enumerate(WheelEntryKeys(animDict, order)):
             label = animDict[key]
             if not isinstance(label, str):
                 continue
@@ -3849,9 +3858,10 @@ def _BuildRoulette(properties, netease, warnings):
         builtClassifies.add(classifyId)
         item = {"id": classifyId, "extra_animation": []}
         classifyList.append(item)
-        item["extra_animation"] = _BuildEntries(classify.get("extra_animation"))
+        item["extra_animation"] = _BuildEntries(
+            classify.get("extra_animation"), classify.get("extra_animation_order"))
 
-    extra = _BuildEntries(extraAnimation)
+    extra = _BuildEntries(extraAnimation, properties.get("extra_animation_order"))
     return extra, classifyList, buttonsList, animKeys
 
 
